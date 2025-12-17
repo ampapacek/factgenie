@@ -293,9 +293,35 @@ def select_batch(db, seed, annotator_id):
             ].iloc[0]
             logging.info(f"Reusing batch {assigned_batch['batch_idx']}")
             return assigned_batch["batch_idx"]
+    
+    free_batches = db[db["status"] == ExampleStatus.FREE]
+
+    # Ensure a single annotator does not see the same underlying example multiple times
+    # when annotators_per_example > 1 (examples are duplicated across annotator_group).
+    if annotator_id != PREVIEW_STUDY_ID:
+        key_cols = ["dataset", "split", "setup_id", "example_idx"]
+        annotated = db.loc[
+            (db["annotator_id"] == annotator_id) & (db["status"] != ExampleStatus.FREE),
+            key_cols,
+        ]
+        if not annotated.empty:
+            annotated_keys = set(map(tuple, annotated.to_numpy()))
+            free_keys = pd.Series(
+                list(
+                    zip(
+                        free_batches["dataset"],
+                        free_batches["split"],
+                        free_batches["setup_id"],
+                        free_batches["example_idx"],
+                    )
+                ),
+                index=free_batches.index,
+            )
+            free_batches = free_batches[~free_keys.isin(annotated_keys)]
+
+
 
     # Choose from the batches with the lowest annotator group
-    free_batches = db[db["status"] == ExampleStatus.FREE]
     eligible_batches = free_batches.groupby("batch_idx")["annotator_group"].min()
 
     eligible_batches = eligible_batches[eligible_batches == eligible_batches.min()]
