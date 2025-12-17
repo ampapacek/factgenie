@@ -14,6 +14,24 @@ var splitInstance = Split(['#centerpanel', '#rightpanel'], {
     gutterSize: 1,
 });
 
+function maybeWarnMissingAnnotatorId() {
+    const placeholder = "FILL_YOUR_NAME_HERE";
+    const annotatorIdNormalized = String(annotator_id || "").trim();
+
+    if (
+        annotatorIdNormalized === "" ||
+        annotatorIdNormalized === placeholder 
+    ) {
+        alert(
+            `Annotator ID is not set.\n\n` +
+            `Please open the link with your name/id, e.g.:\n` +
+            `${window.location.origin}${window.location.pathname}?annotatorId=pepa_novak\n\n` +
+            `Current annotatorId: "${annotatorIdNormalized || "(empty)"}"`
+        );
+    }
+}
+
+
 function clearExampleLevelFields() {
     // uncheck all checkboxes
     $(".crowdsourcing-flag input[type='checkbox']").prop("checked", false);
@@ -506,6 +524,7 @@ $('.btn-check').on('change', function () {
 });
 
 $(document).ready(function () {
+    maybeWarnMissingAnnotatorId();
     loadAnnotations();
     $("#total-examples").html(total_examples - 1);
     enableTooltips();
