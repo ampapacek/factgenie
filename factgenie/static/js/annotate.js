@@ -271,21 +271,42 @@ function loadAnnotations() {
         });
 }
 
+function isSkipAnnotationSelected() {
+    let skipSelected = false;
+    $(".crowdsourcing-flag").each(function () {
+        const label = $(this).find("label").text().trim().toLowerCase();
+        const checked = $(this).find("input[type='checkbox']").prop("checked");
+        if (!checked) return;
+        if (label.includes("skip")) {
+            skipSelected = true;
+        }
+    });
+    return skipSelected;
+}
+
 function markAnnotationAsComplete() {
-    // check whether all the selects have been filled (the default value is not selected)
-    const allSelectsFilled = $(".crowdsourcing-option").find("select option:selected").filter(function () { return $(this).val() == ""; }).length == 0;
+    const skipSelected = isSkipAnnotationSelected();
 
-    if (!allSelectsFilled) {
-        alert("Please select all the options before marking the annotation as complete.");
-        return;
-    }
+    // if skip flag was set, dont check initialization of the values
+    if (!skipSelected) {
+        
+        // check whether all the selects have been filled (the default value is not selected)
+        const allSelectsFilled = $(".crowdsourcing-option").find("select option:selected")
+            .filter(function () { return $(this).val() == ""; }).length == 0;
 
-    // check whether no .slider-crowdsourcing-value contains its data-default-value
-    const allSlidersFilled = $(".slider-crowdsourcing-value").filter(function () { return $(this).text() == $(this).attr('data-default-value'); }).length == 0;
+        if (!allSelectsFilled) {
+            alert("Please select all the options before marking the annotation as complete.");
+            return;
+        }
 
-    if (!allSlidersFilled) {
-        alert("Please set all the sliders before marking the annotation as complete.");
-        return;
+        // check whether no .slider-crowdsourcing-value contains its data-default-value
+        const allSlidersFilled = $(".slider-crowdsourcing-value")
+            .filter(function () { return $(this).text() == $(this).attr('data-default-value'); }).length == 0;
+
+        if (!allSlidersFilled) {
+            alert("Please set all the sliders before marking the annotation as complete.");
+            return;
+        }
     }
 
     $('#page-link-' + current_example_idx).removeClass("bg-incomplete");
