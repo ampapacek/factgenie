@@ -273,9 +273,11 @@ def get_annotation_files():
 def remove_annotations(app, file_path):
     """Remove annotations from the annotation index for a specific file"""
     if app.db["annotation_index"] is not None:
-        # Filter out annotations from the specified file
-        app.db["annotation_index"] = app.db["annotation_index"][app.db["annotation_index"]["jsonl_file"] != file_path]
-
+        # Filter out annotations from the specified file (older/empty indexes may miss this column)
+        if "jsonl_file" in app.db["annotation_index"].columns:
+            app.db["annotation_index"] = app.db["annotation_index"][
+                app.db["annotation_index"]["jsonl_file"] != file_path
+            ]
 
 def get_annotation_index(app, force_reload=True):
     if app and app.db["annotation_index"] is not None and not force_reload:
