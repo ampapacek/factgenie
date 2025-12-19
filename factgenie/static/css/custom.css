@@ -1034,6 +1034,7 @@ a:hover {
     -moz-user-select: none;
     -ms-user-select: none;
     user-select: none;
+    white-space: pre-wrap;
 }
 
 .annotatable-paragraph.select-mode-enabled {
