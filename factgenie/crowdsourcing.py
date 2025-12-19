@@ -99,8 +99,8 @@ def generate_text_fields(text_fields):
     for i, text_field in enumerate(text_fields):
         text_fields_segment += f"""
             <div class="form-group crowdsourcing-text mb-4">
-                <label for="textbox-{i}"><b>{text_field}</b></label>
-                <input type="text" class="form-control textbox-crowdsourcing" id="textbox-crowdsourcing-{i}">
+                <label for="textbox-crowdsourcing-{i}"><b>{text_field}</b></label>
+                <textarea cols="50" rows="5" style="resize: both;" class="form-control textbox-crowdsourcing" id="textbox-crowdsourcing-{i}"></textarea>
             </div>
         """
     text_fields_segment += "</div>"

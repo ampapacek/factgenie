@@ -47,8 +47,8 @@ function clearExampleLevelFields() {
         $(this).text($(this).attr('data-default-value'));
     });
 
-    // clear the values in text inputs
-    $(".crowdsourcing-text input[type='text']").val("");
+    // clear the values in free-text fields
+    $(".crowdsourcing-text .textbox-crowdsourcing").val("");
 }
 
 
@@ -120,7 +120,7 @@ function collectTextFields() {
 
     $(".crowdsourcing-text").each(function (x) {
         const label = $(this).find("label").text().trim();
-        const value = $(this).find("input[type='text']").val();
+        const value = $(this).find(".textbox-crowdsourcing").val();
         textFields.push({ label: label, value: value });
     });
     return textFields;
@@ -212,7 +212,7 @@ function goToAnnotation(example_idx) {
 
     if (textFields !== undefined) {
         for (const [i, textField] of Object.entries(textFields)) {
-            $(`.crowdsourcing-text input:eq(${i})`).val(textField.value);
+            $(`.crowdsourcing-text .textbox-crowdsourcing:eq(${i})`).val(textField.value);
         }
     }
 
