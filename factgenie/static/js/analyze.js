@@ -183,6 +183,12 @@ const sliderMetrics = [
     { key: 'min_value', label: 'Min' },
     { key: 'max_value', label: 'Max' },
 ];
+const annotatorBaseColumns = [
+    { key: 'annotator_id', label: 'Annotator' },
+    { key: 'example_count', label: 'Questions' },
+    { key: 'avg_spans', label: 'Avg spans' },
+    { key: 'text_questions_count', label: 'Questions w/ text' },
+];
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -300,6 +306,50 @@ function renderSliderSetupTables(sliderStats) {
     });
 }
 
+function renderAnnotatorTable(annotatorStats) {
+    const table = $('#annotator-table');
+    const headerRow = table.find('thead tr');
+    headerRow.empty();
+
+    if (!annotatorStats || !annotatorStats.rows || annotatorStats.rows.length === 0) {
+        $('#annotator-stats-empty').show();
+        return;
+    }
+
+    $('#annotator-stats-empty').hide();
+
+    const columns = [];
+    annotatorBaseColumns.forEach((col) => {
+        columns.push(col.key);
+        headerRow.append(`<th data-sortable="true" data-field="${col.key}">${col.label}</th>`);
+    });
+
+    const labelKeys = buildLabelKeys(annotatorStats.slider_labels || []);
+    (annotatorStats.slider_labels || []).forEach((label) => {
+        const field = `slider_${labelKeys[label]}_avg`;
+        columns.push(field);
+        headerRow.append(`<th data-sortable="true" data-field="${field}">${escapeHtml(label)} Avg</th>`);
+    });
+
+    const rows = annotatorStats.rows.map((row) => {
+        const data = {
+            annotator_id: row.annotator_id,
+            example_count: row.example_count,
+            avg_spans: row.avg_spans,
+            text_questions_count: row.text_questions_count,
+        };
+
+        (annotatorStats.slider_labels || []).forEach((label) => {
+            const field = `slider_${labelKeys[label]}_avg`;
+            data[field] = row.slider_avgs?.[label] ?? '';
+        });
+
+        return data;
+    });
+
+    populateTable('annotator-table', rows, columns);
+}
+
 
 $(document).ready(function () {
     // if we are on a detail page, populate the tables
@@ -317,6 +367,11 @@ $(document).ready(function () {
             renderSliderSetupTables(statistics.slider_stats);
         } else {
             $('#slider-stats-empty').show();
+        }
+        if (statistics.annotator_stats) {
+            renderAnnotatorTable(statistics.annotator_stats);
+        } else {
+            $('#annotator-stats-empty').show();
         }
     }
 });

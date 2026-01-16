@@ -91,6 +91,11 @@
             height="30px" class="heading-img-inline">By sliders</a>
       </li>
       <li class="nav-item" role="presentation">
+        <a class="nav-link" id="pills-annotator-stats-tab" data-bs-toggle="pill" href="#pills-stats-annotators"
+          role="tab" aria-controls="pills-stats-annotators"><img src="{{ host_prefix }}/static/img/stats/stats-charts.png"
+            height="30px" class="heading-img-inline">By annotator</a>
+      </li>
+      <li class="nav-item" role="presentation">
         <a class="nav-link" id="pills-charts-tab" data-bs-toggle="pill" href="#pills-charts" role="tab"
           aria-controls="pills-charts"><img src="{{ host_prefix }}/static/img/stats/stats-charts.png" height="30px"
             class="heading-img-inline">Extra fields</a>
@@ -216,6 +221,24 @@
           </tbody>
         </table>
         <div id="slider-setup-tables"></div>
+      </div>
+    </div>
+    <div class="tab-content" id="pills-tabContent">
+      <div class="tab-pane mb-5 fade" id="pills-stats-annotators" role="tabpanel"
+        aria-labelledby="pills-stats-annotators-tab">
+        <div id="annotator-stats-empty" class="alert alert-info" role="alert">
+          <i class="fa fa-info"></i>
+          <span>No annotator statistics are available for this campaign.</span>
+        </div>
+        <table id="annotator-table" class="table table-bordered table-hover" data-show-export="true"
+          data-sortable="true" data-toolbar="#toolbar">
+          <thead>
+            <tr>
+            </tr>
+          </thead>
+          <tbody>
+          </tbody>
+        </table>
       </div>
     </div>
     <div class="tab-content" id="pills-tabContent">

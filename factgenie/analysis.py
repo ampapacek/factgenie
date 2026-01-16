@@ -214,6 +214,117 @@ def compute_extra_fields_stats(example_index):
     return extra_fields_stats
 
 
+def _is_skip_selected(flags):
+    if not isinstance(flags, list):
+        return False
+    for flag in flags:
+        if not isinstance(flag, dict):
+            continue
+        label = str(flag.get("label", "")).lower()
+        value = flag.get("value", False)
+        if "skip" in label and bool(value):
+            return True
+    return False
+
+
+def compute_annotator_stats(example_index, slider_label_order=None):
+    if example_index.empty:
+        return None
+
+    df = example_index.copy()
+    df["annotator_id"] = df["annotator_id"].fillna("unknown")
+
+    def count_spans(anns):
+        return len(anns) if isinstance(anns, list) else 0
+
+    def has_text(fields):
+        if not isinstance(fields, list):
+            return False
+        for field in fields:
+            if not isinstance(field, dict):
+                continue
+            value = field.get("value", "")
+            if str(value).strip() != "":
+                return True
+        return False
+
+    df["span_count"] = df["annotations"].apply(count_spans)
+    df["text_entered"] = df["text_fields"].apply(has_text)
+
+    base = (
+        df.groupby("annotator_id")
+        .agg(
+            example_count=("example_idx", "size"),
+            avg_spans=("span_count", "mean"),
+            text_questions_count=("text_entered", "sum"),
+        )
+        .reset_index()
+    )
+    base["avg_spans"] = base["avg_spans"].round(3)
+
+    slider_rows = []
+    for _, row in df.iterrows():
+        annotator_id = row["annotator_id"]
+        sliders = row.get("sliders", [])
+        if not isinstance(sliders, list):
+            continue
+        for slider in sliders:
+            if not isinstance(slider, dict):
+                continue
+            label = slider.get("label")
+            value = slider.get("value")
+            if label is None or value is None or value == "":
+                continue
+            try:
+                value_num = float(value)
+            except (TypeError, ValueError):
+                continue
+            slider_rows.append(
+                {
+                    "annotator_id": annotator_id,
+                    "label": label,
+                    "value": value_num,
+                }
+            )
+
+    slider_labels = []
+    slider_avgs = {}
+    if slider_rows:
+        slider_df = pd.DataFrame.from_records(slider_rows)
+        slider_avgs = (
+            slider_df.groupby(["annotator_id", "label"])["value"].mean().round(3).reset_index()
+        )
+        labels = sorted(slider_df["label"].unique())
+        if slider_label_order:
+            slider_labels = [label for label in slider_label_order if label in labels]
+            slider_labels.extend([label for label in labels if label not in slider_labels])
+        else:
+            slider_labels = labels
+
+    rows = []
+    for _, row in base.iterrows():
+        annotator_id = row["annotator_id"]
+        entry = {
+            "annotator_id": annotator_id,
+            "example_count": int(row["example_count"]),
+            "avg_spans": row["avg_spans"],
+            "text_questions_count": int(row["text_questions_count"]),
+            "slider_avgs": {},
+        }
+
+        if not isinstance(slider_avgs, dict) and not slider_avgs.empty:
+            ann_rows = slider_avgs[slider_avgs["annotator_id"] == annotator_id]
+            for _, ann_row in ann_rows.iterrows():
+                entry["slider_avgs"][ann_row["label"]] = ann_row["value"]
+
+        rows.append(entry)
+
+    return {
+        "slider_labels": slider_labels,
+        "rows": rows,
+    }
+
+
 def _normalize_example_text(example):
     if example is None:
         return ""
@@ -395,16 +506,23 @@ def compute_statistics(app, campaign):
         }
 
     if not example_index.empty:
-        extra_fields_stats = compute_extra_fields_stats(example_index)
+        filtered_example_index = example_index
+        if "flags" in example_index.columns:
+            filtered_example_index = example_index[~example_index["flags"].apply(_is_skip_selected)]
+
+        extra_fields_stats = compute_extra_fields_stats(filtered_example_index)
         statistics["extra_fields"] = extra_fields_stats
         slider_label_order = [
             slider.get("label")
             for slider in campaign.metadata["config"].get("sliders", [])
             if isinstance(slider, dict) and slider.get("label")
         ]
-        slider_stats = compute_slider_stats(example_index, app.db["datasets_obj"], slider_label_order)
+        slider_stats = compute_slider_stats(filtered_example_index, app.db["datasets_obj"], slider_label_order)
         if slider_stats:
             statistics["slider_stats"] = slider_stats
+        annotator_stats = compute_annotator_stats(filtered_example_index, slider_label_order)
+        if annotator_stats:
+            statistics["annotator_stats"] = annotator_stats
 
     return statistics
 
