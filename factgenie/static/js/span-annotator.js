@@ -525,8 +525,9 @@ class SpanAnnotator {
                 if (isLastInAnyAnnotation && !hasMultipleAnnotations) {
                     // add right padding to the last span in the annotation
                     if (this.granularity === 'words') {
-                        const char = $span.attr('data-whitespace');
-                        if (char !== '\n') {
+                        const whitespace = String($span.attr('data-whitespace') || '');
+                        const hasNewline = whitespace.includes('\n');
+                        if (!hasNewline) {
                             $('.whitespace', $span).addClass('whitespace-hidden');
                             $span.css('margin-right', '9px');
                         }
