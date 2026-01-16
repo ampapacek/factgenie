@@ -146,10 +146,23 @@ class SpanAnnotator {
 
                 const whitespace = arrayIndex < parts.length - 1 ? parts[arrayIndex + 1] : '';
                 const fullContent = String(part) + whitespace;
+                let spanWhitespace = whitespace;
+                let trailingWhitespace = '';
+                const lastNewline = whitespace.lastIndexOf('\n');
+                if (lastNewline !== -1 && lastNewline < whitespace.length - 1) {
+                    spanWhitespace = whitespace.slice(0, lastNewline + 1);
+                    trailingWhitespace = whitespace.slice(lastNewline + 1);
+                }
+
+                const renderedWhitespace = spanWhitespace.replace(/\n/g, '<br>');
+                const trailingSpan = trailingWhitespace
+                    ? `<span class="whitespace trailing-whitespace">${trailingWhitespace}</span>`
+                    : '';
+
                 const span = `<span class="annotatable" 
                     data-index="${currentIndex}" 
                     data-content="${part}"
-                    data-whitespace="${whitespace}">${part}<span class="whitespace">${whitespace === '\n' ? '<br>' : whitespace}</span></span>`;
+                    data-whitespace="${spanWhitespace}">${part}<span class="whitespace">${renderedWhitespace}</span></span>${trailingSpan}`;
 
                 currentIndex += fullContent.length;
                 return span;
