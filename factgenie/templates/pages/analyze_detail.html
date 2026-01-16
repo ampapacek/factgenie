@@ -86,6 +86,11 @@
             height="30px" class="heading-img-inline">By datasets</a>
       </li>
       <li class="nav-item" role="presentation">
+        <a class="nav-link" id="pills-slider-stats-tab" data-bs-toggle="pill" href="#pills-stats-sliders" role="tab"
+          aria-controls="pills-stats-sliders"><img src="{{ host_prefix }}/static/img/stats/stats-charts.png"
+            height="30px" class="heading-img-inline">By sliders</a>
+      </li>
+      <li class="nav-item" role="presentation">
         <a class="nav-link" id="pills-charts-tab" data-bs-toggle="pill" href="#pills-charts" role="tab"
           aria-controls="pills-charts"><img src="{{ host_prefix }}/static/img/stats/stats-charts.png" height="30px"
             class="heading-img-inline">Extra fields</a>
@@ -186,6 +191,31 @@
           <tbody>
           </tbody>
         </table>
+      </div>
+    </div>
+    <div class="tab-content" id="pills-tabContent">
+      <div class="tab-pane mb-5 fade" id="pills-stats-sliders" role="tabpanel" aria-labelledby="pills-stats-sliders-tab">
+        <div id="slider-stats-empty" class="alert alert-info" role="alert">
+          <i class="fa fa-info"></i>
+          <span>No slider data was collected for this campaign.</span>
+        </div>
+        <h5 class="mt-4">All examples</h5>
+        <table id="slider-overall-table" class="table table-bordered table-hover" data-show-export="true"
+          data-sortable="true" data-toolbar="#toolbar">
+          <thead>
+            <tr>
+              <th data-sortable="true" data-field="label">Slider</th>
+              <th data-sortable="true" data-field="count" data-align="right">Count</th>
+              <th data-sortable="true" data-field="min_value" data-align="right">Min</th>
+              <th data-sortable="true" data-field="max_value" data-align="right">Max</th>
+              <th data-sortable="true" data-field="avg_value" data-align="right">Avg</th>
+              <th data-sortable="true" data-field="std_value" data-align="right">Std</th>
+            </tr>
+          </thead>
+          <tbody>
+          </tbody>
+        </table>
+        <div id="slider-setup-tables"></div>
       </div>
     </div>
     <div class="tab-content" id="pills-tabContent">

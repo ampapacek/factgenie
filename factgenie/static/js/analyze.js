@@ -176,6 +176,129 @@ const fullTableColumns = ['dataset', 'split', 'setup_id', 'example_count', 'anno
 const spanTableColumns = ['example_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
 const setupTableColumns = ['setup_id', 'example_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
 const datasetTableColumns = ['dataset', 'split', 'example_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
+const sliderOverallColumns = ['label', 'count', 'min_value', 'max_value', 'avg_value', 'std_value'];
+const sliderMetrics = [
+    { key: 'count', label: 'Count' },
+    { key: 'avg_value', label: 'Avg' },
+    { key: 'min_value', label: 'Min' },
+    { key: 'max_value', label: 'Max' },
+];
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function slugifyField(label) {
+    const base = String(label ?? '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    return base || 'slider';
+}
+
+function buildLabelKeys(labels) {
+    const keys = {};
+    const used = new Set();
+    labels.forEach((label, idx) => {
+        let base = slugifyField(label);
+        let key = base;
+        let suffix = 1;
+        while (used.has(key)) {
+            key = `${base}_${suffix}`;
+            suffix += 1;
+        }
+        used.add(key);
+        keys[label] = key || `slider_${idx}`;
+    });
+    return keys;
+}
+
+function buildExampleCell(row) {
+    const preview = escapeHtml(row.example_preview || '');
+    const full = escapeHtml(row.example_full || '');
+    if (!full || preview === full) {
+        return preview || '<span class="text-muted">(empty)</span>';
+    }
+    const summaryText = preview ? `${preview}…` : 'Show';
+    return `
+        <details>
+            <summary>${summaryText}</summary>
+            <div class="text-muted small" style="white-space: pre-wrap;">${full}</div>
+        </details>
+    `;
+}
+
+function renderSliderSetupTables(sliderStats) {
+    const container = $('#slider-setup-tables');
+    container.empty();
+
+    if (!sliderStats || !sliderStats.by_setup || sliderStats.by_setup.length === 0) {
+        $('#slider-stats-empty').show();
+        return;
+    }
+
+    $('#slider-stats-empty').hide();
+
+    sliderStats.by_setup.forEach((setup, index) => {
+        const title = `${setup.dataset} / ${setup.split} / ${setup.setup_id}`;
+        const tableId = `slider-setup-table-${index}`;
+
+        container.append(`<div class="mt-4 text-muted small">Dataset and setup</div>`);
+        container.append(`<h5 class="mt-1">${escapeHtml(title)}</h5>`);
+
+        const table = $(`
+            <table id="${tableId}" class="table table-bordered table-hover" data-show-export="true"
+              data-sortable="true" data-toolbar="#toolbar">
+              <thead><tr></tr></thead>
+              <tbody></tbody>
+            </table>
+        `);
+
+        const headerRow = table.find('thead tr');
+        const columns = ['example_idx', 'example'];
+
+        headerRow.append(`<th data-sortable="true" data-field="example_idx">Example</th>`);
+        headerRow.append(`<th data-sortable="true" data-field="example">Data</th>`);
+
+        const labelKeys = buildLabelKeys(setup.slider_labels || []);
+        (setup.slider_labels || []).forEach((label) => {
+            const labelKey = labelKeys[label];
+            sliderMetrics.forEach((metric) => {
+                const field = `slider_${labelKey}_${metric.key}`;
+                columns.push(field);
+                headerRow.append(
+                    `<th data-sortable="true" data-field="${field}">${escapeHtml(label)} ${metric.label}</th>`
+                );
+            });
+        });
+
+        const rows = (setup.rows || []).map((row) => {
+            const rowData = {
+                example_idx: row.example_idx,
+                example: buildExampleCell(row),
+            };
+
+            (setup.slider_labels || []).forEach((label) => {
+                const labelKey = labelKeys[label];
+                const stats = (row.stats || {})[label] || {};
+                sliderMetrics.forEach((metric) => {
+                    const field = `slider_${labelKey}_${metric.key}`;
+                    rowData[field] = stats[metric.key] ?? '';
+                });
+            });
+
+            return rowData;
+        });
+
+        container.append(table);
+        populateTable(tableId, rows, columns);
+    });
+}
 
 
 $(document).ready(function () {
@@ -188,6 +311,13 @@ $(document).ready(function () {
         populateTable('span-table', ann_counts.span, spanTableColumns);
         populateTable('setup-table', ann_counts.setup, setupTableColumns);
         populateTable('dataset-table', ann_counts.dataset, datasetTableColumns);
+
+        if (statistics.slider_stats) {
+            populateTable('slider-overall-table', statistics.slider_stats.overall, sliderOverallColumns);
+            renderSliderSetupTables(statistics.slider_stats);
+        } else {
+            $('#slider-stats-empty').show();
+        }
     }
 });
 

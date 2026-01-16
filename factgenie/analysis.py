@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 
+import html
+import json
 import logging
 import os
+import re
 import sys
 import traceback
 from collections import defaultdict
@@ -211,6 +214,165 @@ def compute_extra_fields_stats(example_index):
     return extra_fields_stats
 
 
+def _normalize_example_text(example):
+    if example is None:
+        return ""
+
+    if isinstance(example, str):
+        text = example
+    elif isinstance(example, dict):
+        for key in ["question", "text", "input", "prompt", "query"]:
+            if key in example:
+                text = str(example[key])
+                break
+        else:
+            text = json.dumps(example, ensure_ascii=False)
+    elif isinstance(example, list):
+        text = " ".join(str(item) for item in example)
+    else:
+        text = str(example)
+
+    if "<" in text and ">" in text:
+        text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+        text = re.sub(r"(?i)</(p|div|li|h[1-6]|tr|table)>", "\n", text)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = html.unescape(text)
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = text.strip()
+
+    return text
+
+
+def _build_example_preview(text, word_count=5):
+    words = text.split()
+    if len(words) <= word_count:
+        return text
+    return " ".join(words[:word_count])
+
+
+def compute_slider_stats(example_index, datasets, slider_label_order=None):
+    slider_rows = []
+
+    for _, row in example_index.iterrows():
+        sliders = row.get("sliders", [])
+        if not isinstance(sliders, list):
+            continue
+
+        for slider in sliders:
+            if not isinstance(slider, dict):
+                continue
+            label = slider.get("label")
+            value = slider.get("value")
+            if label is None or value is None or value == "":
+                continue
+            try:
+                value_num = float(value)
+            except (TypeError, ValueError):
+                continue
+
+            slider_rows.append(
+                {
+                    "dataset": row["dataset"],
+                    "split": row["split"],
+                    "setup_id": row["setup_id"],
+                    "example_idx": row["example_idx"],
+                    "label": label,
+                    "value": value_num,
+                }
+            )
+
+    if not slider_rows:
+        return None
+
+    df = pd.DataFrame.from_records(slider_rows)
+
+    def build_stats_df(groupby_cols):
+        stats = (
+            df.groupby(groupby_cols)["value"]
+            .agg(count="count", min_value="min", max_value="max", avg_value="mean", std_value="std")
+            .reset_index()
+        )
+        stats["avg_value"] = stats["avg_value"].round(3)
+        stats["min_value"] = stats["min_value"].round(3)
+        stats["max_value"] = stats["max_value"].round(3)
+        stats["std_value"] = stats["std_value"].fillna(0).round(3)
+        return stats
+
+    overall_df = build_stats_df(["label"])
+    by_example_df = build_stats_df(["dataset", "split", "setup_id", "example_idx", "label"])
+    overall = overall_df.to_dict(orient="records")
+
+    example_text_map = {}
+    unique_examples = example_index[["dataset", "split", "example_idx"]].drop_duplicates()
+    for _, ex in unique_examples.iterrows():
+        dataset_id = ex["dataset"]
+        split = ex["split"]
+        example_idx = ex["example_idx"]
+
+        dataset = datasets.get(dataset_id)
+        if dataset is None:
+            text = ""
+        else:
+            try:
+                text = _normalize_example_text(dataset.get_example(split, example_idx))
+            except Exception:
+                text = ""
+
+        example_text_map[(dataset_id, split, example_idx)] = {
+            "full": text,
+            "preview": _build_example_preview(text, word_count=5),
+        }
+
+    by_setup = []
+    for (dataset, split, setup_id), group in by_example_df.groupby(["dataset", "split", "setup_id"]):
+        rows_by_example = {}
+        labels = set(group["label"].tolist())
+
+        for _, row in group.iterrows():
+            ex_idx = row["example_idx"]
+            ex_key = (dataset, split, ex_idx)
+            text_data = example_text_map.get(ex_key, {"full": "", "preview": ""})
+
+            if ex_idx not in rows_by_example:
+                rows_by_example[ex_idx] = {
+                    "example_idx": ex_idx,
+                    "example_preview": text_data["preview"],
+                    "example_full": text_data["full"],
+                    "stats": {},
+                }
+
+            rows_by_example[ex_idx]["stats"][row["label"]] = {
+                "count": int(row["count"]),
+                "min_value": row["min_value"],
+                "max_value": row["max_value"],
+                "avg_value": row["avg_value"],
+            }
+
+        if slider_label_order:
+            labels_sorted = [label for label in slider_label_order if label in labels]
+            labels_sorted.extend([label for label in sorted(labels) if label not in labels_sorted])
+        else:
+            labels_sorted = sorted(labels)
+
+        rows = [rows_by_example[idx] for idx in sorted(rows_by_example)]
+
+        by_setup.append(
+            {
+                "dataset": dataset,
+                "split": split,
+                "setup_id": setup_id,
+                "slider_labels": labels_sorted,
+                "rows": rows,
+            }
+        )
+
+    return {
+        "overall": overall,
+        "by_setup": by_setup,
+    }
+
+
 def compute_statistics(app, campaign):
     statistics = {}
 
@@ -235,6 +397,14 @@ def compute_statistics(app, campaign):
     if not example_index.empty:
         extra_fields_stats = compute_extra_fields_stats(example_index)
         statistics["extra_fields"] = extra_fields_stats
+        slider_label_order = [
+            slider.get("label")
+            for slider in campaign.metadata["config"].get("sliders", [])
+            if isinstance(slider, dict) and slider.get("label")
+        ]
+        slider_stats = compute_slider_stats(example_index, app.db["datasets_obj"], slider_label_order)
+        if slider_stats:
+            statistics["slider_stats"] = slider_stats
 
     return statistics
 
