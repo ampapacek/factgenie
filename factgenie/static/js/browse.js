@@ -6,6 +6,14 @@ var splitInstance = Split(['#centerpanel', '#rightpanel'], {
     gutterSize: 1,
 });
 
+function normalizeNewlines(text) {
+    if (text === null || text === undefined) return "";
+    return String(text)
+        .replace(/\r\n/g, "\n")
+        .replace(/\\r\\n/g, "\n")
+        .replace(/\\n/g, "\n");
+}
+
 function changeDataset() {
     $("#dataset-spinner").show();
     const dataset = $('#dataset-select').val();
@@ -306,8 +314,8 @@ function fetchExample(dataset, split, example_idx) {
 function getAnnotatedOutput(output, annId, annotations) {
     const setup_id = output.setup_id;
 
-    // replace newlines with any spaces around them with <br>
-    const content = output.output.replace(/\\n/g, '<br>');
+    const normalized = normalizeNewlines(output.output);
+    const contentHtml = normalized.replace(/\n/g, '<br>');
 
     var placeholder = $('<pre>', { id: `out-${setup_id}-${annId}-placeholder`, class: `font-mono out-placeholder out-${annId}-placeholder` });
     var annotated_content;
@@ -323,7 +331,7 @@ function getAnnotatedOutput(output, annId, annotations) {
 
         const parId = `out-text-${annId}-par`;
 
-        annotated_content = $('<p>', { id: parId }).html(content);
+        annotated_content = $('<p>', { id: parId }).html(normalized);
         spanAnnotator.addDocument(parId, annotated_content, false);
         spanAnnotator.addAnnotations(parId, annotations.annotations);
     } else {
@@ -331,7 +339,7 @@ function getAnnotatedOutput(output, annId, annotations) {
         if (annId != "original") {
             placeholder.css("color", "#c2c2c2");
         }
-        annotated_content = content;
+        annotated_content = contentHtml;
     }
     placeholder.html(annotated_content);
     // placeholder.hide();
