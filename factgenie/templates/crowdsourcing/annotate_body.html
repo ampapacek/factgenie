@@ -112,6 +112,34 @@
   </div>
   </div>
 
+  <div class="modal fade" id="annotator-auth-modal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
+    data-bs-keyboard="false">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Annotator access</h5>
+        </div>
+        <div class="modal-body">
+          <div class="btn-group w-100" role="group">
+            <button type="button" class="btn btn-outline-primary active" id="annotator-auth-login-btn">Login</button>
+            <button type="button" class="btn btn-outline-primary" id="annotator-auth-register-btn">Register</button>
+          </div>
+          <div class="mt-3">
+            <label for="annotator-name-input" class="form-label">Name</label>
+            <input type="text" class="form-control" id="annotator-name-input" autocomplete="name">
+            <div id="annotator-auth-error" class="text-danger small mt-2" style="display: none;"></div>
+            <div class="text-muted small mt-2">
+              Use the same name every time to avoid duplicate annotations.
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-primary" id="annotator-auth-submit-btn">Continue</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="overlay-start" class="overlay">
     <div id="overlay-start-content" class="overlay-content">
       <h1>Welcome!</h1>

@@ -3,6 +3,7 @@ import datetime
 import json
 import logging
 import os
+import re
 import shutil
 import threading
 import traceback
@@ -27,7 +28,7 @@ import factgenie.crowdsourcing as crowdsourcing
 import factgenie.llm_campaign as llm_campaign
 import factgenie.utils as utils
 import factgenie.workflows as workflows
-from factgenie import CAMPAIGN_DIR, INPUT_DIR, PACKAGE_DIR, STATIC_DIR, TEMPLATES_DIR
+from factgenie import CAMPAIGN_DIR, INPUT_DIR, PACKAGE_DIR, PREVIEW_STUDY_ID, STATIC_DIR, TEMPLATES_DIR
 from factgenie.campaign import CampaignMode, CampaignStatus, ExampleStatus
 from factgenie.models import ModelFactory
 
@@ -201,6 +202,102 @@ def annotate(campaign_id):
         annotator_id=service_ids["annotator_id"],
         metadata=metadata,
     )
+
+
+def _annotator_registry_path(campaign_id):
+    return os.path.join(CAMPAIGN_DIR, campaign_id, "annotators.json")
+
+
+def _normalize_annotator_id(value):
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    text = re.sub(r"\s+", "_", text)
+    text = text.replace("/", "_").replace("\\", "_")
+    return text
+
+
+def _load_annotator_registry(campaign_id):
+    path = _annotator_registry_path(campaign_id)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [str(x) for x in data if str(x)]
+    except Exception:
+        logger.warning(f"Failed to read annotator registry for {campaign_id}")
+    return []
+
+
+def _save_annotator_registry(campaign_id, annotators):
+    path = _annotator_registry_path(campaign_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(sorted(set(annotators)), f, indent=2, ensure_ascii=False)
+
+
+def _find_existing_annotator(annotators, candidate):
+    candidate_norm = candidate.lower()
+    for existing in annotators:
+        if existing.lower() == candidate_norm:
+            return existing
+    return None
+
+
+@app.route("/annotator/exists", methods=["GET"])
+def annotator_exists():
+    campaign_id = request.args.get("campaign_id")
+    annotator_id = _normalize_annotator_id(request.args.get("annotator_id"))
+
+    if not campaign_id or not annotator_id:
+        return jsonify(success=True, exists=False)
+
+    annotators = _load_annotator_registry(campaign_id)
+    existing = _find_existing_annotator(annotators, annotator_id)
+    return jsonify(success=True, exists=existing is not None, annotator_id=existing or annotator_id)
+
+
+@app.route("/annotator/register", methods=["POST"])
+def annotator_register():
+    data = request.get_json() or {}
+    campaign_id = data.get("campaign_id")
+    annotator_id = _normalize_annotator_id(data.get("annotator_id"))
+
+    if not campaign_id or not annotator_id:
+        return utils.error("Missing campaign_id or annotator_id")
+
+    if annotator_id in [PREVIEW_STUDY_ID, "FILL_YOUR_NAME_HERE"]:
+        return utils.error("Invalid annotator ID")
+
+    annotators = _load_annotator_registry(campaign_id)
+    existing = _find_existing_annotator(annotators, annotator_id)
+    if existing:
+        return jsonify(success=True, annotator_id=existing, exists=True)
+
+    annotators.append(annotator_id)
+    _save_annotator_registry(campaign_id, annotators)
+    return jsonify(success=True, annotator_id=annotator_id, exists=False)
+
+
+@app.route("/annotator/login", methods=["POST"])
+def annotator_login():
+    data = request.get_json() or {}
+    campaign_id = data.get("campaign_id")
+    annotator_id = _normalize_annotator_id(data.get("annotator_id"))
+
+    if not campaign_id or not annotator_id:
+        return utils.error("Missing campaign_id or annotator_id")
+
+    annotators = _load_annotator_registry(campaign_id)
+    existing = _find_existing_annotator(annotators, annotator_id)
+    if not existing:
+        return utils.error("Annotator not found. Please register first.")
+
+    return jsonify(success=True, annotator_id=existing)
 
 
 @app.route("/app_config", methods=["GET"])

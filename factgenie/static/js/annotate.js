@@ -1,6 +1,7 @@
 const sizes = [50, 50];
 const annotator_id = window.annotator_id;
 const metadata = window.metadata;
+const INVALID_ANNOTATOR_IDS = ["", "FILL_YOUR_NAME_HERE", null, undefined];
 
 var current_example_idx = 0;
 var annotation_set = window.annotation_set;
@@ -8,6 +9,8 @@ var annotation_set = window.annotation_set;
 const total_examples = annotation_set.length;
 
 var examples_cached = {};
+var annotatorAuthMode = "login";
+var annotatorAuthModal = null;
 
 var splitInstance = Split(['#centerpanel', '#rightpanel'], {
     sizes: sizes,
@@ -29,6 +32,122 @@ function maybeWarnMissingAnnotatorId() {
             `Current annotatorId: "${annotatorIdNormalized || "(empty)"}"`
         );
     }
+}
+
+function normalizeAnnotatorId(value) {
+    if (value === null || value === undefined) return "";
+    return String(value)
+        .trim()
+        .replace(/\s+/g, "_")
+        .replace(/[\\/]/g, "_");
+}
+
+function setAnnotatorAuthMode(mode) {
+    annotatorAuthMode = mode;
+    if (mode === "register") {
+        $("#annotator-auth-register-btn").addClass("active");
+        $("#annotator-auth-login-btn").removeClass("active");
+    } else {
+        $("#annotator-auth-login-btn").addClass("active");
+        $("#annotator-auth-register-btn").removeClass("active");
+    }
+}
+
+function showAnnotatorAuthModal(mode, message) {
+    setAnnotatorAuthMode(mode || "login");
+    if (message) {
+        $("#annotator-auth-error").text(message).show();
+    } else {
+        $("#annotator-auth-error").hide().text("");
+    }
+
+    if (!annotatorAuthModal) {
+        annotatorAuthModal = new bootstrap.Modal(document.getElementById("annotator-auth-modal"));
+    }
+    annotatorAuthModal.show();
+}
+
+function redirectWithAnnotatorId(annotatorId) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("annotatorId", annotatorId);
+    window.onbeforeunload = null;
+    window.location.href = url.toString();
+}
+
+function checkAnnotatorExists(annotatorId) {
+    return $.get(`${url_prefix}/annotator/exists`, {
+        campaign_id: metadata.id,
+        annotator_id: annotatorId,
+    });
+}
+
+function submitAnnotatorAuth() {
+    const rawName = $("#annotator-name-input").val();
+    const normalized = normalizeAnnotatorId(rawName);
+    if (!normalized) {
+        $("#annotator-auth-error").text("Please enter your name.").show();
+        return;
+    }
+
+    const endpoint = annotatorAuthMode === "register" ? "register" : "login";
+    $("#annotator-auth-submit-btn").prop("disabled", true);
+    $("#annotator-auth-error").hide().text("");
+
+    $.post({
+        url: `${url_prefix}/annotator/${endpoint}`,
+        contentType: "application/json",
+        data: JSON.stringify({
+            campaign_id: metadata.id,
+            annotator_id: normalized,
+        }),
+        success: function (response) {
+            if (response.success !== true) {
+                const errorMsg = response.error || "Authentication failed.";
+                $("#annotator-auth-error").text(errorMsg).show();
+                $("#annotator-auth-submit-btn").prop("disabled", false);
+                return;
+            }
+            localStorage.setItem(`factgenie_annotator_id_${metadata.id}`, response.annotator_id);
+            redirectWithAnnotatorId(response.annotator_id);
+        },
+        error: function (xhr) {
+            const errorMsg = xhr.responseJSON?.error || "Authentication failed.";
+            $("#annotator-auth-error").text(errorMsg).show();
+            $("#annotator-auth-submit-btn").prop("disabled", false);
+        }
+    });
+}
+
+function ensureAnnotatorAuth() {
+    return new Promise((resolve) => {
+        const normalized = normalizeAnnotatorId(annotator_id);
+        if (normalized === "factgenie_preview") {
+            resolve();
+            return;
+        }
+        const isInvalid = INVALID_ANNOTATOR_IDS.includes(normalized);
+
+        if (isInvalid) {
+            const stored = localStorage.getItem(`factgenie_annotator_id_${metadata.id}`) || "";
+            $("#annotator-name-input").val(stored);
+            showAnnotatorAuthModal("register");
+            return;
+        }
+
+        checkAnnotatorExists(normalized)
+            .done((response) => {
+                if (response.exists) {
+                    resolve();
+                } else {
+                    $("#annotator-name-input").val(normalized);
+                    showAnnotatorAuthModal("login", "Annotator not found. Please register first.");
+                }
+            })
+            .fail(() => {
+                $("#annotator-name-input").val(normalized);
+                showAnnotatorAuthModal("login", "Could not verify annotator. Please try again.");
+            });
+    });
 }
 
 
@@ -534,10 +653,27 @@ $('.btn-check').on('change', function () {
 });
 
 $(document).ready(function () {
-    maybeWarnMissingAnnotatorId();
-    loadAnnotations();
-    $("#total-examples").html(total_examples - 1);
-    enableTooltips();
+    $("#annotator-auth-login-btn").click(function () {
+        setAnnotatorAuthMode("login");
+    });
+    $("#annotator-auth-register-btn").click(function () {
+        setAnnotatorAuthMode("register");
+    });
+    $("#annotator-auth-submit-btn").click(function () {
+        submitAnnotatorAuth();
+    });
+    $("#annotator-name-input").on("keydown", function (e) {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            submitAnnotatorAuth();
+        }
+    });
+
+    ensureAnnotatorAuth().then(() => {
+        loadAnnotations();
+        $("#total-examples").html(total_examples - 1);
+        enableTooltips();
+    });
 
     // Auto-save to local storage every 30 seconds while annotating
     setInterval(function () {
