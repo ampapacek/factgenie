@@ -2,6 +2,8 @@ var current_example_idx = 0;
 var selected_campaigns = [];
 var collapsed_boxes = [];
 var showAnnotatorNames = false;
+var preferredAnnotatorName = null;
+var currentAnnInfo = new Map();
 var splitInstance = Split(['#centerpanel', '#rightpanel'], {
     sizes: [66, 33],
     gutterSize: 1,
@@ -165,15 +167,37 @@ function getAnnotatorLabel(annId, annInfo) {
         return annId;
     }
 
-    const names = Array.from(annInfo.annotator_ids || []).filter((name) => {
-        const trimmed = String(name || '').trim();
-        return trimmed !== "";
-    });
+    const names = getAnnotatorNames(annInfo);
 
     if (names.length === 0) {
         return annId;
     }
     return names.join(", ");
+}
+
+function getAnnotatorNames(annInfo) {
+    return Array.from(annInfo?.annotator_ids || []).filter((name) => {
+        const trimmed = String(name || '').trim();
+        return trimmed !== "";
+    });
+}
+
+function getPrimaryAnnotatorName(annInfo) {
+    const names = getAnnotatorNames(annInfo).slice().sort((a, b) => a.localeCompare(b));
+    if (names.length === 0) {
+        return null;
+    }
+    return names[0];
+}
+
+function getAnnotatorSortKey(annId, annInfo) {
+    const names = getAnnotatorNames(annInfo)
+        .map((name) => String(name).toLowerCase())
+        .sort();
+    if (names.length > 0) {
+        return names[0];
+    }
+    return String(annId).toLowerCase();
 }
 
 function createOutputBoxes(generated_outputs) {
@@ -187,18 +211,33 @@ function createOutputBoxes(generated_outputs) {
 
     // find all campaign ids in output annotations
     const annIds = buildAnnotationInfo(generated_outputs);
+    currentAnnInfo = annIds;
 
     const selectBox = $("#annotations-select");
     // clear the selectbox
     selectBox.empty();
 
-    const sortedAnnIds = Array.from(annIds.keys()).sort();
+    const sortedAnnIds = Array.from(annIds.keys()).sort((a, b) => {
+        const aInfo = annIds.get(a);
+        const bInfo = annIds.get(b);
+        const aKey = getAnnotatorSortKey(a, aInfo);
+        const bKey = getAnnotatorSortKey(b, bInfo);
+        if (aKey === bKey) {
+            return String(a).localeCompare(String(b));
+        }
+        return aKey.localeCompare(bKey);
+    });
 
     // add an option for each campaign id
     for (const ann_id of sortedAnnIds) {
         const annLabel = getAnnotatorLabel(ann_id, annIds.get(ann_id));
         const button = $(`<button type="button" class="btn btn-sm btn-primary btn-ann-select" data-ann="${ann_id}">${annLabel}</button>`);
         button.on('click', function () {
+            const info = annIds.get(ann_id);
+            const primaryName = getPrimaryAnnotatorName(info);
+            if (primaryName) {
+                preferredAnnotatorName = primaryName.toLowerCase();
+            }
             $(this).toggleClass('active');
             updateDisplayedAnnotations();
         });
@@ -484,13 +523,48 @@ function showSelectedCampaigns() {
         }
     });
 
+    if (!preferredAnnotatorName && selected_campaigns.length > 0) {
+        const annId = selected_campaigns[0];
+        const info = currentAnnInfo.get(annId);
+        const primaryName = getPrimaryAnnotatorName(info);
+        if (primaryName) {
+            preferredAnnotatorName = primaryName.toLowerCase();
+        }
+    }
+
     // if window.highlight_ann_campaign is set, select the corresponding campaign
     if (window.highlight_ann_campaign) {
         $(`.btn-ann-select[data-ann="${window.highlight_ann_campaign}"]`).addClass("active").trigger("change");
+        return;
+    }
+    if (preferredAnnotatorName) {
+        const matching = [];
+        $(".btn-ann-select").each(function () {
+            const annId = $(this).data('ann');
+            const info = currentAnnInfo.get(annId);
+            const names = getAnnotatorNames(info).map((name) => String(name).toLowerCase());
+            if (names.includes(preferredAnnotatorName)) {
+                $(this).addClass("active").trigger("change");
+                matching.push(annId);
+            } else {
+                $(this).removeClass("active");
+            }
+        });
+        if (matching.length > 0) {
+            selected_campaigns = matching;
+            return;
+        }
     }
     // if no campaigns were selected (no $(".btn-ann-select") has class `active), select the first one
     if (!window.highlight_ann_campaign && $(".btn-ann-select").length > 0 && $(".btn-ann-select.active").length == 0) {
-        $(".btn-ann-select").first().addClass("active").trigger("change");
+        const first = $(".btn-ann-select").first();
+        first.addClass("active").trigger("change");
+        const annId = first.data("ann");
+        const info = currentAnnInfo.get(annId);
+        const primaryName = getPrimaryAnnotatorName(info);
+        if (primaryName) {
+            preferredAnnotatorName = primaryName.toLowerCase();
+        }
     }
 }
 
