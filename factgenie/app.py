@@ -221,12 +221,19 @@ def browse():
     example_idx = request.args.get("example_idx")
     setup_id = request.args.get("setup_id")
     ann_campaign = request.args.get("ann_campaign")
+    show_annotator_toggle = False
 
     if dataset_id and split and example_idx:
         display_example = {"dataset": dataset_id, "split": split, "example_idx": int(example_idx)}
         logger.info(f"Serving permalink {dataset_id} / {split} / {example_idx}")
     else:
         display_example = None
+
+    auth = request.cookies.get("auth")
+    if auth:
+        parts = auth.split(":", 1)
+        if len(parts) == 2 and utils.check_login(app, parts[0], parts[1]):
+            show_annotator_toggle = True
 
     workflows.refresh_indexes(app)
     datasets = workflows.get_local_dataset_overview(app)
@@ -243,6 +250,7 @@ def browse():
         highlight_setup_id=setup_id,
         highlight_ann_campaign=ann_campaign,
         datasets=datasets,
+        show_annotator_toggle=show_annotator_toggle,
         host_prefix=app.config["host_prefix"],
     )
 

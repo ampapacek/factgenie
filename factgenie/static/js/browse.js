@@ -1,6 +1,7 @@
 var current_example_idx = 0;
 var selected_campaigns = [];
 var collapsed_boxes = [];
+var showAnnotatorNames = false;
 var splitInstance = Split(['#centerpanel', '#rightpanel'], {
     sizes: [66, 33],
     gutterSize: 1,
@@ -53,10 +54,11 @@ function changeExample(dataset, split, example_idx) {
 }
 
 
-function createOutputBox(content, exampleLevelFields, annId, setup_id) {
+function createOutputBox(content, exampleLevelFields, annId, annLabel, setup_id) {
     var card = $('<div>', { class: `card output-box generated-output-box box-${setup_id} box-${annId} box-${setup_id}-${annId}` });
 
-    var annotationBadge = (annId !== "original") ? `<span class="small"><i class="fa fa-pencil"></i> ${annId}</span>` : ""
+    const badgeLabel = annLabel || annId;
+    var annotationBadge = (annId !== "original") ? `<span class="small"><i class="fa fa-pencil"></i> ${badgeLabel}</span>` : ""
     var permalinkButton = `<button class="btn btn-link p-0 text-muted permalink-btn" data-setup-id="${setup_id}" data-ann-id="${annId}" title="Copy permalink to clipboard"><i class="fa fa-link"></i></button>`;
     var headerHTML = `<div class="d-flex justify-content-between">
     <span class="small">${setup_id}</span>
@@ -132,6 +134,48 @@ function generateAnnotatorShortId(campaign_id, annotator_group) {
     return ann_id;
 }
 
+function buildAnnotationInfo(generated_outputs) {
+    const annIds = new Map();
+
+    generated_outputs.forEach(output => {
+        output.annotations.forEach(annotation => {
+            const campaign_id = annotation.campaign_id;
+            const annotator_group = annotation.annotator_group;
+            const annotator_id = annotation.annotator_id;
+            const ann_id = generateAnnotatorShortId(campaign_id, annotator_group);
+
+            if (!annIds.has(ann_id)) {
+                annIds.set(ann_id, {
+                    campaign_id: campaign_id,
+                    annotator_group: annotator_group,
+                    annotator_ids: new Set(),
+                });
+            }
+            if (annotator_id) {
+                annIds.get(ann_id).annotator_ids.add(annotator_id);
+            }
+        });
+    });
+
+    return annIds;
+}
+
+function getAnnotatorLabel(annId, annInfo) {
+    if (!showAnnotatorNames || !annInfo) {
+        return annId;
+    }
+
+    const names = Array.from(annInfo.annotator_ids || []).filter((name) => {
+        const trimmed = String(name || '').trim();
+        return trimmed !== "";
+    });
+
+    if (names.length === 0) {
+        return annId;
+    }
+    return names.join(", ");
+}
+
 function createOutputBoxes(generated_outputs) {
     // clear the output area
     $("#outputarea").empty();
@@ -142,16 +186,7 @@ function createOutputBoxes(generated_outputs) {
     });
 
     // find all campaign ids in output annotations
-    const annIds = new Map();
-    generated_outputs.forEach(output => {
-        output.annotations.forEach(annotation => {
-            const campaign_id = annotation.campaign_id;
-            const annotator_group = annotation.annotator_group;
-            const ann_id = generateAnnotatorShortId(campaign_id, annotator_group);
-
-            annIds.set(ann_id, { "campaign_id": campaign_id, "annotator_group": annotator_group });
-        });
-    });
+    const annIds = buildAnnotationInfo(generated_outputs);
 
     const selectBox = $("#annotations-select");
     // clear the selectbox
@@ -161,7 +196,8 @@ function createOutputBoxes(generated_outputs) {
 
     // add an option for each campaign id
     for (const ann_id of sortedAnnIds) {
-        const button = $(`<button type="button" class="btn btn-sm btn-primary btn-ann-select" data-ann="${ann_id}">${ann_id}</button>`);
+        const annLabel = getAnnotatorLabel(ann_id, annIds.get(ann_id));
+        const button = $(`<button type="button" class="btn btn-sm btn-primary btn-ann-select" data-ann="${ann_id}">${annLabel}</button>`);
         button.on('click', function () {
             $(this).toggleClass('active');
             updateDisplayedAnnotations();
@@ -180,7 +216,7 @@ function createOutputBoxes(generated_outputs) {
         groupDiv.appendTo("#outputarea");
 
         const plain_output = getAnnotatedOutput(output, "original", null);
-        card = createOutputBox(plain_output, null, "original", output.setup_id);
+        card = createOutputBox(plain_output, null, "original", null, output.setup_id);
         card.appendTo(groupDiv);
 
         for (const annId of sortedAnnIds) {
@@ -190,7 +226,8 @@ function createOutputBoxes(generated_outputs) {
             const annotated_output = getAnnotatedOutput(output, annId, annotations);
             const exampleLevelFields = getExampleLevelFields(annotations);
 
-            card = createOutputBox(annotated_output, exampleLevelFields, annId, output.setup_id);
+            const annLabel = getAnnotatorLabel(annId, annIds.get(annId));
+            card = createOutputBox(annotated_output, exampleLevelFields, annId, annLabel, output.setup_id);
             card.appendTo(groupDiv);
             card.hide();
         }
@@ -461,6 +498,20 @@ function toggleRaw() {
     // toggle display: none on rawarea and examplearea
     $("#rawarea").toggle();
     $("#examplearea").toggle();
+}
+
+function toggleAnnotatorNames() {
+    showAnnotatorNames = !showAnnotatorNames;
+
+    const label = showAnnotatorNames ? "Hide annotator names" : "Show annotator names";
+    $("#toggle-annotator-names-btn small").text(label);
+
+    if (window.generated_outputs) {
+        createOutputBoxes(window.generated_outputs);
+        showSelectedCampaigns();
+        updateDisplayedAnnotations();
+        highlightSetup();
+    }
 }
 
 

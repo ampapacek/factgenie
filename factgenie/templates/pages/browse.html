@@ -79,6 +79,14 @@
                 style="padding-left: 5px">Show raw data</small>
             </a>
           </li>
+          {% if show_annotator_toggle %}
+          <li class="page-item">
+            <a class="page-link" id="toggle-annotator-names-btn" onclick="toggleAnnotatorNames();"
+              title="Show annotator names">
+              <i class="fa fa-user"></i> <small style="padding-left: 5px">Show annotator names</small>
+            </a>
+          </li>
+          {% endif %}
           <li class="page-item">
             <a class="page-link" id="about-btn" title="About" data-bs-toggle="modal" data-bs-target="#aboutModal">
               <img src="{{ host_prefix }}/static/img/info.png"
