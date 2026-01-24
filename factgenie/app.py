@@ -182,7 +182,16 @@ def annotate(campaign_id):
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
 
     service = campaign.metadata["config"]["service"]
+    raw_annotator_id = request.args.get("annotatorId")
     service_ids = crowdsourcing.get_service_ids(service, request.args)
+    template_annotator_id = service_ids["annotator_id"]
+
+    if service == "local":
+        if raw_annotator_id is None:
+            template_annotator_id = PREVIEW_STUDY_ID
+        elif raw_annotator_id.strip() in ["", "FILL_YOUR_NAME_HERE"]:
+            service_ids["annotator_id"] = PREVIEW_STUDY_ID
+            template_annotator_id = raw_annotator_id.strip()
 
     metadata = campaign.metadata
     annotation_set = crowdsourcing.get_annotator_batch(app, campaign, service_ids, batch_idx=batch_idx)
@@ -199,7 +208,7 @@ def annotate(campaign_id):
         custom_folder=f"{PACKAGE_DIR}/campaigns/{campaign.campaign_id}/pages",
         host_prefix=app.config["host_prefix"],
         annotation_set=annotation_set,
-        annotator_id=service_ids["annotator_id"],
+        annotator_id=template_annotator_id,
         metadata=metadata,
     )
 
