@@ -39,6 +39,15 @@ function normalizeAnnotatorKey(value) {
     return text.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
+function getAnnotatorAliasKey(campaignId, annotatorId) {
+    const campaignKey = normalizeAnnotatorKey(campaignId);
+    const annotatorKey = normalizeAnnotatorKey(annotatorId);
+    if (!campaignKey || !annotatorKey) {
+        return "";
+    }
+    return `${campaignKey}:${annotatorKey}`;
+}
+
 function loadAnnotatorAliases() {
     try {
         const stored = localStorage.getItem(annotatorAliasStorageKey);
@@ -68,21 +77,38 @@ function saveAnnotatorAliases() {
     }
 }
 
-function getOrCreateAnnotatorAlias(annotatorId) {
-    const key = normalizeAnnotatorKey(annotatorId);
+function getOrCreateAnnotatorAlias(campaignId, annotatorId) {
+    const key = getAnnotatorAliasKey(campaignId, annotatorId);
     if (!key) {
         return "";
     }
+    const campaignKey = `${normalizeAnnotatorKey(campaignId)}:`;
+    const campaignEntries = Array.from(annotatorAliases.entries())
+        .filter(([aliasKey]) => aliasKey.startsWith(campaignKey) && aliasKey !== key);
+    const usedAliases = new Set(campaignEntries.map(([, value]) => value));
+
     if (annotatorAliases.has(key)) {
-        return annotatorAliases.get(key);
+        const currentAlias = annotatorAliases.get(key);
+        if (!usedAliases.has(currentAlias)) {
+            return currentAlias;
+        }
     }
-    const existingCount = annotatorAliases.size;
-    const baseIndex = existingCount % annotatorAliasList.length;
-    const suffixIndex = Math.floor(existingCount / annotatorAliasList.length) + 1;
-    let alias = annotatorAliasList[baseIndex];
-    if (suffixIndex > 1) {
-        alias = `${alias} ${suffixIndex}`;
+
+    let index = 0;
+    let alias = "";
+    while (true) {
+        const baseIndex = index % annotatorAliasList.length;
+        const suffixIndex = Math.floor(index / annotatorAliasList.length) + 1;
+        alias = annotatorAliasList[baseIndex];
+        if (suffixIndex > 1) {
+            alias = `${alias} ${suffixIndex}`;
+        }
+        if (!usedAliases.has(alias)) {
+            break;
+        }
+        index += 1;
     }
+
     annotatorAliases.set(key, alias);
     saveAnnotatorAliases();
     return alias;
@@ -248,12 +274,10 @@ function buildAnnotationInfo(generated_outputs) {
 }
 
 function getAnnotatorLabel(annId, annInfo) {
-    if (!showAnnotatorNames || !annInfo) {
+    if (!annInfo) {
         return annId;
     }
-
-    const names = getAnnotatorNames(annInfo);
-
+    const names = showAnnotatorNames ? getAnnotatorNames(annInfo) : getAnnotatorAliases(annInfo);
     if (names.length === 0) {
         return annId;
     }
@@ -262,7 +286,14 @@ function getAnnotatorLabel(annId, annInfo) {
 
 function getAnnotatorNames(annInfo) {
     const names = Array.from(annInfo?.annotator_ids || [])
-        .map((name) => getOrCreateAnnotatorAlias(name))
+        .map((name) => String(name || "").trim())
+        .filter((name) => name !== "");
+    return Array.from(new Set(names));
+}
+
+function getAnnotatorAliases(annInfo) {
+    const names = Array.from(annInfo?.annotator_ids || [])
+        .map((name) => getOrCreateAnnotatorAlias(annInfo.campaign_id, name))
         .filter((name) => String(name || "").trim() !== "");
     return Array.from(new Set(names));
 }
