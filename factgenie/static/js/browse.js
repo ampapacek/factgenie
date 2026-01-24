@@ -39,6 +39,42 @@ function normalizeAnnotatorKey(value) {
     return text.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
+function isInvalidAnnotatorId(value) {
+    if (typeof value === "number" && Number.isNaN(value)) {
+        return true;
+    }
+    const text = String(value || "").trim();
+    if (!text) {
+        return false;
+    }
+    return text.toLowerCase() === "nan";
+}
+
+function isTruthyFlagValue(value) {
+    if (typeof value === "boolean") {
+        return value;
+    }
+    if (typeof value === "number") {
+        return value !== 0 && !Number.isNaN(value);
+    }
+    const text = String(value || "").trim().toLowerCase();
+    if (!text) {
+        return false;
+    }
+    return !["false", "0", "no", "off"].includes(text);
+}
+
+function isSkipSelected(annotations) {
+    const flags = annotations?.flags || [];
+    return flags.some((flag) => {
+        const label = String(flag?.label || "").toLowerCase();
+        if (!label.includes("skip")) {
+            return false;
+        }
+        return isTruthyFlagValue(flag?.value);
+    });
+}
+
 function getAnnotatorAliasKey(campaignId, annotatorId) {
     const campaignKey = normalizeAnnotatorKey(campaignId);
     const annotatorKey = normalizeAnnotatorKey(annotatorId);
@@ -253,6 +289,9 @@ function buildAnnotationInfo(generated_outputs) {
             const campaign_id = annotation.campaign_id;
             const annotator_group = annotation.annotator_group;
             const annotator_id = String(annotation.annotator_id || "").trim();
+            if (isInvalidAnnotatorId(annotator_id) || isSkipSelected(annotation)) {
+                return;
+            }
             const ann_id = generateAnnotatorKey(campaign_id, annotator_id) ||
                 generateAnnotatorShortId(campaign_id, annotator_group);
 
@@ -381,6 +420,9 @@ function createOutputBoxes(generated_outputs) {
                 annotations = output.annotations.filter(a => a.campaign_id == info.campaign_id && a.annotator_id == info.annotator_id)[0];
             } else {
                 annotations = output.annotations.filter(a => a.campaign_id == info.campaign_id && a.annotator_group == info.annotator_group)[0];
+            }
+            if (!annotations || isSkipSelected(annotations) || isInvalidAnnotatorId(annotations.annotator_id)) {
+                continue;
             }
 
             const annotated_output = getAnnotatedOutput(output, annId, annotations);
