@@ -441,6 +441,7 @@ class SpanAnnotator {
                             <textarea class="form-control" id="annotation-reason-input" rows="3" placeholder="Enter your reason..."></textarea>
                         </div>
                         <div class="modal-footer">
+                            <button type="button" class="btn btn-outline-secondary" onclick="spanAnnotator._handleReasonCancel()">Cancel</button>
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" onclick="spanAnnotator._handleReasonSubmit('')">Skip</button>
                             <button type="button" class="btn btn-primary" onclick="spanAnnotator._handleReasonSubmit(document.getElementById('annotation-reason-input').value)">Submit</button>
                         </div>
@@ -458,6 +459,12 @@ class SpanAnnotator {
         // Show modal
         const modal = new bootstrap.Modal(document.getElementById('annotation-reason-modal'));
         modal.show();
+
+        $('#annotation-reason-modal').on('hidden.bs.modal', function () {
+            if (spanAnnotator.pendingAnnotation) {
+                spanAnnotator._handleReasonCancel();
+            }
+        });
 
         // Focus on text area
         $('#annotation-reason-modal').on('shown.bs.modal', function () {
@@ -498,6 +505,31 @@ class SpanAnnotator {
             modal.hide();
         }
         $('#annotation-reason-modal').remove();
+    }
+
+    _handleReasonCancel() {
+        if (!this.pendingAnnotation) {
+            return;
+        }
+
+        const { objectId } = this.pendingAnnotation;
+        this.pendingAnnotation = null;
+
+        if (objectId) {
+            this._renderAnnotations(objectId);
+        }
+
+        const modalElement = document.getElementById('annotation-reason-modal');
+        if (modalElement) {
+            const modal = bootstrap.Modal.getInstance(modalElement);
+            if (modalElement.classList.contains('show')) {
+                modal.hide();
+            }
+            if (modal) {
+                modal.dispose();
+            }
+            $('#annotation-reason-modal').remove();
+        }
     }
 
     _removeAnnotation(objectId, $span) {
