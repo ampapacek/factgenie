@@ -134,6 +134,24 @@ class SpanAnnotator {
         return this.documents.get(objectId)?.annotations || [];
     }
 
+    _escapeHtml(text) {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    _escapeAttr(text) {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\r/g, '&#13;')
+            .replace(/\n/g, '&#10;');
+    }
+
     _createSpans(text) {
         let currentIndex = 0;
         if (this.granularity === 'words') {
@@ -154,25 +172,31 @@ class SpanAnnotator {
                     trailingWhitespace = whitespace.slice(lastNewline + 1);
                 }
 
-                const renderedWhitespace = spanWhitespace.replace(/\n/g, '<br>');
+                const renderedWhitespace = this._escapeHtml(spanWhitespace).replace(/\n/g, '<br>');
                 const trailingSpan = trailingWhitespace
-                    ? `<span class="whitespace trailing-whitespace">${trailingWhitespace}</span>`
+                    ? `<span class="whitespace trailing-whitespace">${this._escapeHtml(trailingWhitespace)}</span>`
                     : '';
+
+                const contentAttr = this._escapeAttr(part);
+                const whitespaceAttr = this._escapeAttr(spanWhitespace);
+                const partHtml = this._escapeHtml(part);
 
                 const span = `<span class="annotatable" 
                     data-index="${currentIndex}" 
-                    data-content="${part}"
-                    data-whitespace="${spanWhitespace}">${part}<span class="whitespace">${renderedWhitespace}</span></span>${trailingSpan}`;
+                    data-content="${contentAttr}"
+                    data-whitespace="${whitespaceAttr}">${partHtml}<span class="whitespace">${renderedWhitespace}</span></span>${trailingSpan}`;
 
                 currentIndex += fullContent.length;
                 return span;
             }).join('');
         } else {
             return text.split('').map(char => {
+                const contentAttr = this._escapeAttr(char);
+                const renderedChar = char === '\n' ? '<br>' : this._escapeHtml(char);
                 const span = `<span class="annotatable" 
                     data-index="${currentIndex}"
-                    data-content="${char}"
-                    >${char === '\n' ? '<br>' : char}</span>`;
+                    data-content="${contentAttr}"
+                    >${renderedChar}</span>`;
                 currentIndex += 1;
                 return span;
             }).join('');
