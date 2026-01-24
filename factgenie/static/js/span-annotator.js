@@ -438,6 +438,7 @@ class SpanAnnotator {
                         </div>
                         <div class="modal-body">
                             <p>Please provide a reason for annotating "<strong>${annotation.text}</strong>":</p>
+                            <div id="annotation-reason-presets" class="d-flex flex-wrap gap-2 mb-2"></div>
                             <textarea class="form-control" id="annotation-reason-input" rows="3" placeholder="Enter your reason..."></textarea>
                         </div>
                         <div class="modal-footer">
@@ -455,6 +456,31 @@ class SpanAnnotator {
 
         // Add modal to body
         $('body').append(modalHtml);
+
+        const presets = Array.isArray(this.annotationTypes?.[annotation.type]?.reason_presets)
+            ? this.annotationTypes[annotation.type].reason_presets
+            : [];
+        const presetContainer = $('#annotation-reason-presets');
+        if (presetContainer.length && presets.length > 0) {
+            presets.forEach((preset) => {
+                const label = String(preset || "").trim();
+                if (!label) {
+                    return;
+                }
+                const button = $('<button type="button" class="btn btn-outline-secondary btn-sm"></button>');
+                button.text(label);
+                button.on('click', function () {
+                    const input = $('#annotation-reason-input');
+                    const current = String(input.val() || "").trim();
+                    const newValue = current ? `${label} ${current}` : label;
+                    input.val(newValue);
+                    input.focus();
+                });
+                presetContainer.append(button);
+            });
+        } else {
+            presetContainer.remove();
+        }
 
         // Show modal
         const modal = new bootstrap.Modal(document.getElementById('annotation-reason-modal'));
