@@ -4,6 +4,20 @@ var collapsed_boxes = [];
 var showAnnotatorNames = false;
 var preferredAnnotatorName = null;
 var currentAnnInfo = new Map();
+var annotatorAliases = new Map();
+var annotatorAliasList = [
+    "Tokyo",
+    "Paris",
+    "London",
+    "New York",
+    "Sydney",
+    "Berlin",
+    "Rome",
+    "Cairo",
+    "Mumbai",
+    "Mexico City",
+];
+var annotatorAliasStorageKey = "factgenie_browse_annotator_aliases";
 var splitInstance = Split(['#centerpanel', '#rightpanel'], {
     sizes: [66, 33],
     gutterSize: 1,
@@ -15,6 +29,71 @@ function normalizeNewlines(text) {
         .replace(/\r\n/g, "\n")
         .replace(/\\r\\n/g, "\n")
         .replace(/\\n/g, "\n");
+}
+
+function normalizeAnnotatorKey(value) {
+    const text = String(value || "").trim().toLowerCase();
+    if (!text) {
+        return "";
+    }
+    return text.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function loadAnnotatorAliases() {
+    try {
+        const stored = localStorage.getItem(annotatorAliasStorageKey);
+        if (!stored) {
+            return;
+        }
+        const data = JSON.parse(stored);
+        if (!data || typeof data !== "object") {
+            return;
+        }
+        Object.entries(data).forEach(([key, value]) => {
+            if (key && value) {
+                annotatorAliases.set(key, value);
+            }
+        });
+    } catch (error) {
+        console.warn("Failed to load annotator aliases.", error);
+    }
+}
+
+function saveAnnotatorAliases() {
+    try {
+        const data = Object.fromEntries(annotatorAliases.entries());
+        localStorage.setItem(annotatorAliasStorageKey, JSON.stringify(data));
+    } catch (error) {
+        console.warn("Failed to save annotator aliases.", error);
+    }
+}
+
+function getOrCreateAnnotatorAlias(annotatorId) {
+    const key = normalizeAnnotatorKey(annotatorId);
+    if (!key) {
+        return "";
+    }
+    if (annotatorAliases.has(key)) {
+        return annotatorAliases.get(key);
+    }
+    const existingCount = annotatorAliases.size;
+    const baseIndex = existingCount % annotatorAliasList.length;
+    const suffixIndex = Math.floor(existingCount / annotatorAliasList.length) + 1;
+    let alias = annotatorAliasList[baseIndex];
+    if (suffixIndex > 1) {
+        alias = `${alias} ${suffixIndex}`;
+    }
+    annotatorAliases.set(key, alias);
+    saveAnnotatorAliases();
+    return alias;
+}
+
+function generateAnnotatorKey(campaign_id, annotator_id) {
+    const key = normalizeAnnotatorKey(annotator_id);
+    if (!key) {
+        return null;
+    }
+    return `${campaign_id}-ann-${key}`;
 }
 
 function changeDataset() {
@@ -60,7 +139,11 @@ function createOutputBox(content, exampleLevelFields, annId, annLabel, setup_id)
     var card = $('<div>', { class: `card output-box generated-output-box box-${setup_id} box-${annId} box-${setup_id}-${annId}` });
 
     const badgeLabel = annLabel || annId;
-    var annotationBadge = (annId !== "original") ? `<span class="small"><i class="fa fa-pencil"></i> ${badgeLabel}</span>` : ""
+    var annotationBadge = (annId !== "original")
+        ? (showAnnotatorNames
+            ? `<span class="small">${badgeLabel}</span>`
+            : `<span class="small"><i class="fa fa-pencil"></i> ${badgeLabel}</span>`)
+        : "";
     var permalinkButton = `<button class="btn btn-link p-0 text-muted permalink-btn" data-setup-id="${setup_id}" data-ann-id="${annId}" title="Copy permalink to clipboard"><i class="fa fa-link"></i></button>`;
     var headerHTML = `<div class="d-flex justify-content-between">
     <span class="small">${setup_id}</span>
@@ -143,13 +226,15 @@ function buildAnnotationInfo(generated_outputs) {
         output.annotations.forEach(annotation => {
             const campaign_id = annotation.campaign_id;
             const annotator_group = annotation.annotator_group;
-            const annotator_id = annotation.annotator_id;
-            const ann_id = generateAnnotatorShortId(campaign_id, annotator_group);
+            const annotator_id = String(annotation.annotator_id || "").trim();
+            const ann_id = generateAnnotatorKey(campaign_id, annotator_id) ||
+                generateAnnotatorShortId(campaign_id, annotator_group);
 
             if (!annIds.has(ann_id)) {
                 annIds.set(ann_id, {
                     campaign_id: campaign_id,
                     annotator_group: annotator_group,
+                    annotator_id: annotator_id || null,
                     annotator_ids: new Set(),
                 });
             }
@@ -176,10 +261,10 @@ function getAnnotatorLabel(annId, annInfo) {
 }
 
 function getAnnotatorNames(annInfo) {
-    return Array.from(annInfo?.annotator_ids || []).filter((name) => {
-        const trimmed = String(name || '').trim();
-        return trimmed !== "";
-    });
+    const names = Array.from(annInfo?.annotator_ids || [])
+        .map((name) => getOrCreateAnnotatorAlias(name))
+        .filter((name) => String(name || "").trim() !== "");
+    return Array.from(new Set(names));
 }
 
 function getPrimaryAnnotatorName(annInfo) {
@@ -259,8 +344,13 @@ function createOutputBoxes(generated_outputs) {
         card.appendTo(groupDiv);
 
         for (const annId of sortedAnnIds) {
-            const { campaign_id, annotator_group } = annIds.get(annId);
-            annotations = output.annotations.filter(a => a.campaign_id == campaign_id && a.annotator_group == annotator_group)[0];
+            const info = annIds.get(annId);
+            let annotations;
+            if (info.annotator_id) {
+                annotations = output.annotations.filter(a => a.campaign_id == info.campaign_id && a.annotator_id == info.annotator_id)[0];
+            } else {
+                annotations = output.annotations.filter(a => a.campaign_id == info.campaign_id && a.annotator_group == info.annotator_group)[0];
+            }
 
             const annotated_output = getAnnotatedOutput(output, annId, annotations);
             const exampleLevelFields = getExampleLevelFields(annotations);
@@ -726,6 +816,8 @@ window.addEventListener('popstate', function (event) {
 
 
 $(document).ready(function () {
+    loadAnnotatorAliases();
+
     // Check for URL parameters on initial load
     const urlParams = new URLSearchParams(window.location.search);
     const setup_id = urlParams.get('setup_id');
