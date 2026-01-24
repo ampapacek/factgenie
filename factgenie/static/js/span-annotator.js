@@ -514,6 +514,7 @@ class SpanAnnotator {
             if (spanAnnotator.pendingAnnotation) {
                 spanAnnotator._handleReasonCancel();
             }
+            spanAnnotator._restoreBodyScroll();
         });
 
         // Focus on text area
@@ -555,6 +556,7 @@ class SpanAnnotator {
             modal.hide();
         }
         $('#annotation-reason-modal').remove();
+        this._restoreBodyScroll();
     }
 
     _handleReasonCancel() {
@@ -579,7 +581,15 @@ class SpanAnnotator {
                 modal.dispose();
             }
             $('#annotation-reason-modal').remove();
+            this._restoreBodyScroll();
         }
+    }
+
+    _restoreBodyScroll() {
+        document.body.classList.remove('modal-open');
+        document.body.style.overflow = '';
+        document.body.style.paddingRight = '';
+        $('.modal-backdrop').remove();
     }
 
     _removeAnnotation(objectId, $span) {
