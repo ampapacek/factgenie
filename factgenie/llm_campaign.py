@@ -277,6 +277,10 @@ def parse_llm_eval_config(config):
         "model_args": config.get("modelArguments"),
         "extra_args": config.get("extraArguments"),
         "annotation_span_categories": config.get("annotationSpanCategories"),
+        "flags": config.get("flags"),
+        "options": config.get("options"),
+        "sliders": config.get("sliders"),
+        "text_fields": config.get("textFields") or config.get("text_fields"),
     }
     return config
 

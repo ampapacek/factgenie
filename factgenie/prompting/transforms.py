@@ -743,6 +743,205 @@ class ParseAnnotations(Transform):
         return derive_field(current, api, self.parse_annotations, self.output_field)
 
 
+class ParseExtraFields(Transform):
+    def __init__(
+        self,
+        input_field: str,
+        flags: list | None = None,
+        options: list | None = None,
+        sliders: list | None = None,
+        text_fields: list | None = None,
+    ):
+        self.input_field = input_field
+        self.flags_config = flags or []
+        self.options_config = options or []
+        self.sliders_config = sliders or []
+        self.text_fields_config = text_fields or []
+
+    @property
+    def requires_fields(self) -> list[str]:
+        return [self.input_field]
+
+    @property
+    def outputs_fields(self) -> list[str]:
+        return ["flags", "options", "sliders", "text_fields"]
+
+    @staticmethod
+    def _normalize_label(label) -> str:
+        return str(label).strip().lower()
+
+    @staticmethod
+    def _coerce_bool(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in ("true", "yes", "1"):
+                return True
+            if lowered in ("false", "no", "0", ""):
+                return False
+        return bool(value)
+
+    def _label_value_map(self, raw):
+        mapping = {}
+        if isinstance(raw, dict):
+            for key, value in raw.items():
+                mapping[self._normalize_label(key)] = value
+        elif isinstance(raw, list):
+            for item in raw:
+                if not isinstance(item, dict):
+                    continue
+                label = item.get("label")
+                if label is None:
+                    continue
+                if "value" not in item:
+                    continue
+                mapping[self._normalize_label(label)] = item.get("value")
+        return mapping
+
+    def _parse_flags(self, raw):
+        if not raw and not self.flags_config:
+            return []
+
+        raw_map = self._label_value_map(raw)
+        if not self.flags_config:
+            return [
+                {"label": label, "value": self._coerce_bool(value)}
+                for label, value in raw_map.items()
+            ]
+
+        flags_out = []
+        for label in self.flags_config:
+            value = raw_map.get(self._normalize_label(label), False)
+            flags_out.append({"label": label, "value": self._coerce_bool(value)})
+        return flags_out
+
+    @staticmethod
+    def _match_option_value(raw_value, option_values):
+        if raw_value is None:
+            return "", None
+
+        if isinstance(raw_value, int) and 0 <= raw_value < len(option_values):
+            return option_values[raw_value], raw_value
+
+        raw_str = str(raw_value).strip()
+        for idx, option in enumerate(option_values):
+            if str(option).strip().lower() == raw_str.lower():
+                return option, idx
+
+        if raw_str.isdigit():
+            idx = int(raw_str)
+            if 0 <= idx < len(option_values):
+                return option_values[idx], idx
+
+        return raw_str, None
+
+    def _parse_options(self, raw):
+        if not raw and not self.options_config:
+            return []
+
+        raw_map = self._label_value_map(raw)
+        if not self.options_config:
+            return [
+                {"label": label, "value": value}
+                for label, value in raw_map.items()
+            ]
+
+        options_out = []
+        for option in self.options_config:
+            if not isinstance(option, dict):
+                continue
+            label = option.get("label")
+            values = option.get("values", [])
+            if label is None:
+                continue
+            raw_value = raw_map.get(self._normalize_label(label))
+            matched_value, index = self._match_option_value(raw_value, values)
+            entry = {
+                "label": label,
+                "value": matched_value,
+                "optionList": values,
+            }
+            if index is not None:
+                entry["index"] = index
+            options_out.append(entry)
+        return options_out
+
+    def _parse_sliders(self, raw):
+        if not raw and not self.sliders_config:
+            return []
+
+        raw_map = self._label_value_map(raw)
+        if not self.sliders_config:
+            return list(raw) if isinstance(raw, list) else []
+
+        sliders_out = []
+        for slider in self.sliders_config:
+            if not isinstance(slider, dict):
+                continue
+            label = slider.get("label")
+            if label is None:
+                continue
+            value = raw_map.get(self._normalize_label(label), "")
+            sliders_out.append(
+                {
+                    "label": label,
+                    "value": value,
+                    "min": slider.get("min"),
+                    "max": slider.get("max"),
+                    "step": slider.get("step"),
+                }
+            )
+        return sliders_out
+
+    def _parse_text_fields(self, raw):
+        if not raw and not self.text_fields_config:
+            return []
+
+        raw_map = self._label_value_map(raw)
+        if not self.text_fields_config:
+            return [
+                {"label": label, "value": value}
+                for label, value in raw_map.items()
+            ]
+
+        text_out = []
+        for label in self.text_fields_config:
+            value = raw_map.get(self._normalize_label(label), "")
+            text_out.append({"label": label, "value": value})
+        return text_out
+
+    def parse_extra_fields(self, c: dict, api: ModelAPI):
+        payload = {}
+        raw = c.get(self.input_field)
+        if isinstance(raw, dict):
+            payload = raw
+        elif isinstance(raw, str):
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {}
+
+        flags = self._parse_flags(payload.get("flags"))
+        options = self._parse_options(payload.get("options"))
+        sliders = self._parse_sliders(payload.get("sliders"))
+        text_fields = self._parse_text_fields(payload.get("text_fields", payload.get("textFields")))
+
+        return {
+            "flags": flags,
+            "options": options,
+            "sliders": sliders,
+            "text_fields": text_fields,
+        }
+
+    def __call__(self, current: list[dict], api: ModelAPI) -> list[dict]:
+        return derive_and_upsert_fields(current, api, self.parse_extra_fields)
+
+
 class ParseOptions(Transform):
     def __init__(
         self,

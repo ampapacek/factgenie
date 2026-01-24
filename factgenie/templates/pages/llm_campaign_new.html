@@ -170,6 +170,67 @@
               </div>
               {% endif %}
 
+              {% if mode == 'llm_eval' %}
+              <div class="mt-4 mb-3">
+                <h5>Example-level inputs</h5>
+                <div class="mb-2">
+                  <small class="form-text text-muted">If you set these, update the prompt template to return them in the JSON output.</small>
+                </div>
+                <div class="row mb-3 align-items-center">
+                  <div class="col-auto">
+                    <i class="fa fa-check"></i>
+                    <span style="margin-left: 5px; margin-right: 10px;">Flags</span>
+                    <div class="mb-2">
+                      <small class="form-text text-muted">Checkboxes that the model should fill for each example.</small>
+                    </div>
+                  </div>
+                  <div id="flags"></div>
+                  <div class="col-auto mt-1">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addFlag();">+</button>
+                  </div>
+                </div>
+                <div class="row mb-3 align-items-center">
+                  <div class="col-auto">
+                    <i class="fa fa-list-ul"></i>
+                    <span style="margin-left: 5px; margin-right: 10px;">List of options</span>
+                    <div class="mb-2">
+                      <small class="form-text text-muted">Options that the model should pick for each example.</small>
+                    </div>
+                  </div>
+                  <div id="options"></div>
+                  <div class="col-auto mt-1">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addOption();">+</button>
+                  </div>
+                </div>
+                <div class="row mb-3 mt-3 align-items-center">
+                  <div class="col-auto">
+                    <i class="fa fa-sliders"></i>
+                    <span style="margin-left: 5px; margin-right: 10px;">Sliders</span>
+                    <div class="mb-2">
+                      <small class="form-text text-muted">Slider values that the model should assign for each example.</small>
+                    </div>
+                  </div>
+                  <div id="sliders"></div>
+                  <div class="col-auto mt-1">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addSlider();">+</button>
+                  </div>
+                </div>
+                <div class="row mt-3 mb-1 align-items-center">
+                  <div class="col-auto">
+                    <i class="fa fa-file-text-o"></i>
+                    <span style="margin-left: 5px; margin-right: 10px;">Text fields</span>
+                    <div class="mb-2">
+                      <small class="form-text text-muted">Free-text fields that the model should fill for each example.</small>
+                    </div>
+                  </div>
+                  <div id="textFields"></div>
+                  <div class="col-auto mt-1">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addTextField();">+</button>
+                  </div>
+                </div>
+              </div>
+              {% endif %}
+
               <div class="row g-3 mb-3 align-items-center">
                 <div class="col-auto">
                   <i class="fa fa-align-left"></i>

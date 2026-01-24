@@ -26,6 +26,10 @@ class RawOutputAnnotationStrategy(SequentialStrategy):
         annotation_granularity = self.config.get("annotation_granularity", "words")
         with_reason = self.extra_args.get("with_reason", True)
         output_validation_model = AnnotationModelFactory.get_output_model(with_reason)
+        flags = self.config.get("flags")
+        options = self.config.get("options")
+        sliders = self.config.get("sliders")
+        text_fields = self.config.get("text_fields") or self.config.get("textFields")
 
         return [
             # 1. Ask prompt.
@@ -52,6 +56,7 @@ class RawOutputAnnotationStrategy(SequentialStrategy):
                 output_validation_model,
                 annotation_granularity,
             ),
+            t.ParseExtraFields(EXTRACTED, flags=flags, options=options, sliders=sliders, text_fields=text_fields),
             # Metadata.
             t.Metadata(fields=[PROMPT]),
         ]

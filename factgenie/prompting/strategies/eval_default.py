@@ -24,6 +24,10 @@ class StructuredAnnotationStrategy(SequentialStrategy):
         with_reason = self.extra_args.get("with_reason", True)
         with_occurence_index = self.extra_args.get("with_occurence_index", False)
         output_validation_model = AnnotationModelFactory.get_output_model(with_reason, with_occurence_index)
+        flags = self.config.get("flags")
+        options = self.config.get("options")
+        sliders = self.config.get("sliders")
+        text_fields = self.config.get("text_fields") or self.config.get("textFields")
 
         return [
             # 1. Ask prompt.
@@ -46,5 +50,6 @@ class StructuredAnnotationStrategy(SequentialStrategy):
                 output_validation_model,
                 annotation_granularity,
             ),
+            t.ParseExtraFields(ANNOTATIONS_RAW, flags=flags, options=options, sliders=sliders, text_fields=text_fields),
             # Metadata.
         ]
