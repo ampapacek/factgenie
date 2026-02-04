@@ -556,13 +556,26 @@ class SpanAnnotator {
                     if (!presetSet) {
                         return;
                     }
+                    const oppositeLabel = label.startsWith("NotIn")
+                        ? `In${label.slice(5)}`
+                        : (label.startsWith("In") ? `NotIn${label.slice(2)}` : null);
                     const isActive = presetSet.has(label);
                     if (isActive) {
                         presetSet.delete(label);
                     } else {
                         presetSet.add(label);
+                        if (oppositeLabel && presetSet.has(oppositeLabel)) {
+                            presetSet.delete(oppositeLabel);
+                        }
                     }
                     $(this).toggleClass("active", !isActive);
+                    if (oppositeLabel) {
+                        $('#annotation-reason-presets button').each(function () {
+                            if ($(this).text().trim() === oppositeLabel) {
+                                $(this).toggleClass("active", presetSet.has(oppositeLabel));
+                            }
+                        });
+                    }
                     $('#annotation-reason-input').focus();
                 });
                 presetContainer.append(button);
