@@ -487,7 +487,7 @@ class SpanAnnotator {
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-outline-secondary" onclick="spanAnnotator._handleReasonCancel()">Cancel</button>
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" onclick="spanAnnotator._handleReasonSubmit('')">Skip</button>
+                            <button type="button" class="btn btn-secondary" id="annotation-reason-skip" data-bs-dismiss="modal" onclick="spanAnnotator._handleReasonSubmit('')">Skip</button>
                             <button type="button" class="btn btn-primary" onclick="spanAnnotator._handleReasonSubmit(document.getElementById('annotation-reason-input').value)">Submit</button>
                         </div>
                     </div>
@@ -561,6 +561,10 @@ class SpanAnnotator {
                 const label = $(this).text().trim();
                 $(this).toggleClass("active", presetSet.has(label));
             });
+            const skipBtn = document.getElementById('annotation-reason-skip');
+            if (skipBtn) {
+                skipBtn.disabled = !!spanAnnotator.pendingAnnotation?.isEdit;
+            }
             $('#annotation-reason-input').focus();
         });
 
