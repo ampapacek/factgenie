@@ -215,9 +215,18 @@ function detailFilter(index, row) {
 function enableTooltips() {
     // enable tooltips
     var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-        return new bootstrap.Tooltip(tooltipTriggerEl)
-    })
+    tooltipTriggerList.forEach(function (tooltipTriggerEl) {
+        const existing = bootstrap.Tooltip.getInstance(tooltipTriggerEl);
+        if (existing) {
+            existing.dispose();
+        }
+    });
+    document.querySelectorAll('.tooltip').forEach(function (tooltipEl) {
+        tooltipEl.remove();
+    });
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
 }
 
 
