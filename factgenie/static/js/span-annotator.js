@@ -16,6 +16,7 @@ class SpanAnnotator {
         this.currentHistoryIndex = new Map(); // Map of document ID -> current history index
         this.annotateReason = false; // Whether to collect reasons for annotations
         this.pendingAnnotation = null; // Store annotation data while waiting for reason input
+        this.suppressClickOnce = false;
     }
 
     init(granularity, overlapAllowed, annotationTypes, annotateReason = false) {
@@ -242,6 +243,13 @@ class SpanAnnotator {
             if (this.isSelecting || this.currentType === -2 || this.currentType === -1) {
                 return;
             }
+            if (this.suppressClickOnce) {
+                this.suppressClickOnce = false;
+                return;
+            }
+            if (!this.annotateReason) {
+                return;
+            }
             const $target = $(e.target).closest('.annotatable');
             if ($target.length === 0) {
                 return;
@@ -254,6 +262,9 @@ class SpanAnnotator {
                 return;
             }
             const annotation = matching[matching.length - 1];
+            if (annotation.type !== this.currentType) {
+                return;
+            }
             this.pendingAnnotation = { objectId, annotation, isEdit: true };
             this._showReasonDialog(annotation);
         });
@@ -290,6 +301,21 @@ class SpanAnnotator {
                 if (this.currentType === -1) {
                     this._removeAnnotation(objectId, endSpan);
                 } else {
+                    if (this.annotateReason && this.startSpan.is(endSpan)) {
+                        const doc = this.documents.get(objectId);
+                        const position = parseInt(endSpan.data('index'));
+                        const matching = doc.annotations.filter(a =>
+                            position >= a.start && position < a.start + a.text.length);
+                        if (matching.length > 0) {
+                            const annotation = matching[matching.length - 1];
+                            if (annotation.type === this.currentType) {
+                                this.pendingAnnotation = { objectId, annotation, isEdit: true };
+                                this._showReasonDialog(annotation);
+                                this.suppressClickOnce = true;
+                                return;
+                            }
+                        }
+                    }
                     this._createAnnotation(objectId, this.startSpan, endSpan);
                 }
             }
@@ -486,7 +512,7 @@ class SpanAnnotator {
                             <textarea class="form-control" id="annotation-reason-input" rows="3" placeholder="Enter your reason..."></textarea>
                         </div>
                         <div class="modal-footer">
-                            <button type="button" class="btn btn-outline-secondary" onclick="spanAnnotator._handleReasonCancel()">Cancel</button>
+                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" onclick="spanAnnotator._handleReasonCancel()">Cancel</button>
                             <button type="button" class="btn btn-secondary" id="annotation-reason-skip" data-bs-dismiss="modal" onclick="spanAnnotator._handleReasonSubmit('')">Skip</button>
                             <button type="button" class="btn btn-primary" onclick="spanAnnotator._handleReasonSubmit(document.getElementById('annotation-reason-input').value)">Submit</button>
                         </div>
@@ -500,13 +526,17 @@ class SpanAnnotator {
 
         // Add modal to body
         $('body').append(modalHtml);
+        const skipBtn = document.getElementById('annotation-reason-skip');
+        if (skipBtn) {
+            skipBtn.disabled = !!this.pendingAnnotation?.isEdit;
+        }
 
         const presets = Array.isArray(this.annotationTypes?.[annotation.type]?.reason_presets)
             ? this.annotationTypes[annotation.type].reason_presets
             : [];
         let initialReason = "";
         if (this.pendingAnnotation?.isEdit) {
-            initialReason = String(annotation.reason || "").trim();
+            initialReason = String(annotation.reason || annotation.note || "").trim();
         }
         const { presetSet, remainingText } = this._splitReasonPresets(initialReason, presets);
         if (this.pendingAnnotation) {
@@ -561,10 +591,6 @@ class SpanAnnotator {
                 const label = $(this).text().trim();
                 $(this).toggleClass("active", presetSet.has(label));
             });
-            const skipBtn = document.getElementById('annotation-reason-skip');
-            if (skipBtn) {
-                skipBtn.disabled = !!spanAnnotator.pendingAnnotation?.isEdit;
-            }
             $('#annotation-reason-input').focus();
         });
 
@@ -613,11 +639,7 @@ class SpanAnnotator {
     }
 
     _handleReasonCancel() {
-        if (!this.pendingAnnotation) {
-            return;
-        }
-
-        const { objectId } = this.pendingAnnotation;
+        const objectId = this.pendingAnnotation?.objectId;
         this.pendingAnnotation = null;
 
         if (objectId) {
@@ -626,13 +648,8 @@ class SpanAnnotator {
 
         const modalElement = document.getElementById('annotation-reason-modal');
         if (modalElement) {
-            const modal = bootstrap.Modal.getInstance(modalElement);
-            if (modalElement.classList.contains('show')) {
-                modal.hide();
-            }
-            if (modal) {
-                modal.dispose();
-            }
+            const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
+            modal.hide();
             $('#annotation-reason-modal').remove();
             this._restoreBodyScroll();
         }
@@ -687,6 +704,7 @@ class SpanAnnotator {
 
             // Reset styling
             $span.attr('style', '');
+            $span.removeAttr('data-bs-toggle data-bs-placement title data-bs-original-title');
             $('.whitespace', $span).removeClass('whitespace-hidden');
 
             if (spanAnnotations.length > 0) {
@@ -735,9 +753,14 @@ class SpanAnnotator {
                 $span.attr('data-bs-toggle', 'tooltip');
                 $span.attr('data-bs-placement', 'top');
                 $span.attr('title', tooltipText);
+                $span.attr('data-bs-original-title', tooltipText);
 
             }
         });
+        // enable displaying span annotation reasons when howering
+        if (typeof enableTooltips === 'function') {
+            enableTooltips();
+        }
     }
 }
 
