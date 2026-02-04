@@ -238,6 +238,26 @@ class SpanAnnotator {
             this.startSpan = this._findClosestSpan(objectId, e.clientX, e.clientY);
         });
 
+        $element.on('click', (e) => {
+            if (this.isSelecting || this.currentType === -2 || this.currentType === -1) {
+                return;
+            }
+            const $target = $(e.target).closest('.annotatable');
+            if ($target.length === 0) {
+                return;
+            }
+            const doc = this.documents.get(objectId);
+            const position = parseInt($target.data('index'));
+            const matching = doc.annotations.filter(a =>
+                position >= a.start && position < a.start + a.text.length);
+            if (matching.length === 0) {
+                return;
+            }
+            const annotation = matching[matching.length - 1];
+            this.pendingAnnotation = { objectId, annotation, isEdit: true };
+            this._showReasonDialog(annotation);
+        });
+
         $element.on('mousemove', (e) => {
             if (e.buttons === 2) { // Right button pressed
                 const closestSpan = this._findClosestSpan(objectId, e.clientX, e.clientY);
@@ -484,8 +504,13 @@ class SpanAnnotator {
         const presets = Array.isArray(this.annotationTypes?.[annotation.type]?.reason_presets)
             ? this.annotationTypes[annotation.type].reason_presets
             : [];
+        let initialReason = "";
+        if (this.pendingAnnotation?.isEdit) {
+            initialReason = String(annotation.reason || "").trim();
+        }
+        const { presetSet, remainingText } = this._splitReasonPresets(initialReason, presets);
         if (this.pendingAnnotation) {
-            this.pendingAnnotation.selectedPresets = new Set();
+            this.pendingAnnotation.selectedPresets = presetSet;
         }
         const presetContainer = $('#annotation-reason-presets');
         if (presetContainer.length && presets.length > 0) {
@@ -515,6 +540,8 @@ class SpanAnnotator {
         } else {
             presetContainer.remove();
         }
+
+        $('#annotation-reason-input').val(remainingText);
 
         // Show modal
         const modal = new bootstrap.Modal(document.getElementById('annotation-reason-modal'));
@@ -549,7 +576,7 @@ class SpanAnnotator {
     _handleReasonSubmit(reason) {
         if (!this.pendingAnnotation) return;
 
-        const { objectId, annotation } = this.pendingAnnotation;
+        const { objectId, annotation, isEdit } = this.pendingAnnotation;
         const doc = this.documents.get(objectId);
         const presetSet = this.pendingAnnotation.selectedPresets || new Set();
         const presetText = Array.from(presetSet).join(" ").trim();
@@ -562,10 +589,12 @@ class SpanAnnotator {
                 : reasonText;
         }
 
-        // Add annotation to document
-        doc.annotations.push(annotation);
+        if (!isEdit) {
+            // Add annotation to document
+            doc.annotations.push(annotation);
+            this.emit('annotationAdded', { objectId, annotation });
+        }
         this._renderAnnotations(objectId);
-        this.emit('annotationAdded', { objectId, annotation });
 
         // Clean up
         this.pendingAnnotation = null;
@@ -603,6 +632,21 @@ class SpanAnnotator {
             $('#annotation-reason-modal').remove();
             this._restoreBodyScroll();
         }
+    }
+
+    _splitReasonPresets(reason, presets) {
+        const tokens = String(reason || "").split(/\s+/).filter((token) => token.length > 0);
+        const presetSet = new Set();
+        const presetList = Array.isArray(presets) ? presets.map((p) => String(p || "").trim()) : [];
+        const remaining = [];
+        tokens.forEach((token) => {
+            if (presetList.includes(token)) {
+                presetSet.add(token);
+            } else {
+                remaining.push(token);
+            }
+        });
+        return { presetSet, remainingText: remaining.join(" ") };
     }
 
     _restoreBodyScroll() {
