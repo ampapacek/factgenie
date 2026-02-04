@@ -484,6 +484,9 @@ class SpanAnnotator {
         const presets = Array.isArray(this.annotationTypes?.[annotation.type]?.reason_presets)
             ? this.annotationTypes[annotation.type].reason_presets
             : [];
+        if (this.pendingAnnotation) {
+            this.pendingAnnotation.selectedPresets = new Set();
+        }
         const presetContainer = $('#annotation-reason-presets');
         if (presetContainer.length && presets.length > 0) {
             presets.forEach((preset) => {
@@ -494,11 +497,18 @@ class SpanAnnotator {
                 const button = $('<button type="button" class="btn btn-outline-secondary btn-sm"></button>');
                 button.text(label);
                 button.on('click', function () {
-                    const input = $('#annotation-reason-input');
-                    const current = String(input.val() || "").trim();
-                    const newValue = current ? `${label} ${current}` : label;
-                    input.val(newValue);
-                    input.focus();
+                    const presetSet = spanAnnotator.pendingAnnotation?.selectedPresets;
+                    if (!presetSet) {
+                        return;
+                    }
+                    const isActive = presetSet.has(label);
+                    if (isActive) {
+                        presetSet.delete(label);
+                    } else {
+                        presetSet.add(label);
+                    }
+                    $(this).toggleClass("active", !isActive);
+                    $('#annotation-reason-input').focus();
                 });
                 presetContainer.append(button);
             });
@@ -519,6 +529,11 @@ class SpanAnnotator {
 
         // Focus on text area
         $('#annotation-reason-modal').on('shown.bs.modal', function () {
+            const presetSet = spanAnnotator.pendingAnnotation?.selectedPresets || new Set();
+            $('#annotation-reason-presets button').each(function () {
+                const label = $(this).text().trim();
+                $(this).toggleClass("active", presetSet.has(label));
+            });
             $('#annotation-reason-input').focus();
         });
 
@@ -536,10 +551,15 @@ class SpanAnnotator {
 
         const { objectId, annotation } = this.pendingAnnotation;
         const doc = this.documents.get(objectId);
+        const presetSet = this.pendingAnnotation.selectedPresets || new Set();
+        const presetText = Array.from(presetSet).join(" ").trim();
 
         // Add reason to annotation if provided
-        if (reason && reason.trim()) {
-            annotation.reason = reason.trim();
+        const reasonText = String(reason || "").trim();
+        if (presetText || reasonText) {
+            annotation.reason = presetText
+                ? (reasonText ? `${presetText} ${reasonText}` : presetText)
+                : reasonText;
         }
 
         // Add annotation to document
