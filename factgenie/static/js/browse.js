@@ -18,8 +18,23 @@ var annotatorAliasList = [
     "Mexico City",
 ];
 var annotatorAliasStorageKey = "factgenie_browse_annotator_aliases";
+const DEFAULT_SPLIT_SIZES = [66, 33];
+const SPLIT_STORAGE_KEY = "factgenie:splitSizes";
+
+function loadSplitSizes() {
+    try {
+        return JSON.parse(localStorage.getItem(SPLIT_STORAGE_KEY)) || DEFAULT_SPLIT_SIZES;
+    } catch {
+        return DEFAULT_SPLIT_SIZES;
+    }
+}
+
+function saveSplitSizes() {
+    localStorage.setItem(SPLIT_STORAGE_KEY, JSON.stringify(splitInstance.getSizes()));
+}
+
 var splitInstance = Split(['#centerpanel', '#rightpanel'], {
-    sizes: [66, 33],
+    sizes: loadSplitSizes(),
     gutterSize: 1,
 });
 
@@ -494,6 +509,7 @@ function highlightSetup() {
 }
 
 function fetchExample(dataset, split, example_idx) {
+    saveSplitSizes();
     // change the URL so that it shows the permalink
     const newUrl = `${url_prefix}/browse?dataset=${dataset}&split=${split}&example_idx=${example_idx}`;
 
@@ -525,7 +541,7 @@ function fetchExample(dataset, split, example_idx) {
             $("#examplearea").html(data.html);
             $("#centerpanel").show();
             // enable Split.js
-            splitInstance.setSizes([66, 33]);
+            splitInstance.setSizes(loadSplitSizes());
             // reset the right panel width
         }
 
