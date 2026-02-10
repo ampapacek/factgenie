@@ -2,7 +2,7 @@ var current_example_idx = 0;
 var selected_campaigns = [];
 var collapsed_boxes = [];
 var showAnnotatorNames = false;
-var preferredAnnotatorName = null;
+var preferredAnnotatorNames = [];
 var currentAnnInfo = new Map();
 var annotatorAliases = new Map();
 var annotatorAliasList = [
@@ -352,14 +352,6 @@ function getAnnotatorAliases(annInfo) {
     return Array.from(new Set(names));
 }
 
-function getPrimaryAnnotatorName(annInfo) {
-    const names = getAnnotatorNames(annInfo).slice().sort((a, b) => a.localeCompare(b));
-    if (names.length === 0) {
-        return null;
-    }
-    return names[0];
-}
-
 function getAnnotatorSortKey(annId, annInfo) {
     const names = getAnnotatorNames(annInfo)
         .map((name) => String(name).toLowerCase())
@@ -368,6 +360,27 @@ function getAnnotatorSortKey(annId, annInfo) {
         return names[0];
     }
     return String(annId).toLowerCase();
+}
+
+function refreshPreferredAnnotators() {
+    if (!selected_campaigns || selected_campaigns.length === 0) {
+        return;
+    }
+
+    const names = new Set();
+    selected_campaigns.forEach((annId) => {
+        const info = currentAnnInfo.get(annId);
+        getAnnotatorNames(info).forEach((name) => {
+            const normalized = String(name || "").trim().toLowerCase();
+            if (normalized) {
+                names.add(normalized);
+            }
+        });
+    });
+
+    if (names.size > 0) {
+        preferredAnnotatorNames = Array.from(names);
+    }
 }
 
 function createOutputBoxes(generated_outputs) {
@@ -403,11 +416,6 @@ function createOutputBoxes(generated_outputs) {
         const annLabel = getAnnotatorLabel(ann_id, annIds.get(ann_id));
         const button = $(`<button type="button" class="btn btn-sm btn-primary btn-ann-select" data-ann="${ann_id}">${annLabel}</button>`);
         button.on('click', function () {
-            const info = annIds.get(ann_id);
-            const primaryName = getPrimaryAnnotatorName(info);
-            if (primaryName) {
-                preferredAnnotatorName = primaryName.toLowerCase();
-            }
             $(this).toggleClass('active');
             updateDisplayedAnnotations();
         });
@@ -702,27 +710,29 @@ function showSelectedCampaigns() {
         }
     });
 
-    if (!preferredAnnotatorName && selected_campaigns.length > 0) {
-        const annId = selected_campaigns[0];
-        const info = currentAnnInfo.get(annId);
-        const primaryName = getPrimaryAnnotatorName(info);
-        if (primaryName) {
-            preferredAnnotatorName = primaryName.toLowerCase();
-        }
-    }
-
     // if window.highlight_ann_campaign is set, select the corresponding campaign
     if (window.highlight_ann_campaign) {
         $(`.btn-ann-select[data-ann="${window.highlight_ann_campaign}"]`).addClass("active").trigger("change");
         return;
     }
-    if (preferredAnnotatorName) {
+
+    // keep exact previous selections when they exist for this example
+    if ($(".btn-ann-select.active").length > 0) {
+        selected_campaigns = $('.btn-ann-select.active').map(function () {
+            return $(this).data('ann');
+        }).get();
+        refreshPreferredAnnotators();
+        return;
+    }
+
+    if (preferredAnnotatorNames.length > 0) {
+        const preferred = new Set(preferredAnnotatorNames);
         const matching = [];
         $(".btn-ann-select").each(function () {
             const annId = $(this).data('ann');
             const info = currentAnnInfo.get(annId);
             const names = getAnnotatorNames(info).map((name) => String(name).toLowerCase());
-            if (names.includes(preferredAnnotatorName)) {
+            if (names.some((name) => preferred.has(name))) {
                 $(this).addClass("active").trigger("change");
                 matching.push(annId);
             } else {
@@ -731,6 +741,7 @@ function showSelectedCampaigns() {
         });
         if (matching.length > 0) {
             selected_campaigns = matching;
+            refreshPreferredAnnotators();
             return;
         }
     }
@@ -739,11 +750,8 @@ function showSelectedCampaigns() {
         const first = $(".btn-ann-select").first();
         first.addClass("active").trigger("change");
         const annId = first.data("ann");
-        const info = currentAnnInfo.get(annId);
-        const primaryName = getPrimaryAnnotatorName(info);
-        if (primaryName) {
-            preferredAnnotatorName = primaryName.toLowerCase();
-        }
+        selected_campaigns = [annId];
+        refreshPreferredAnnotators();
     }
 }
 
@@ -773,6 +781,7 @@ function updateDisplayedAnnotations() {
     selected_campaigns = activeButtons.map(function () {
         return $(this).data('ann');
     }).get();
+    refreshPreferredAnnotators();
     // hide all placeholders
     $(".output-box").hide();
 
