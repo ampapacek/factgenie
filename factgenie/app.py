@@ -154,6 +154,9 @@ def _filter_campaigns_for_viewer(campaigns, visible_dataset_ids):
     filtered = {}
 
     for campaign_id, campaign in campaigns.items():
+        if campaign["metadata"].get("hidden_from_regular_users", False):
+            continue
+
         campaign_dataset_ids = _get_campaign_dataset_ids(campaign.get("data", []))
         if campaign_dataset_ids and not campaign_dataset_ids.issubset(visible_dataset_ids):
             continue
@@ -207,6 +210,9 @@ def analyze_detail(campaign_id):
     is_authenticated = _is_authenticated_viewer()
 
     if not is_authenticated:
+        if campaign.metadata.get("hidden_from_regular_users", False):
+            return redirect(app.config["host_prefix"] + "/analyze")
+
         datasets = workflows.get_local_dataset_overview(app)
         datasets = {k: v for k, v in datasets.items() if v["enabled"]}
         datasets = _filter_datasets_for_viewer(datasets, is_authenticated=is_authenticated)
@@ -981,6 +987,18 @@ def set_dataset_hidden_from_regular_users():
     hidden_from_regular_users = data.get("hiddenFromRegularUsers")
 
     workflows.set_dataset_hidden_from_regular_users(dataset_id, hidden_from_regular_users)
+
+    return utils.success()
+
+
+@app.route("/set_campaign_hidden_from_regular_users", methods=["POST"])
+@login_required
+def set_campaign_hidden_from_regular_users():
+    data = request.get_json()
+    campaign_id = data.get("campaignId")
+    hidden_from_regular_users = data.get("hiddenFromRegularUsers")
+
+    workflows.set_campaign_hidden_from_regular_users(app, campaign_id, hidden_from_regular_users)
 
     return utils.success()
 

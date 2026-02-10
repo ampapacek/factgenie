@@ -625,6 +625,16 @@ def set_dataset_hidden_from_regular_users(dataset_id, hidden_from_regular_users)
     utils.save_dataset_config(config)
 
 
+def set_campaign_hidden_from_regular_users(app, campaign_id, hidden_from_regular_users):
+    campaign = load_campaign(app, campaign_id=campaign_id)
+
+    if campaign is None:
+        raise ValueError(f"Unknown campaign {campaign_id}")
+
+    campaign.metadata["hidden_from_regular_users"] = hidden_from_regular_users
+    campaign.update_metadata()
+
+
 def upload_dataset(app, dataset_id, dataset_name, dataset_description, dataset_format, dataset_data):
     params = {
         "text": {"suffix": "txt", "class": "basic.PlainTextDataset", "type": "default"},

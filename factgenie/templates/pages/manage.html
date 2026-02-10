@@ -205,6 +205,7 @@
           <thead>
             <tr>
               <th scope="col" data-sortable="true">Campaign</th>
+              <th scope="col">Hide in Analyze for regular users</th>
               <!-- <th scope="col" data-sortable="true">Source</th> -->
               <th scope="col" data-sortable="true">Created</th>
               <th scope="col" data-width="400">Labels</th>
@@ -221,6 +222,13 @@
                   href="{{ host_prefix }}/{{ campaign.metadata.mode }}/detail/{{ campaign.metadata.id }}"
                   class="blue-link">{{
                   campaign.metadata.id }}</a>{% endif %}</td>
+              <td>
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="{{ campaign.metadata.id }}-hide-regular-switch"
+                    {% if campaign.metadata.hidden_from_regular_users %} checked {% endif %}
+                    onclick="setCampaignHiddenFromRegularUsers('{{ campaign.metadata.id }}', this.checked)">
+                </div>
+              </td>
               <!-- <td>{{ campaign.metadata.mode }}</td> -->
               <td>{{ campaign.metadata.created }}</td>
               <td style="padding-right:30px;">{% for category in campaign.metadata.config.annotation_span_categories

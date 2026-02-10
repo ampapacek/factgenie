@@ -41,6 +41,7 @@ def create_crowdsourcing_campaign(app, campaign_id, config, campaign_data):
                     "mode": CampaignMode.CROWDSOURCING,
                     "config": config,
                     "created": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "hidden_from_regular_users": False,
                 },
                 f,
                 indent=4,

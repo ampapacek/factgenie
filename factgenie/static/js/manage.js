@@ -233,6 +233,26 @@ function setDatasetHiddenFromRegularUsers(name, hiddenFromRegularUsers) {
     });
 }
 
+function setCampaignHiddenFromRegularUsers(campaignId, hiddenFromRegularUsers) {
+    $.post({
+        url: `${url_prefix}/set_campaign_hidden_from_regular_users`,
+        contentType: 'application/json',
+        data: JSON.stringify({
+            campaignId: campaignId,
+            hiddenFromRegularUsers: hiddenFromRegularUsers
+        }),
+        success: function (response) {
+            console.log(response);
+
+            if (response.success !== true) {
+                alert(response.error);
+            } else {
+                location.reload();
+            }
+        }
+    });
+}
+
 
 
 function uploadDataset() {
