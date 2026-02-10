@@ -213,6 +213,26 @@ function setDatasetEnabled(name, enabled) {
     });
 }
 
+function setDatasetHiddenFromRegularUsers(name, hiddenFromRegularUsers) {
+    $.post({
+        url: `${url_prefix}/set_dataset_hidden_from_regular_users`,
+        contentType: 'application/json',
+        data: JSON.stringify({
+            datasetId: name,
+            hiddenFromRegularUsers: hiddenFromRegularUsers
+        }),
+        success: function (response) {
+            console.log(response);
+
+            if (response.success !== true) {
+                alert(response.error);
+            } else {
+                location.reload();
+            }
+        }
+    });
+}
+
 
 
 function uploadDataset() {

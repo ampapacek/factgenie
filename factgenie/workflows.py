@@ -448,6 +448,7 @@ def get_local_dataset_overview(app):
         class_name = dataset_config["class"]
         params = dataset_config.get("params", {})
         is_enabled = dataset_config.get("enabled", True)
+        hidden_from_regular_users = dataset_config.get("hidden_from_regular_users", False)
         name = dataset_config.get("name", dataset_id)
         description = dataset_config.get("description", "")
         splits = dataset_config.get("splits", [])
@@ -477,6 +478,7 @@ def get_local_dataset_overview(app):
             "name": name,
             "description": description,
             "example_count": example_count,
+            "hidden_from_regular_users": hidden_from_regular_users,
         }
 
     return overview
@@ -533,6 +535,7 @@ def download_dataset(app, dataset_id):
         "description": dataset_config.get("description", ""),
         "splits": dataset_config["splits"],
         "enabled": True,
+        "hidden_from_regular_users": False,
     }
 
     dataset = instantiate_dataset(dataset_id, config[dataset_id])
@@ -616,6 +619,12 @@ def set_dataset_enabled(app, dataset_id, enabled):
     utils.save_dataset_config(config)
 
 
+def set_dataset_hidden_from_regular_users(dataset_id, hidden_from_regular_users):
+    config = utils.load_dataset_config()
+    config[dataset_id]["hidden_from_regular_users"] = hidden_from_regular_users
+    utils.save_dataset_config(config)
+
+
 def upload_dataset(app, dataset_id, dataset_name, dataset_description, dataset_format, dataset_data):
     params = {
         "text": {"suffix": "txt", "class": "basic.PlainTextDataset", "type": "default"},
@@ -671,6 +680,7 @@ def upload_dataset(app, dataset_id, dataset_name, dataset_description, dataset_f
             "description": dataset_description,
             "splits": list(dataset_data.keys()),
             "enabled": True,
+            "hidden_from_regular_users": False,
         }
     utils.save_dataset_config(config)
 

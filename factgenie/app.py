@@ -127,6 +127,41 @@ def login_required(f):
     return wrapper
 
 
+def _is_authenticated_viewer():
+    auth = request.cookies.get("auth")
+    if not auth:
+        return False
+
+    parts = auth.split(":", 1)
+    if len(parts) != 2:
+        return False
+
+    return utils.check_login(app, parts[0], parts[1])
+
+
+def _filter_datasets_for_viewer(datasets, is_authenticated):
+    if is_authenticated:
+        return datasets
+
+    return {k: v for k, v in datasets.items() if not v.get("hidden_from_regular_users", False)}
+
+
+def _get_campaign_dataset_ids(campaign_data):
+    return {slugify(str(row.get("dataset"))) for row in campaign_data if row.get("dataset")}
+
+
+def _filter_campaigns_for_viewer(campaigns, visible_dataset_ids):
+    filtered = {}
+
+    for campaign_id, campaign in campaigns.items():
+        campaign_dataset_ids = _get_campaign_dataset_ids(campaign.get("data", []))
+        if campaign_dataset_ids and not campaign_dataset_ids.issubset(visible_dataset_ids):
+            continue
+        filtered[campaign_id] = campaign
+
+    return filtered
+
+
 # -----------------
 # Flask endpoints
 # -----------------
@@ -150,6 +185,13 @@ def analyze():
     campaigns = workflows.get_sorted_campaign_list(
         app, modes=[CampaignMode.CROWDSOURCING, CampaignMode.LLM_EVAL, CampaignMode.EXTERNAL]
     )
+    is_authenticated = _is_authenticated_viewer()
+
+    if not is_authenticated:
+        datasets = workflows.get_local_dataset_overview(app)
+        datasets = {k: v for k, v in datasets.items() if v["enabled"]}
+        datasets = _filter_datasets_for_viewer(datasets, is_authenticated=is_authenticated)
+        campaigns = _filter_campaigns_for_viewer(campaigns, visible_dataset_ids=set(datasets.keys()))
 
     return render_template(
         "pages/analyze.html",
@@ -162,6 +204,16 @@ def analyze():
 @login_required
 def analyze_detail(campaign_id):
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    is_authenticated = _is_authenticated_viewer()
+
+    if not is_authenticated:
+        datasets = workflows.get_local_dataset_overview(app)
+        datasets = {k: v for k, v in datasets.items() if v["enabled"]}
+        datasets = _filter_datasets_for_viewer(datasets, is_authenticated=is_authenticated)
+        visible_dataset_ids = set(datasets.keys())
+        campaign_dataset_ids = _get_campaign_dataset_ids(workflows.get_campaign_data(campaign))
+        if campaign_dataset_ids and not campaign_dataset_ids.issubset(visible_dataset_ids):
+            return redirect(app.config["host_prefix"] + "/analyze")
 
     statistics = analysis.compute_statistics(app, campaign)
 
@@ -327,23 +379,19 @@ def browse():
     example_idx = request.args.get("example_idx")
     setup_id = request.args.get("setup_id")
     ann_campaign = request.args.get("ann_campaign")
-    show_annotator_toggle = False
-
-    if dataset_id and split and example_idx:
-        display_example = {"dataset": dataset_id, "split": split, "example_idx": int(example_idx)}
-        logger.info(f"Serving permalink {dataset_id} / {split} / {example_idx}")
-    else:
-        display_example = None
-
-    auth = request.cookies.get("auth")
-    if auth:
-        parts = auth.split(":", 1)
-        if len(parts) == 2 and utils.check_login(app, parts[0], parts[1]):
-            show_annotator_toggle = True
+    is_authenticated = _is_authenticated_viewer()
+    show_annotator_toggle = is_authenticated
 
     workflows.refresh_indexes(app)
     datasets = workflows.get_local_dataset_overview(app)
     datasets = {k: v for k, v in datasets.items() if v["enabled"]}
+    datasets = _filter_datasets_for_viewer(datasets, is_authenticated=is_authenticated)
+
+    if dataset_id and split and example_idx and dataset_id in datasets:
+        display_example = {"dataset": dataset_id, "split": split, "example_idx": int(example_idx)}
+        logger.info(f"Serving permalink {dataset_id} / {split} / {example_idx}")
+    else:
+        display_example = None
 
     if not datasets:
         return render_template(
@@ -574,6 +622,11 @@ def render_example():
     split = request.args.get("split")
     example_idx = max(int(request.args.get("example_idx")), 0)
     setup_id = request.args.get("setup_id", None)
+
+    if not _is_authenticated_viewer():
+        dataset_config = utils.load_dataset_config().get(slugify(dataset_id))
+        if dataset_config and dataset_config.get("hidden_from_regular_users", False):
+            return utils.error("Dataset is not available.")
 
     try:
         example_data = workflows.get_example_data(app, dataset_id, split, example_idx, setup_id)
@@ -916,6 +969,18 @@ def set_dataset_enabled():
     enabled = data.get("enabled")
 
     workflows.set_dataset_enabled(app, dataset_id, enabled)
+
+    return utils.success()
+
+
+@app.route("/set_dataset_hidden_from_regular_users", methods=["POST"])
+@login_required
+def set_dataset_hidden_from_regular_users():
+    data = request.get_json()
+    dataset_id = data.get("datasetId")
+    hidden_from_regular_users = data.get("hiddenFromRegularUsers")
+
+    workflows.set_dataset_hidden_from_regular_users(dataset_id, hidden_from_regular_users)
 
     return utils.success()
 

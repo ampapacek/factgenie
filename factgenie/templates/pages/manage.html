@@ -70,6 +70,7 @@
           <thead>
             <tr>
               <th scope="col">Enabled</th>
+              <th scope="col">Hide for regular users</th>
               <th scope="col">Dataset</th>
               <th scope="col">Class</th>
               <th scope="col">Splits</th>
@@ -85,6 +86,13 @@
                 <div class="form-check form-switch">
                   <input class="form-check-input" type="checkbox" id="{{ dataset_id }}-switch" {% if dataset.enabled %}
                     checked {% endif %} onclick="setDatasetEnabled('{{ dataset_id }}', this.checked)">
+                </div>
+              </td>
+              <td>
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="{{ dataset_id }}-hide-regular-switch" {% if
+                    dataset.hidden_from_regular_users %} checked {% endif %}
+                    onclick="setDatasetHiddenFromRegularUsers('{{ dataset_id }}', this.checked)">
                 </div>
               </td>
               <td>
