@@ -316,10 +316,15 @@ function buildAnnotationInfo(generated_outputs) {
                     annotator_group: annotator_group,
                     annotator_id: annotator_id || null,
                     annotator_ids: new Set(),
+                    annotator_aliases: new Set(),
                 });
             }
             if (annotator_id) {
                 annIds.get(ann_id).annotator_ids.add(annotator_id);
+            }
+            const alias = String(annotation.annotator_alias || "").trim();
+            if (alias) {
+                annIds.get(ann_id).annotator_aliases.add(alias);
             }
         });
     });
@@ -346,10 +351,10 @@ function getAnnotatorNames(annInfo) {
 }
 
 function getAnnotatorAliases(annInfo) {
-    const names = Array.from(annInfo?.annotator_ids || [])
-        .map((name) => getOrCreateAnnotatorAlias(annInfo.campaign_id, name))
-        .filter((name) => String(name || "").trim() !== "");
-    return Array.from(new Set(names));
+    const aliases = Array.from(annInfo?.annotator_aliases || [])
+        .map((alias) => String(alias || "").trim())
+        .filter((alias) => alias !== "");
+    return Array.from(new Set(aliases));
 }
 
 function getAnnotatorSortKey(annId, annInfo) {

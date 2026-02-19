@@ -45,6 +45,19 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_host=1)
 
 logger = logging.getLogger("factgenie")
 
+ANNOTATOR_PSEUDONYM_CITIES = [
+    "Tokyo",
+    "Paris",
+    "London",
+    "New York",
+    "Sydney",
+    "Berlin",
+    "Rome",
+    "Cairo",
+    "Mumbai",
+    "Mexico City",
+]
+
 
 # -----------------
 # Jinja filters
@@ -286,6 +299,57 @@ def _normalize_annotator_id(value):
     return text
 
 
+def _city_alias_from_index(index):
+    if index < 0:
+        index = 0
+    base_index = index % len(ANNOTATOR_PSEUDONYM_CITIES)
+    suffix_index = (index // len(ANNOTATOR_PSEUDONYM_CITIES)) + 1
+    alias = ANNOTATOR_PSEUDONYM_CITIES[base_index]
+    if suffix_index > 1:
+        alias = f"{alias} {suffix_index}"
+    return alias
+
+
+def _next_available_alias(used_aliases):
+    index = 0
+    while True:
+        alias = _city_alias_from_index(index)
+        if alias not in used_aliases:
+            return alias
+        index += 1
+
+
+def _normalize_annotator_records(records):
+    normalized = []
+    seen_ids = set()
+    used_aliases = set()
+
+    for record in records:
+        annotator_id = ""
+        alias = ""
+        if isinstance(record, dict):
+            annotator_id = _normalize_annotator_id(record.get("id"))
+            alias = str(record.get("alias", "")).strip()
+        else:
+            annotator_id = _normalize_annotator_id(record)
+
+        if not annotator_id:
+            continue
+
+        key = annotator_id.lower()
+        if key in seen_ids:
+            continue
+
+        if not alias or alias in used_aliases:
+            alias = _next_available_alias(used_aliases)
+
+        normalized.append({"id": annotator_id, "alias": alias})
+        seen_ids.add(key)
+        used_aliases.add(alias)
+
+    return normalized
+
+
 def _load_annotator_registry(campaign_id):
     path = _annotator_registry_path(campaign_id)
     if not os.path.exists(path):
@@ -293,26 +357,62 @@ def _load_annotator_registry(campaign_id):
     try:
         with open(path) as f:
             data = json.load(f)
+
         if isinstance(data, list):
-            return [str(x) for x in data if str(x)]
+            # Legacy format: list of annotator IDs.
+            return _normalize_annotator_records(data)
+
+        if isinstance(data, dict) and isinstance(data.get("annotators"), list):
+            return _normalize_annotator_records(data.get("annotators"))
     except Exception:
         logger.warning(f"Failed to read annotator registry for {campaign_id}")
     return []
 
 
-def _save_annotator_registry(campaign_id, annotators):
+def _save_annotator_registry(campaign_id, records):
     path = _annotator_registry_path(campaign_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    normalized = _normalize_annotator_records(records)
+    normalized.sort(key=lambda x: x["id"].lower())
     with open(path, "w") as f:
-        json.dump(sorted(set(annotators)), f, indent=2, ensure_ascii=False)
+        json.dump({"annotators": normalized}, f, indent=2, ensure_ascii=False)
 
 
-def _find_existing_annotator(annotators, candidate):
+def _find_existing_annotator(records, candidate):
     candidate_norm = candidate.lower()
-    for existing in annotators:
-        if existing.lower() == candidate_norm:
+    for existing in records:
+        if existing["id"].lower() == candidate_norm:
             return existing
     return None
+
+
+def _annotator_alias_map(campaign_id):
+    records = _load_annotator_registry(campaign_id)
+    return {record["id"].lower(): record["alias"] for record in records}
+
+
+def _attach_annotation_aliases(example_data):
+    generated_outputs = example_data.get("generated_outputs")
+    if not isinstance(generated_outputs, list):
+        return
+
+    alias_cache = {}
+    for output in generated_outputs:
+        annotations = output.get("annotations", [])
+        if not isinstance(annotations, list):
+            continue
+        for annotation in annotations:
+            campaign_id = annotation.get("campaign_id")
+            annotator_id = _normalize_annotator_id(annotation.get("annotator_id"))
+            if not campaign_id or not annotator_id:
+                continue
+
+            if campaign_id not in alias_cache:
+                alias_cache[campaign_id] = _annotator_alias_map(campaign_id)
+
+            alias = alias_cache[campaign_id].get(annotator_id.lower())
+            if alias:
+                annotation["annotator_alias"] = alias
 
 
 @app.route("/annotator/exists", methods=["GET"])
@@ -325,7 +425,12 @@ def annotator_exists():
 
     annotators = _load_annotator_registry(campaign_id)
     existing = _find_existing_annotator(annotators, annotator_id)
-    return jsonify(success=True, exists=existing is not None, annotator_id=existing or annotator_id)
+    return jsonify(
+        success=True,
+        exists=existing is not None,
+        annotator_id=(existing["id"] if existing else annotator_id),
+        annotator_alias=(existing["alias"] if existing else None),
+    )
 
 
 @app.route("/annotator/register", methods=["POST"])
@@ -343,11 +448,13 @@ def annotator_register():
     annotators = _load_annotator_registry(campaign_id)
     existing = _find_existing_annotator(annotators, annotator_id)
     if existing:
-        return jsonify(success=True, annotator_id=existing, exists=True)
+        return jsonify(success=True, annotator_id=existing["id"], annotator_alias=existing["alias"], exists=True)
 
-    annotators.append(annotator_id)
+    used_aliases = {record["alias"] for record in annotators}
+    alias = _next_available_alias(used_aliases)
+    annotators.append({"id": annotator_id, "alias": alias})
     _save_annotator_registry(campaign_id, annotators)
-    return jsonify(success=True, annotator_id=annotator_id, exists=False)
+    return jsonify(success=True, annotator_id=annotator_id, annotator_alias=alias, exists=False)
 
 
 @app.route("/annotator/login", methods=["POST"])
@@ -364,7 +471,7 @@ def annotator_login():
     if not existing:
         return utils.error("Annotator not found. Please register first.")
 
-    return jsonify(success=True, annotator_id=existing)
+    return jsonify(success=True, annotator_id=existing["id"], annotator_alias=existing["alias"])
 
 
 @app.route("/app_config", methods=["GET"])
@@ -636,6 +743,7 @@ def render_example():
 
     try:
         example_data = workflows.get_example_data(app, dataset_id, split, example_idx, setup_id)
+        _attach_annotation_aliases(example_data)
         example_data = sanitize_json(example_data)
         return jsonify(example_data)
     except Exception as e:
