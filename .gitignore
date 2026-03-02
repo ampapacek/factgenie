@@ -30,3 +30,8 @@ Makefile
 
 # ignore changes in the notebook by default (to avoid adding the notebook after each run)
 factgenie/notebooks/inter_annotator_agreement.ipynb
+.env
+archived_campaigns/
+data/
+dataset_creation_steps.md
+make_example.txt
