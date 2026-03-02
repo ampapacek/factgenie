@@ -51,7 +51,7 @@ However, the recommended approach for using factgenie is using an editable packa
 ```bash
 git clone https://github.com/ufal/factgenie.git
 cd factgenie
-pip install -e .[dev,deploy]
+pip install -e '.[dev,deploy]'
 ```
 This approach will allow you to manually modify configuration files and write your own data classes.
 
