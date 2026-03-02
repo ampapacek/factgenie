@@ -17,6 +17,73 @@ var splitInstance = Split(['#centerpanel', '#rightpanel'], {
     gutterSize: 1,
 });
 
+function initStickyAnnotationCategories() {
+    const sticky = document.querySelector(".annotation-categories-sticky");
+    if (!sticky) {
+        return;
+    }
+
+    const placeholder = document.createElement("div");
+    placeholder.style.display = "none";
+    sticky.parentNode.insertBefore(placeholder, sticky);
+
+    let stickyStartY = 0;
+    let isFixed = false;
+
+    function recalcStart() {
+        const rect = sticky.getBoundingClientRect();
+        stickyStartY = window.scrollY + rect.top;
+    }
+
+    function updateFixedGeometry() {
+        const rect = placeholder.getBoundingClientRect();
+        sticky.style.left = `${rect.left}px`;
+        sticky.style.width = `${rect.width}px`;
+    }
+
+    function enableFixed() {
+        if (isFixed) {
+            updateFixedGeometry();
+            return;
+        }
+        placeholder.style.height = `${sticky.offsetHeight}px`;
+        placeholder.style.display = "block";
+        sticky.classList.add("annotation-categories-fixed");
+        updateFixedGeometry();
+        isFixed = true;
+    }
+
+    function disableFixed() {
+        if (!isFixed) {
+            return;
+        }
+        sticky.classList.remove("annotation-categories-fixed");
+        sticky.style.left = "";
+        sticky.style.width = "";
+        placeholder.style.display = "none";
+        placeholder.style.height = "";
+        isFixed = false;
+    }
+
+    function onScroll() {
+        if (window.scrollY >= stickyStartY) {
+            enableFixed();
+        } else {
+            disableFixed();
+        }
+    }
+
+    recalcStart();
+    onScroll();
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", function () {
+        disableFixed();
+        recalcStart();
+        onScroll();
+    });
+}
+
 function maybeWarnMissingAnnotatorId() {
     const placeholder = "FILL_YOUR_NAME_HERE";
     const annotatorIdNormalized = String(annotator_id || "").trim();
@@ -653,6 +720,8 @@ $('.btn-check').on('change', function () {
 });
 
 $(document).ready(function () {
+    initStickyAnnotationCategories();
+
     $("#annotator-auth-login-btn").click(function () {
         setAnnotatorAuthMode("login");
     });
