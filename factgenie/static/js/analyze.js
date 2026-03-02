@@ -350,12 +350,190 @@ function renderAnnotatorTable(annotatorStats) {
     populateTable('annotator-table', rows, columns);
 }
 
+function buildBrowseUrl(row) {
+    const params = new URLSearchParams({
+        dataset: row.dataset,
+        split: row.split,
+        example_idx: row.example_idx,
+        setup_id: row.setup_id,
+    });
+    return `${url_prefix}/browse?${params.toString()}`;
+}
+
+function statusBadge(status) {
+    if (status === 'done') {
+        return '<span class="badge bg-success">done</span>';
+    }
+    if (status === 'skipped') {
+        return '<span class="badge bg-warning text-dark">skipped</span>';
+    }
+    return '<span class="badge bg-secondary">todo</span>';
+}
+
+
+function buildCoveragePlainExportTable() {
+    const sourceTable = $('#coverage-matrix-table');
+    if (sourceTable.length === 0) {
+        return null;
+    }
+
+    const clone = sourceTable.clone();
+
+    // Export plain text only: replace links with their visible text.
+    clone.find('a').each(function () {
+        const textValue = $(this).text();
+        $(this).replaceWith(document.createTextNode(textValue));
+    });
+
+    return clone;
+}
+
+function exportCoverageTable(options) {
+    const exportTable = buildCoveragePlainExportTable();
+    if (!exportTable) {
+        return;
+    }
+
+    const wrapper = $('<div style="display:none;"></div>');
+    wrapper.append(exportTable);
+    $('body').append(wrapper);
+
+    try {
+        exportTable.tableExport(options);
+    } finally {
+        wrapper.remove();
+    }
+}
+
+function renderCoverageMatrix(coverageStats) {
+    const matrix = coverageStats?.matrix;
+    const annotators = matrix?.annotators || [];
+    const rows = matrix?.rows || [];
+
+    if (!matrix || annotators.length === 0 || rows.length === 0) {
+        $('#coverage-stats-empty').show();
+        $('#coverage-stats-content').hide();
+        return;
+    }
+
+    $('#coverage-stats-empty').hide();
+    $('#coverage-stats-content').show();
+
+    let html = `
+      <div class="table-responsive">
+        <table id="coverage-matrix-table" class="table table-bordered table-sm align-middle">
+          <thead>
+            <tr>
+              <th rowspan="3" style="min-width: 75px;">Done</th>
+              <th rowspan="3" style="min-width: 160px;">Output</th>
+    `;
+
+    annotators.forEach((ann) => {
+        html += `<th class="text-center" style="min-width: 120px;">${escapeHtml(ann.annotator_name || '-')}</th>`;
+    });
+
+    html += `
+              <th rowspan="3" style="min-width: 240px;">Question</th>
+            </tr>
+            <tr>
+    `;
+
+    annotators.forEach((ann) => {
+        const alias = ann.annotator_alias ? escapeHtml(ann.annotator_alias) : '-';
+        html += `<th class="text-center text-muted">${alias}</th>`;
+    });
+
+    html += `
+            </tr>
+            <tr>
+    `;
+
+    annotators.forEach((ann) => {
+        html += `<th class="text-center">${ann.done_count ?? 0}</th>`;
+    });
+
+    html += `
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    rows.forEach((row) => {
+        const rowDone = Number(row.row_done_count || 0);
+        const rowClass = Number(row.group_parity || 0) % 2 === 0 ? 'table-light' : '';
+        const questionPreview = escapeHtml(row.question_preview || '');
+        const outputLabel = `${escapeHtml(row.dataset)}/${escapeHtml(row.split)}/${escapeHtml(row.setup_id)} #${row.example_idx}`;
+        const browseUrl = buildBrowseUrl(row);
+        const doneCell = rowDone > 0
+            ? `<span class="badge bg-success">${rowDone}</span>`
+            : `<span class="badge bg-danger">${rowDone}</span>`;
+
+        html += `<tr class="${rowClass}">`;
+        html += `<td class="text-center">${doneCell}</td>`;
+        html += `<td><a href="${browseUrl}" target="_blank">${outputLabel}</a></td>`;
+
+        annotators.forEach((ann) => {
+            const groupKey = ann.annotator_group_key;
+            const status = row.statuses?.[groupKey] || 'todo';
+            html += `<td class="text-center"><a href="${browseUrl}" target="_blank">${statusBadge(status)}</a></td>`;
+        });
+
+        html += `<td>${questionPreview}</td>`;
+        html += '</tr>';
+    });
+
+    html += `
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    $('#coverage-matrix-container').html(html);
+
+    $('#coverage-export-csv-btn').off('click').on('click', function () {
+        exportCoverageTable({
+            type: 'csv',
+            fileName: `coverage-matrix-${metadata.id}`,
+            escape: false,
+        });
+    });
+
+    $('#coverage-export-xls-btn').off('click').on('click', function () {
+        const commonOptions = {
+            fileName: `coverage-matrix-${metadata.id}`,
+            escape: false,
+        };
+
+        if (typeof window.XLSX !== 'undefined') {
+            exportCoverageTable({
+                ...commonOptions,
+                type: 'xlsx',
+            });
+            return;
+        }
+
+        // Fallback to Excel 2003 XML to avoid extension/content mismatch warnings.
+        exportCoverageTable({
+            ...commonOptions,
+            type: 'excel',
+            mso: {
+                fileFormat: 'xmlss',
+            },
+        });
+    });
+}
+
 
 $(document).ready(function () {
     // if we are on a detail page, populate the tables
     if ($('#full-table').length > 0) {
         const statistics = window.statistics;
-        const ann_counts = statistics.ann_counts;
+        const ann_counts = statistics.ann_counts || {
+            full: [],
+            span: [],
+            setup: [],
+            dataset: [],
+        };
 
         populateTable('full-table', ann_counts.full, fullTableColumns);
         populateTable('span-table', ann_counts.span, spanTableColumns);
@@ -372,6 +550,12 @@ $(document).ready(function () {
             renderAnnotatorTable(statistics.annotator_stats);
         } else {
             $('#annotator-stats-empty').show();
+        }
+        if (statistics.coverage_stats) {
+            renderCoverageMatrix(statistics.coverage_stats);
+        } else {
+            $('#coverage-stats-empty').show();
+            $('#coverage-stats-content').hide();
         }
     }
 });
