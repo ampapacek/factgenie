@@ -304,7 +304,7 @@ function buildAnnotationInfo(generated_outputs) {
             const campaign_id = annotation.campaign_id;
             const annotator_group = annotation.annotator_group;
             const annotator_id = String(annotation.annotator_id || "").trim();
-            if (isInvalidAnnotatorId(annotator_id) || isSkipSelected(annotation)) {
+            if (isInvalidAnnotatorId(annotator_id)) {
                 return;
             }
             const ann_id = generateAnnotatorKey(campaign_id, annotator_id) ||
@@ -322,7 +322,10 @@ function buildAnnotationInfo(generated_outputs) {
             if (annotator_id) {
                 annIds.get(ann_id).annotator_ids.add(annotator_id);
             }
-            const alias = String(annotation.annotator_alias || "").trim();
+            let alias = String(annotation.annotator_alias || "").trim();
+            if (!alias && annotator_id) {
+                alias = getOrCreateAnnotatorAlias(campaign_id, annotator_id);
+            }
             if (alias) {
                 annIds.get(ann_id).annotator_aliases.add(alias);
             }
@@ -341,6 +344,44 @@ function getAnnotatorLabel(annId, annInfo) {
         return annId;
     }
     return names.join(", ");
+}
+
+function getAnnotatorDisplayBoth(annInfo) {
+    const aliases = getAnnotatorAliases(annInfo);
+    const names = getAnnotatorNames(annInfo);
+
+    if (aliases.length > 0 && names.length > 0) {
+        return `${aliases.join(", ")} (${names.join(", ")})`;
+    }
+    if (aliases.length > 0) {
+        return aliases.join(", ");
+    }
+    if (names.length > 0) {
+        return names.join(", ");
+    }
+    return "unknown annotator";
+}
+
+function getSkipMessage(annInfo, annotations) {
+    const who = getAnnotatorDisplayBoth(annInfo);
+    const skipFlags = (annotations?.flags || [])
+        .filter((flag) => {
+            const label = String(flag?.label || "").toLowerCase();
+            return label.includes("skip") && isTruthyFlagValue(flag?.value);
+        })
+        .map((flag) => String(flag?.label || "skip").trim())
+        .filter((label) => label.length > 0);
+
+    const details = skipFlags.length > 0
+        ? `<div class="small text-muted mt-1">${skipFlags.join(", ")}</div>`
+        : "";
+
+    return `
+        <div class="alert alert-warning mb-0 py-2 px-3" role="alert">
+            <div><b>Skipped annotation</b> by ${who}.</div>
+            ${details}
+        </div>
+    `;
 }
 
 function getAnnotatorNames(annInfo) {
@@ -449,14 +490,25 @@ function createOutputBoxes(generated_outputs) {
             } else {
                 annotations = output.annotations.filter(a => a.campaign_id == info.campaign_id && a.annotator_group == info.annotator_group)[0];
             }
-            if (!annotations || isSkipSelected(annotations) || isInvalidAnnotatorId(annotations.annotator_id)) {
+            if (!annotations || isInvalidAnnotatorId(annotations.annotator_id)) {
                 continue;
             }
 
-            const annotated_output = getAnnotatedOutput(output, annId, annotations);
-            const exampleLevelFields = getExampleLevelFields(annotations);
+            const annInfo = annIds.get(annId);
+            const isSkipped = isSkipSelected(annotations);
+            const annotated_output = isSkipped
+                ? getAnnotatedOutput(output, annId, null, false)
+                : getAnnotatedOutput(output, annId, annotations);
 
-            const annLabel = getAnnotatorLabel(annId, annIds.get(annId));
+            let exampleLevelFields;
+            if (isSkipped) {
+                exampleLevelFields = $('<div>', { class: "p-2 extra-fields" });
+                exampleLevelFields.append($('<div>', { class: "small text-muted fw-bold" }).text('skip = True'));
+            } else {
+                exampleLevelFields = getExampleLevelFields(annotations);
+            }
+
+            const annLabel = getAnnotatorLabel(annId, annInfo);
             card = createOutputBox(annotated_output, exampleLevelFields, annId, annLabel, output.setup_id);
             card.appendTo(groupDiv);
             card.hide();
@@ -579,7 +631,7 @@ function fetchExample(dataset, split, example_idx) {
     });
 }
 
-function getAnnotatedOutput(output, annId, annotations) {
+function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
     const setup_id = output.setup_id;
 
     const normalized = normalizeNewlines(output.output);
@@ -604,7 +656,7 @@ function getAnnotatedOutput(output, annId, annotations) {
         spanAnnotator.addAnnotations(parId, annotations.annotations);
     } else {
         // we do not have outputs for the particular campaign -> grey out the text
-        if (annId != "original") {
+        if (annId != "original" && muteMissing) {
             placeholder.css("color", "#c2c2c2");
         }
         annotated_content = contentHtml;
