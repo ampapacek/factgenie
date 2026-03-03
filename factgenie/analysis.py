@@ -509,9 +509,29 @@ def _load_campaign_annotator_alias_map(campaign):
         return {}
 
 
-def _make_question_preview(example_text):
-    preview = _build_example_preview(example_text, word_count=14)
-    return preview if preview else ""
+def _extract_question_from_font_mono(raw_text):
+    if not raw_text:
+        return ""
+
+    match = re.search(
+        r"<h4>\s*Otázka\s*</h4>\s*<div[^>]*class=[\"'][^\"']*\bfont-mono\b[^\"']*[\"'][^>]*>(.*?)</div>",
+        raw_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return ""
+
+    text = re.sub(r"<[^>]+>", " ", match.group(1))
+    text = html.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _make_question_preview(example):
+    if example is None:
+        return ""
+    raw_text = example if isinstance(example, str) else str(example)
+    return _extract_question_from_font_mono(raw_text)
 
 
 def compute_question_coverage_stats(app, campaign, example_index):
@@ -753,7 +773,7 @@ def compute_question_coverage_stats(app, campaign, example_index):
             if dataset_obj is not None:
                 try:
                     example = dataset_obj.get_example(split, example_idx)
-                    preview = _make_question_preview(_normalize_example_text(example))
+                    preview = _make_question_preview(example)
                 except Exception:
                     preview = ""
             question_preview_map[(dataset_id, split, example_idx)] = preview

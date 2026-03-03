@@ -419,6 +419,26 @@ function renderCoverageMatrix(coverageStats) {
     $('#coverage-stats-empty').hide();
     $('#coverage-stats-content').show();
 
+    const outputPaths = rows.map((row) => `${row.dataset}/${row.split}/${row.setup_id}`);
+    const commonPrefix = (() => {
+        if (outputPaths.length === 0) {
+            return '';
+        }
+        let commonParts = outputPaths[0].split('/');
+        for (let i = 1; i < outputPaths.length; i += 1) {
+            const parts = outputPaths[i].split('/');
+            let matchLen = 0;
+            while (matchLen < commonParts.length && matchLen < parts.length && commonParts[matchLen] === parts[matchLen]) {
+                matchLen += 1;
+            }
+            commonParts = commonParts.slice(0, matchLen);
+            if (commonParts.length === 0) {
+                break;
+            }
+        }
+        return commonParts.length > 0 ? `${commonParts.join('/')}/` : '';
+    })();
+
     let html = `
       <div class="table-responsive">
         <table id="coverage-matrix-table" class="table table-bordered table-sm align-middle">
@@ -462,7 +482,11 @@ function renderCoverageMatrix(coverageStats) {
         const rowDone = Number(row.row_done_count || 0);
         const rowClass = Number(row.group_parity || 0) % 2 === 0 ? 'table-light' : '';
         const questionPreview = escapeHtml(row.question_preview || '');
-        const outputLabel = `${escapeHtml(row.dataset)}/${escapeHtml(row.split)}/${escapeHtml(row.setup_id)} #${row.example_idx}`;
+        const fullOutputPath = `${row.dataset}/${row.split}/${row.setup_id}`;
+        const outputPath = commonPrefix && fullOutputPath.startsWith(commonPrefix)
+            ? fullOutputPath.slice(commonPrefix.length)
+            : fullOutputPath;
+        const outputLabel = `${escapeHtml(outputPath)} #${row.example_idx}`;
         const browseUrl = buildBrowseUrl(row);
         const doneCell = rowDone > 0
             ? `<span class="badge bg-success">${rowDone}</span>`
