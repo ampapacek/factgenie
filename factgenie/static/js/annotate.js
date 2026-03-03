@@ -29,16 +29,29 @@ function initStickyAnnotationCategories() {
 
     let stickyStartY = 0;
     let isFixed = false;
+    let fixedTop = 0;
+
+    function calculateFixedTop() {
+        return 0;
+    }
+
+    function applyTopOffset() {
+        fixedTop = calculateFixedTop();
+        document.documentElement.style.setProperty("--annotation-categories-top", `${fixedTop}px`);
+    }
 
     function recalcStart() {
+        disableFixed();
+        applyTopOffset();
         const rect = sticky.getBoundingClientRect();
-        stickyStartY = window.scrollY + rect.top;
+        stickyStartY = window.scrollY + rect.top - fixedTop;
     }
 
     function updateFixedGeometry() {
         const rect = placeholder.getBoundingClientRect();
         sticky.style.left = `${rect.left}px`;
         sticky.style.width = `${rect.width}px`;
+        sticky.style.top = `${fixedTop}px`;
     }
 
     function enableFixed() {
@@ -60,6 +73,7 @@ function initStickyAnnotationCategories() {
         sticky.classList.remove("annotation-categories-fixed");
         sticky.style.left = "";
         sticky.style.width = "";
+        sticky.style.top = "";
         placeholder.style.display = "none";
         placeholder.style.height = "";
         isFixed = false;
@@ -78,7 +92,6 @@ function initStickyAnnotationCategories() {
 
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", function () {
-        disableFixed();
         recalcStart();
         onScroll();
     });
@@ -680,7 +693,10 @@ function downloadAnnotationBackup() {
 
 
 $("#hideOverlayBtn").click(function () {
-    $("#overlay-start").fadeOut();
+    $("body").addClass("annotation-ui-ready");
+    $("#overlay-start").fadeOut(function () {
+        window.dispatchEvent(new Event("resize"));
+    });
 });
 
 $("#undo-button").click(function () {
@@ -720,6 +736,10 @@ $('.btn-check').on('change', function () {
 });
 
 $(document).ready(function () {
+    if ($("#overlay-start").is(":hidden")) {
+        $("body").addClass("annotation-ui-ready");
+    }
+
     initStickyAnnotationCategories();
 
     $("#annotator-auth-login-btn").click(function () {
