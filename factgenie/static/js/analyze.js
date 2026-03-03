@@ -405,6 +405,29 @@ function exportCoverageTable(options) {
     }
 }
 
+function exportCoverageXlsx(fileName) {
+    const exportTable = buildCoveragePlainExportTable();
+    if (!exportTable) {
+        return;
+    }
+    if (typeof window.XLSX === 'undefined' || !window.XLSX.utils || !window.XLSX.writeFile) {
+        return;
+    }
+
+    const wrapper = $('<div style="display:none;"></div>');
+    wrapper.append(exportTable);
+    $('body').append(wrapper);
+
+    try {
+        const worksheet = window.XLSX.utils.table_to_sheet(exportTable.get(0), { raw: false });
+        const workbook = window.XLSX.utils.book_new();
+        window.XLSX.utils.book_append_sheet(workbook, worksheet, 'Coverage');
+        window.XLSX.writeFile(workbook, `${fileName}.xlsx`);
+    } finally {
+        wrapper.remove();
+    }
+}
+
 function renderCoverageMatrix(coverageStats) {
     const matrix = coverageStats?.matrix;
     const annotators = matrix?.annotators || [];
@@ -523,22 +546,17 @@ function renderCoverageMatrix(coverageStats) {
     });
 
     $('#coverage-export-xls-btn').off('click').on('click', function () {
-        const commonOptions = {
-            fileName: `coverage-matrix-${metadata.id}`,
-            escape: false,
-        };
+        const fileName = `coverage-matrix-${metadata.id}`;
 
-        if (typeof window.XLSX !== 'undefined') {
-            exportCoverageTable({
-                ...commonOptions,
-                type: 'xlsx',
-            });
+        if (typeof window.XLSX !== 'undefined' && window.XLSX.utils && window.XLSX.writeFile) {
+            exportCoverageXlsx(fileName);
             return;
         }
 
-        // Fallback to Excel 2003 XML to avoid extension/content mismatch warnings.
+        // Fallback to Excel 2003 XML when XLSX library is unavailable.
         exportCoverageTable({
-            ...commonOptions,
+            fileName,
+            escape: false,
             type: 'excel',
             mso: {
                 fileFormat: 'xmlss',
