@@ -259,6 +259,7 @@ def compute_extra_fields_stats(example_index):
 
 
 def _is_skip_selected(flags):
+    skip_markers = ("skip", "přeskoč")
     if not isinstance(flags, list):
         return False
     for flag in flags:
@@ -266,7 +267,7 @@ def _is_skip_selected(flags):
             continue
         label = str(flag.get("label", "")).lower()
         value = flag.get("value", False)
-        if "skip" in label and bool(value):
+        if any(marker in label for marker in skip_markers) and bool(value):
             return True
     return False
 

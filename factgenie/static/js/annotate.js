@@ -499,12 +499,13 @@ function loadAnnotations() {
 }
 
 function isSkipAnnotationSelected() {
+    const skipMarkers = ["skip", "přeskoč"];
     let skipSelected = false;
     $(".crowdsourcing-flag").each(function () {
         const label = $(this).find("label").text().trim().toLowerCase();
         const checked = $(this).find("input[type='checkbox']").prop("checked");
         if (!checked) return;
-        if (label.includes("skip")) {
+        if (skipMarkers.some(marker => label.includes(marker))) {
             skipSelected = true;
         }
     });
