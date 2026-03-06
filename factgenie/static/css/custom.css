@@ -586,6 +586,10 @@ a:hover {
 }
 
 /* Add your custom styles here */
+body.overlay-open {
+    overflow: hidden;
+}
+
 .overlay {
     /* display: none; */
     position: fixed;
@@ -595,7 +599,7 @@ a:hover {
     height: 100vh;
     background-color: white;
     z-index: 1000;
-    overflow-y: scroll;
+    overflow-y: auto;
 }
 
 .panel-heading {

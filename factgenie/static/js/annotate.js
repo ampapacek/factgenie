@@ -598,6 +598,7 @@ function submitAnnotations(campaign_id) {
             } else {
                 $("#final-message").html(response.message);
                 $("#overlay-end").show();
+                syncOverlayScrollLock();
             }
         },
         error: function (xhr, textStatus, errorThrown) {
@@ -614,6 +615,7 @@ function handleSubmissionError(submissionData) {
     $("#retry-section").show();
     $("#backup-section").show();
     $("#overlay-fail").show();
+    syncOverlayScrollLock();
 }
 
 function retrySubmission() {
@@ -623,6 +625,7 @@ function retrySubmission() {
     // Add a brief delay to show the "Retrying..." status and prevent flicker
     setTimeout(() => {
         $("#overlay-fail").hide();
+        syncOverlayScrollLock();
         submitAnnotations();
         // Re-enable the button in case of another error
         $("#retry-btn").prop("disabled", false).text("🔄 Retry Now");
@@ -692,10 +695,15 @@ function downloadAnnotationBackup() {
     }
 }
 
+function syncOverlayScrollLock() {
+    $("body").toggleClass("overlay-open", $(".overlay:visible").length > 0);
+}
+
 
 $("#hideOverlayBtn").click(function () {
     $("body").addClass("annotation-ui-ready");
     $("#overlay-start").fadeOut(function () {
+        syncOverlayScrollLock();
         window.dispatchEvent(new Event("resize"));
     });
 });
@@ -740,8 +748,13 @@ $(document).ready(function () {
     if ($("#overlay-start").is(":hidden")) {
         $("body").addClass("annotation-ui-ready");
     }
+    syncOverlayScrollLock();
 
     initStickyAnnotationCategories();
+
+    $("#close-error-overlay-btn").click(function () {
+        setTimeout(syncOverlayScrollLock, 0);
+    });
 
     $("#annotator-auth-login-btn").click(function () {
         setAnnotatorAuthMode("login");
