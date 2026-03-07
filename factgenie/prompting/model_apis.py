@@ -51,25 +51,16 @@ class ModelAPI:
     def call_model_once(self, messages, model_service, prompt_strat_kwargs):
         import litellm
 
-        completion_kwargs = self.normalize_completion_kwargs(
-            {
-                **prompt_strat_kwargs,  # E.g. structured output format.
-                **self.api_kwargs,  # E.g. credentials.
-                **self.config.get("model_args", {}),  # E.g. temperature, max_tokens, etc.
-            }
-        )
-
         response = litellm.completion(
             model=model_service,
             messages=messages,
             api_base=self._api_url(),
-            **completion_kwargs,
+            **prompt_strat_kwargs,  # E.g. structured output format.
+            **self.api_kwargs,  # E.g. credentials.
+            **self.config.get("model_args", {}),  # E.g. temperature, max_tokens, etc.
             tools=[],
         )
         return response
-
-    def normalize_completion_kwargs(self, completion_kwargs: dict):
-        return completion_kwargs
 
     def get_model_response_with_retries(self, messages, prompt_strat_kwargs={}):
         import litellm
@@ -142,20 +133,6 @@ class OpenAIAPI(ModelAPI):
     def _service_prefix(self):
         # OpenAI models do not seem to require a prefix: https://docs.litellm.ai/docs/providers/openai
         return ""
-
-    def normalize_completion_kwargs(self, completion_kwargs: dict):
-        completion_kwargs = completion_kwargs.copy()
-        model_name = str(self.config.get("model", ""))
-        temperature = completion_kwargs.get("temperature")
-
-        # GPT-5 family currently rejects temperature values other than 1.
-        if model_name.startswith("gpt-5") and temperature not in [None, 1, 1.0, "1", "1.0"]:
-            logger.warning(
-                f"Removing unsupported temperature={temperature} for OpenAI model '{model_name}'. GPT-5 models only accept temperature=1."
-            )
-            completion_kwargs.pop("temperature", None)
-
-        return completion_kwargs
 
 
 @register_model_api(name="ollama")
