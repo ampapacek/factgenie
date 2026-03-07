@@ -835,6 +835,158 @@ class ParseOptions(Transform):
         return derive_field(current, api, self.parse_options, self.output_field)
 
 
+class ParseExtraFields(Transform):
+    def __init__(
+        self,
+        input_field: str,
+        flags: list[str] | None = None,
+        options: list[dict] | None = None,
+        sliders: list[dict] | None = None,
+        text_fields: list[str] | None = None,
+    ):
+        self.input_field = input_field
+        self.flags = flags or []
+        self.options = options or []
+        self.sliders = sliders or []
+        self.text_fields = text_fields or []
+
+    @property
+    def requires_fields(self) -> list[str]:
+        return [self.input_field]
+
+    @property
+    def outputs_fields(self) -> list[str]:
+        return ["flags", "options", "sliders", "text_fields"]
+
+    @classmethod
+    def _section_to_mapping(cls, value):
+        if isinstance(value, dict):
+            return value
+
+        if isinstance(value, list):
+            mapping = {}
+            for item in value:
+                if not isinstance(item, dict):
+                    continue
+                label = item.get("label")
+                if label is not None and "value" in item:
+                    mapping[str(label)] = item["value"]
+            return mapping
+
+        return {}
+
+    @classmethod
+    def _parse_bool(cls, value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"true", "yes", "y", "1", "checked"}
+        return False
+
+    @classmethod
+    def _parse_number(cls, value):
+        if isinstance(value, (int, float)):
+            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped == "":
+                return None
+            try:
+                if "." in stripped:
+                    return float(stripped)
+                return int(stripped)
+            except ValueError:
+                return None
+        return None
+
+    @classmethod
+    def _match_option_value(cls, raw_value, choices: list[str]):
+        if raw_value is None:
+            return "", -1
+
+        if isinstance(raw_value, str):
+            stripped = raw_value.strip()
+            if stripped.isdigit():
+                raw_value = int(stripped)
+            else:
+                for index, choice in enumerate(choices):
+                    if choice == stripped or choice.lower() == stripped.lower():
+                        return choice, index
+                return stripped, -1
+
+        if isinstance(raw_value, (int, float)):
+            index = int(raw_value)
+            if 0 <= index < len(choices):
+                return choices[index], index
+
+        return str(raw_value), -1
+
+    def parse_extra_fields(self, c: dict, api: ModelAPI):
+        raw_json = c[self.input_field]
+        try:
+            payload = json.loads(raw_json) if raw_json else {}
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse extra fields JSON: {raw_json}")
+            payload = {}
+
+        flags_mapping = self._section_to_mapping(payload.get("flags", {}))
+        options_mapping = self._section_to_mapping(payload.get("options", {}))
+        sliders_mapping = self._section_to_mapping(payload.get("sliders", {}))
+        text_fields_mapping = self._section_to_mapping(payload.get("text_fields", {}))
+
+        parsed_flags = [{"label": label, "value": self._parse_bool(flags_mapping.get(label, False))} for label in self.flags]
+
+        parsed_options = []
+        for option in self.options:
+            label = option["label"]
+            values = option["values"]
+            selected_value, selected_index = self._match_option_value(options_mapping.get(label), values)
+            parsed_options.append(
+                {
+                    "label": label,
+                    "index": selected_index,
+                    "value": selected_value,
+                    "optionList": ["Select an option..."] + values,
+                }
+            )
+
+        parsed_sliders = []
+        for slider in self.sliders:
+            value = self._parse_number(sliders_mapping.get(slider["label"]))
+            if value is None:
+                continue
+
+            parsed_sliders.append(
+                {
+                    "label": slider["label"],
+                    "value": value,
+                    "min": self._parse_number(slider.get("min")),
+                    "max": self._parse_number(slider.get("max")),
+                    "step": self._parse_number(slider.get("step")),
+                }
+            )
+
+        parsed_text_fields = [
+            {
+                "label": label,
+                "value": str(text_fields_mapping.get(label, "") or ""),
+            }
+            for label in self.text_fields
+        ]
+
+        return {
+            "flags": parsed_flags,
+            "options": parsed_options,
+            "sliders": parsed_sliders,
+            "text_fields": parsed_text_fields,
+        }
+
+    def __call__(self, current: list[dict], api: ModelAPI) -> list[dict]:
+        return derive_and_upsert_fields(current, api, self.parse_extra_fields)
+
+
 class SetOptions(Transform):
     def __init__(
         self,
@@ -1225,6 +1377,7 @@ class ConversationExtractResponse(Transform):
         output_field: str,
         conversation_key: str = ConverseLLM.CONTENT,
         index: int = -1,
+        default=None,
     ):
         """
         Extracts a specific item (string) from a conversation (a list of strings).
@@ -1237,6 +1390,7 @@ class ConversationExtractResponse(Transform):
         self.output_field = output_field
         self.conversation_key = conversation_key
         self.index = index
+        self.default = default
 
     @property
     def requires_fields(self) -> list[str]:
@@ -1249,7 +1403,9 @@ class ConversationExtractResponse(Transform):
     def extract_response(self, c: dict, api: ModelAPI):
         history = c[self.input_field]
         selected_history_item = history[self.index]
-        return selected_history_item[self.conversation_key]
+        if self.default is None:
+            return selected_history_item[self.conversation_key]
+        return selected_history_item.get(self.conversation_key, self.default)
 
     def __call__(self, current: list[dict], api: ModelAPI) -> list[dict]:
         return derive_field(current, api, self.extract_response, self.output_field)
