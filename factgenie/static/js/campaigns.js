@@ -241,6 +241,10 @@ function gatherConfig() {
 
             config.annotationSpanCategories = getAnnotationSpanCategories();
             config.annotationGranularity = $("#annotationGranularity").val();
+            config.flags = getKeys($("#flags"));
+            config.options = getOptions();
+            config.sliders = getSliders();
+            config.textFields = getKeys($("#textFields"));
             config.purpose = "metric"
         }
         if (window.mode == "llm_gen") {
@@ -637,6 +641,10 @@ function updateLLMMetricConfig() {
         if (mode == "llm_eval") {
             $("#annotation-field-reason").prop("checked", true);  // Default: checked
             $("#annotation-field-occurrence").prop("checked", false);  // Default: unchecked
+            $("#flags").empty();
+            $("#options").empty();
+            $("#sliders").empty();
+            $("#textFields").empty();
         }
         return;
     }
@@ -703,12 +711,48 @@ function updateLLMMetricConfig() {
     if (mode == "llm_eval") {
         const annotationSpanCategories = cfg.annotation_span_categories;
         const annotation_granularity = cfg.annotation_granularity || "words";
+        const flags = cfg.flags;
+        const options = cfg.options;
+        const sliders = cfg.sliders;
+        const textFields = cfg.text_fields;
         $("#annotation-span-categories").empty();
         $("#annotationGranularity").val(annotation_granularity);
 
         annotationSpanCategories.forEach((annotationSpanCategory) => {
             addAnnotationSpanCategory(annotationSpanCategory.name, annotationSpanCategory.description, annotationSpanCategory.color);
         });
+
+        $("#flags").empty();
+        if (flags !== undefined) {
+            flags.forEach((flag) => {
+                const newFlag = createFlagElem(flag);
+                $("#flags").append(newFlag);
+            });
+        }
+
+        $("#options").empty();
+        if (options !== undefined) {
+            options.forEach((option) => {
+                const newOption = createOptionElem(option.label, option.values.join(", "));
+                $("#options").append(newOption);
+            });
+        }
+
+        $("#sliders").empty();
+        if (sliders !== undefined) {
+            sliders.forEach((slider) => {
+                const newSlider = createSliderElem(slider.label, slider.min, slider.max, slider.step);
+                $("#sliders").append(newSlider);
+            });
+        }
+
+        $("#textFields").empty();
+        if (textFields !== undefined) {
+            textFields.forEach((textField) => {
+                const newTextField = createTextFieldElem(textField);
+                $("#textFields").append(newTextField);
+            });
+        }
     }
     if (mode == "llm_gen") {
         const start_with = cfg.start_with;
