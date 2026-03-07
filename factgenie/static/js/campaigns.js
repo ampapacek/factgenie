@@ -679,6 +679,7 @@ function importCrowdsourcingConfigToLLM() {
     const annotationGranularity = cfg.annotation_granularity || "words";
     const annotationOverlapAllowed = cfg.annotation_overlap_allowed || false;
     const annotateReason = cfg.annotate_reason || false;
+    const annotatorInstructions = cfg.annotator_instructions || "";
     const flags = cfg.flags;
     const options = cfg.options;
     const sliders = cfg.sliders;
@@ -688,6 +689,7 @@ function importCrowdsourcingConfigToLLM() {
     $("#annotationGranularity").val(annotationGranularity);
     $("#annotationOverlapAllowed").prop("checked", annotationOverlapAllowed);
     $("#annotation-field-reason").prop("checked", annotateReason);
+    $("#system-message").val(annotatorInstructions);
 
     annotationSpanCategories.forEach((annotationSpanCategory) => {
         addAnnotationSpanCategory(annotationSpanCategory.name, annotationSpanCategory.description, annotationSpanCategory.color);
