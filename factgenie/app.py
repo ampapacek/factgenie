@@ -92,6 +92,26 @@ def start_llm_campaign_background(app, mode, campaign_id, announcer, campaign, d
     return thread
 
 
+def reconcile_llm_campaign_runtime_state(app, campaign):
+    campaign_id = campaign.metadata["id"]
+    thread = app.db["running_campaign_threads"].get(campaign_id)
+    is_running = thread is not None and thread.is_alive()
+
+    if not is_running and campaign_id in app.db["running_campaigns"]:
+        app.db["running_campaigns"].discard(campaign_id)
+        app.db["running_campaign_threads"].pop(campaign_id, None)
+        app.db["announcers"].pop(campaign_id, None)
+
+    if is_running and campaign.metadata["status"] != CampaignStatus.RUNNING:
+        campaign.metadata["status"] = CampaignStatus.RUNNING
+        campaign.update_metadata()
+    elif not is_running and campaign.metadata["status"] == CampaignStatus.RUNNING:
+        campaign.metadata["status"] = CampaignStatus.IDLE
+        campaign.update_metadata()
+
+    return is_running
+
+
 # -----------------
 # Jinja filters
 # -----------------
@@ -624,10 +644,7 @@ def llm_campaign_detail(campaign_id):
 
     mode = utils.get_mode_from_path(request.path)
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
-
-    if campaign.metadata["status"] == CampaignStatus.RUNNING and not app.db["announcers"].get(campaign_id):
-        campaign.metadata["status"] = CampaignStatus.IDLE
-        campaign.update_metadata()
+    reconcile_llm_campaign_runtime_state(app, campaign)
 
     overview = campaign.get_overview()
 
@@ -694,14 +711,17 @@ def llm_campaign_run():
     data = request.get_json()
     campaign_id = data.get("campaignId")
 
-    if campaign_id in app.db["running_campaigns"]:
+    campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    if campaign is None:
+        return utils.error(f"Unknown campaign: {campaign_id}")
+
+    if reconcile_llm_campaign_runtime_state(app, campaign):
         return utils.error(f"Campaign {campaign_id} is already running.")
 
     app.db["announcers"][campaign_id] = announcer = utils.MessageAnnouncer()
     app.db["running_campaigns"].add(campaign_id)
 
     try:
-        campaign = workflows.load_campaign(app, campaign_id=campaign_id)
         datasets = app.db["datasets_obj"]
 
         config = campaign.metadata["config"]

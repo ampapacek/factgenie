@@ -2,12 +2,17 @@ import contextlib
 import unittest
 from unittest.mock import MagicMock, patch
 
-from factgenie.app import run_llm_campaign_background, start_llm_campaign_background
+from factgenie.app import (
+    reconcile_llm_campaign_runtime_state,
+    run_llm_campaign_background,
+    start_llm_campaign_background,
+)
+from factgenie.campaign import CampaignStatus
 
 
 class DummyApp:
     def __init__(self):
-        self.db = {"running_campaign_threads": {}, "running_campaigns": set()}
+        self.db = {"running_campaign_threads": {}, "running_campaigns": set(), "announcers": {}}
 
     def app_context(self):
         return contextlib.nullcontext()
@@ -61,6 +66,36 @@ class AsyncLlmCampaignRunTests(unittest.TestCase):
         pause_llm_campaign.assert_called_once_with(app, "campaign-1")
         announce.assert_called_once()
         self.assertNotIn("campaign-1", app.db["running_campaign_threads"])
+
+    def test_reconcile_marks_live_thread_as_running(self):
+        app = DummyApp()
+        thread = MagicMock()
+        thread.is_alive.return_value = True
+        app.db["running_campaign_threads"]["campaign-1"] = thread
+
+        campaign = MagicMock()
+        campaign.metadata = {"id": "campaign-1", "status": CampaignStatus.IDLE}
+
+        is_running = reconcile_llm_campaign_runtime_state(app, campaign)
+
+        self.assertTrue(is_running)
+        self.assertEqual(campaign.metadata["status"], CampaignStatus.RUNNING)
+        campaign.update_metadata.assert_called_once()
+
+    def test_reconcile_cleans_stale_running_flag_without_live_thread(self):
+        app = DummyApp()
+        app.db["running_campaigns"].add("campaign-1")
+        app.db["announcers"]["campaign-1"] = object()
+
+        campaign = MagicMock()
+        campaign.metadata = {"id": "campaign-1", "status": CampaignStatus.IDLE}
+
+        is_running = reconcile_llm_campaign_runtime_state(app, campaign)
+
+        self.assertFalse(is_running)
+        self.assertNotIn("campaign-1", app.db["running_campaigns"])
+        self.assertNotIn("campaign-1", app.db["announcers"])
+        campaign.update_metadata.assert_not_called()
 
 
 if __name__ == "__main__":
