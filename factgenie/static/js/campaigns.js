@@ -1,4 +1,5 @@
 const available_data = window.available_data;
+window.llmCampaignListeners = window.llmCampaignListeners || {};
 
 function clearCampaign(campaignId) {
     // ask for confirmation
@@ -261,6 +262,11 @@ function pauseLLMCampaign(campaignId) {
     $(`#stop-button-${campaignId}`).hide();
     setCampaignStatus(campaignId, "idle");
 
+    if (window.llmCampaignListeners[campaignId]) {
+        window.llmCampaignListeners[campaignId].close();
+        delete window.llmCampaignListeners[campaignId];
+    }
+
     $.post({
         url: `${url_prefix}/llm_campaign/pause`,
         contentType: 'application/json',
@@ -269,6 +275,7 @@ function pauseLLMCampaign(campaignId) {
         }),
         success: function (response) {
             console.log(response);
+            $("#log-area").append("Pause requested. The current model call may still finish before the campaign stops.\n");
         }
     });
 }
@@ -469,6 +476,10 @@ function showResult(payload, campaignId) {
 function finalizeCampaign(campaignId) {
     console.log("Closing the connection");
 
+    if (window.llmCampaignListeners[campaignId]) {
+        delete window.llmCampaignListeners[campaignId];
+    }
+
     setCampaignStatus(campaignId, "finished");
     $(`#run-button-${campaignId}`).hide();
     $(`#stop-button-${campaignId}`).hide();
@@ -480,8 +491,26 @@ function finalizeCampaign(campaignId) {
 
 }
 
+function failCampaign(campaignId, message) {
+    if (window.llmCampaignListeners[campaignId]) {
+        window.llmCampaignListeners[campaignId].close();
+        delete window.llmCampaignListeners[campaignId];
+    }
+
+    setCampaignStatus(campaignId, "idle");
+    $(`#run-button-${campaignId}`).show();
+    $(`#stop-button-${campaignId}`).hide();
+    $("#log-area").text(message);
+    alert(message);
+}
+
 function startLLMCampaignListener(campaignId) {
+    if (window.llmCampaignListeners[campaignId]) {
+        window.llmCampaignListeners[campaignId].close();
+    }
+
     var source = new EventSource(`${url_prefix}/llm_campaign/progress/${campaignId}`);
+    window.llmCampaignListeners[campaignId] = source;
     console.log(`Listening for progress events for campaign ${campaignId}`);
 
     source.onmessage = function (event) {
@@ -496,8 +525,19 @@ function startLLMCampaignListener(campaignId) {
 
             if (payload.stats.finished == payload.stats.total) {
                 source.close();
+                delete window.llmCampaignListeners[campaignId];
                 finalizeCampaign(campaignId);
             }
+        }
+        else if (payload.type === "error") {
+            failCampaign(campaignId, payload.message || "Unknown campaign error.");
+        }
+    };
+
+    source.onerror = function () {
+        if (window.llmCampaignListeners[campaignId] === source) {
+            source.close();
+            delete window.llmCampaignListeners[campaignId];
         }
     };
 }
