@@ -23,6 +23,16 @@ from factgenie.campaign import CampaignMode, CampaignStatus, ExampleStatus
 logger = logging.getLogger("factgenie")
 
 
+def format_campaign_processing_error(dataset_id, split, example_idx, error):
+    message = f"Error processing example {dataset_id}-{split}-{example_idx}: {error.__class__.__name__}: {str(error)}"
+    error_text = f"{error.__class__.__name__}: {str(error)}"
+
+    if "UnsupportedParamsError" in error_text and "temperature" in error_text:
+        message += "\nHint: exclude the `temperature` parameter from Model arguments for this model."
+
+    return message
+
+
 def create_llm_campaign(app, mode, campaign_id, config, campaign_data, datasets, overwrite=False):
     campaign_id = slugify(campaign_id)
 
@@ -202,9 +212,7 @@ def run_llm_campaign(app, mode, campaign_id, announcer, campaign, datasets, mode
 
         except Exception as e:
             traceback.print_exc()
-            return utils.error(
-                f"Error processing example {dataset_id}-{split}-{example_idx}: {e.__class__.__name__}: {str(e)}"
-            )
+            return utils.error(format_campaign_processing_error(dataset_id, split, example_idx, e))
 
         # update the DB
         db.loc[i, "end"] = float(time.time())
