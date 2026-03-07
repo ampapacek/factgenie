@@ -78,6 +78,34 @@
               </div>
             </div>
 
+            {% if mode == 'llm_eval' %}
+            <div class="row g-3 mb-3 align-items-center">
+              <div class="col-auto">
+                <span style="margin-left: 5px;">Import crowd config</span>
+              </div>
+              <div class="col-auto">
+                <select class="form-select" id="crowdsourcingImportConfig" name="crowdsourcingImportConfig">
+                  <option value="[None]">[None]</option>
+                  {% for config_name in crowdsourcing_configs.keys() %}
+                  <option value="{{ config_name }}">{{ config_name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-auto">
+                <button type="button" class="btn btn-outline-secondary" onclick="importCrowdsourcingConfigToLLM();">
+                  Import shared fields
+                </button>
+              </div>
+              <div class="col-12">
+                <small class="form-text text-muted">
+                  Copies annotation categories, granularity, overlap, flags, options, sliders, text fields, and
+                  reason collection from a crowdsourcing preset. It does not overwrite the LLM model, provider, or
+                  prompt template.
+                </small>
+              </div>
+            </div>
+            {% endif %}
+
             <div class="rounded-box mt-4">
               {% if mode == 'llm_eval' %}
               {% include 'include/annotation_span_categories.html' %}
@@ -476,6 +504,7 @@
   window.url_prefix = "{{ host_prefix }}";
   window.available_data = {{ available_data | tojson | safe }};
   window.configs = {{ configs | tojson | safe }};
+  window.crowdsourcing_configs = {{ crowdsourcing_configs | tojson | safe }};
   window.datasets = {{ datasets | tojson | safe }};
   window.default_prompts = {{ default_prompts | tojson | safe }};
   window.mode = "{{ mode }}";

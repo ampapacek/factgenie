@@ -662,6 +662,69 @@ function updateCrowdsourcingConfig() {
     }
 }
 
+function importCrowdsourcingConfigToLLM() {
+    const crowdsourcingConfig = $('#crowdsourcingImportConfig').val();
+
+    if (crowdsourcingConfig === "[None]") {
+        return;
+    }
+
+    const cfg = window.crowdsourcing_configs ? window.crowdsourcing_configs[crowdsourcingConfig] : undefined;
+    if (cfg === undefined) {
+        alert(`Unknown crowdsourcing config: ${crowdsourcingConfig}`);
+        return;
+    }
+
+    const annotationSpanCategories = cfg.annotation_span_categories || [];
+    const annotationGranularity = cfg.annotation_granularity || "words";
+    const annotationOverlapAllowed = cfg.annotation_overlap_allowed || false;
+    const annotateReason = cfg.annotate_reason || false;
+    const flags = cfg.flags;
+    const options = cfg.options;
+    const sliders = cfg.sliders;
+    const textFields = cfg.text_fields;
+
+    $("#annotation-span-categories").empty();
+    $("#annotationGranularity").val(annotationGranularity);
+    $("#annotationOverlapAllowed").prop("checked", annotationOverlapAllowed);
+    $("#annotation-field-reason").prop("checked", annotateReason);
+
+    annotationSpanCategories.forEach((annotationSpanCategory) => {
+        addAnnotationSpanCategory(annotationSpanCategory.name, annotationSpanCategory.description, annotationSpanCategory.color);
+    });
+
+    $("#flags").empty();
+    if (flags !== undefined) {
+        flags.forEach((flag) => {
+            const newFlag = createFlagElem(flag);
+            $("#flags").append(newFlag);
+        });
+    }
+
+    $("#options").empty();
+    if (options !== undefined) {
+        options.forEach((option) => {
+            const newOption = createOptionElem(option.label, option.values.join(", "));
+            $("#options").append(newOption);
+        });
+    }
+
+    $("#sliders").empty();
+    if (sliders !== undefined) {
+        sliders.forEach((slider) => {
+            const newSlider = createSliderElem(slider.label, slider.min, slider.max, slider.step);
+            $("#sliders").append(newSlider);
+        });
+    }
+
+    $("#textFields").empty();
+    if (textFields !== undefined) {
+        textFields.forEach((textField) => {
+            const newTextField = createTextFieldElem(textField);
+            $("#textFields").append(newTextField);
+        });
+    }
+}
 
 
 function updateLLMMetricConfig() {
