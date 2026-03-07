@@ -660,6 +660,7 @@ def llm_campaign_new():
 
     # get a list of available metrics
     llm_configs = workflows.load_configs(mode=mode)
+    crowdsourcing_configs = workflows.load_configs(mode=CampaignMode.CROWDSOURCING)
     model_apis = list(ModelFactory.get_model_apis().keys())
     prompt_strats = list(ModelFactory.get_prompt_strategies()[mode].keys())
 
@@ -678,6 +679,7 @@ def llm_campaign_new():
         default_prompts=default_prompts,
         available_data=available_data,
         configs=llm_configs,
+        crowdsourcing_configs=crowdsourcing_configs,
         model_apis=model_apis,
         prompt_strats=prompt_strats,
         host_prefix=app.config["host_prefix"],
