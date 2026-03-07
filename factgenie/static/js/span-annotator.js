@@ -105,12 +105,12 @@ class SpanAnnotator {
         }
     }
 
-    addDocument(objectId, htmlObject, dynamic = false) {
+    addDocument(objectId, htmlObject, dynamic = false, rawText = null) {
         const $element = $(htmlObject);
-        const text = $element.text();
+        const text = rawText ?? $element.text();
         const spans = this._createSpans(text);
 
-        $element.html(spans);
+        $element.empty().append(spans);
 
         this.documents.set(objectId, {
             element: $element,
@@ -134,36 +134,65 @@ class SpanAnnotator {
         return this.documents.get(objectId)?.annotations || [];
     }
 
+    _appendWhitespace($element, whitespace) {
+        for (const char of whitespace) {
+            if (char === '\n') {
+                $element.append($('<br>'));
+            } else {
+                $element.append(document.createTextNode(char));
+            }
+        }
+    }
+
+    _stringLength(text) {
+        return Array.from(String(text)).length;
+    }
+
     _createSpans(text) {
+        const fragment = document.createDocumentFragment();
         let currentIndex = 0;
         if (this.granularity === 'words') {
             const parts = text.split(/(\s+)/);
 
-            return parts.map((part, arrayIndex) => {
+            parts.forEach((part, arrayIndex) => {
                 if (arrayIndex % 2 === 1) {
-                    return ''; // Remove standalone whitespace spans
+                    return;
                 }
 
                 const whitespace = arrayIndex < parts.length - 1 ? parts[arrayIndex + 1] : '';
                 const fullContent = String(part) + whitespace;
-                const span = `<span class="annotatable" 
-                    data-index="${currentIndex}" 
-                    data-content="${part}"
-                    data-whitespace="${whitespace}">${part}<span class="whitespace">${whitespace === '\n' ? '<br>' : whitespace}</span></span>`;
+                const span = document.createElement('span');
+                span.className = 'annotatable';
+                span.dataset.index = String(currentIndex);
+                span.dataset.content = String(part);
+                span.dataset.whitespace = whitespace;
+                span.append(document.createTextNode(part));
 
-                currentIndex += fullContent.length;
-                return span;
-            }).join('');
+                const whitespaceSpan = document.createElement('span');
+                whitespaceSpan.className = 'whitespace';
+                this._appendWhitespace($(whitespaceSpan), whitespace);
+                span.append(whitespaceSpan);
+
+                currentIndex += this._stringLength(fullContent);
+                fragment.append(span);
+            });
         } else {
-            return text.split('').map(char => {
-                const span = `<span class="annotatable" 
-                    data-index="${currentIndex}"
-                    data-content="${char}"
-                    >${char === '\n' ? '<br>' : char}</span>`;
+            Array.from(text).forEach(char => {
+                const span = document.createElement('span');
+                span.className = 'annotatable';
+                span.dataset.index = String(currentIndex);
+                span.dataset.content = char;
+                if (char === '\n') {
+                    span.append(document.createElement('br'));
+                } else {
+                    span.append(document.createTextNode(char));
+                }
                 currentIndex += 1;
-                return span;
-            }).join('');
+                fragment.append(span);
+            });
         }
+
+        return fragment;
     }
 
     _attachEventHandlers(objectId) {
@@ -265,14 +294,14 @@ class SpanAnnotator {
 
         // Find annotations that would be removed
         const affectedAnnotations = doc.annotations.filter(a =>
-            position >= a.start && position < a.start + a.text.length);
+            position >= a.start && position < a.start + this._stringLength(a.text));
 
         // Highlight spans for each affected annotation
         affectedAnnotations.forEach(ann => {
             $('.annotatable', doc.element).each((_, span) => {
                 const $span = $(span);
                 const idx = parseInt($span.data('index'));
-                if (idx >= ann.start && idx < ann.start + ann.text.length) {
+                if (idx >= ann.start && idx < ann.start + this._stringLength(ann.text)) {
 
                     // make the tokens more transparent by applying a filter
                     $span.css('filter', 'opacity(0.5)');
@@ -306,7 +335,7 @@ class SpanAnnotator {
     _hasExistingAnnotations(doc, startIdx, endIdx) {
         return doc.annotations.some(ann => {
             // Check if any part of the new annotation overlaps with existing ones
-            const annotationEnd = ann.start + ann.text.length - 1;
+            const annotationEnd = ann.start + this._stringLength(ann.text) - 1;
             return (startIdx <= annotationEnd && endIdx >= ann.start);
         });
     }
@@ -375,13 +404,13 @@ class SpanAnnotator {
         const [min, max] = [Math.min(startIdx, endIdx), Math.max(startIdx, endIdx)];
 
         // Get the actual end position by adding length of the last token
-        const maxWithLength = max + String($end.data('content')).length - 1;
+        const maxWithLength = max + this._stringLength($end.data('content')) - 1;
 
 
         // Check for exactly matching annotations
         const isExisting = doc.annotations.some(ann =>
             ann.start === min &&
-            ann.start + ann.text.length === maxWithLength + 1 &&
+            ann.start + this._stringLength(ann.text) === maxWithLength + 1 &&
             ann.type === this.currentType
         );
 
@@ -391,7 +420,7 @@ class SpanAnnotator {
             return;
         }
 
-        const text = doc.text.substring(min, maxWithLength + 1);
+        const text = Array.from(doc.text).slice(min, maxWithLength + 1).join('');
         const id = Math.random().toString(36).substring(2, 10);
 
         const annotation = {
@@ -494,10 +523,10 @@ class SpanAnnotator {
         const position = parseInt($span.data('index'));
 
         const removedAnnotations = doc.annotations.filter(a =>
-            position >= a.start && position < a.start + a.text.length);
+            position >= a.start && position < a.start + this._stringLength(a.text));
 
         doc.annotations = doc.annotations.filter(a =>
-            position < a.start || position >= a.start + a.text.length);
+            position < a.start || position >= a.start + this._stringLength(a.text));
 
         this._renderAnnotations(objectId);
         this.emit('annotationRemoved', { objectId, removedAnnotations });
@@ -510,7 +539,7 @@ class SpanAnnotator {
             const position = parseInt($span.data('index'));
 
             const spanAnnotations = doc.annotations.filter(a =>
-                position >= a.start && position < a.start + a.text.length);
+                position >= a.start && position < a.start + this._stringLength(a.text));
 
             // Reset styling
             $span.attr('style', '');
@@ -519,7 +548,7 @@ class SpanAnnotator {
             if (spanAnnotations.length > 0) {
                 const content = String($span.data('content'));
                 const isLastInAnyAnnotation = spanAnnotations.some(ann =>
-                    position + content.length >= ann.start + ann.text.length);
+                    position + this._stringLength(content) >= ann.start + this._stringLength(ann.text));
                 const hasMultipleAnnotations = spanAnnotations.length > 1;
 
                 if (isLastInAnyAnnotation && !hasMultipleAnnotations) {

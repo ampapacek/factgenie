@@ -305,9 +305,7 @@ function fetchExample(dataset, split, example_idx) {
 
 function getAnnotatedOutput(output, annId, annotations) {
     const setup_id = output.setup_id;
-
-    // replace newlines with any spaces around them with <br>
-    const content = output.output.replace(/\\n/g, '<br>');
+    const content = output.output;
 
     var placeholder = $('<pre>', { id: `out-${setup_id}-${annId}-placeholder`, class: `font-mono out-placeholder out-${annId}-placeholder` });
     var annotated_content;
@@ -323,8 +321,8 @@ function getAnnotatedOutput(output, annId, annotations) {
 
         const parId = `out-text-${annId}-par`;
 
-        annotated_content = $('<p>', { id: parId }).html(content);
-        spanAnnotator.addDocument(parId, annotated_content, false);
+        annotated_content = $('<p>', { id: parId });
+        spanAnnotator.addDocument(parId, annotated_content, false, content);
         spanAnnotator.addAnnotations(parId, annotations.annotations);
     } else {
         // we do not have outputs for the particular campaign -> grey out the text
