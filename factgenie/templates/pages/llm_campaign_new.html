@@ -309,6 +309,11 @@
               </div>
 
               {% if mode == 'llm_eval' %}
+              <div class="alert alert-light border small mt-3 mb-3">
+                Extra evaluation fields below are asked in a separate follow-up turn after the span annotations are
+                generated, so they do not need to be described in the annotation JSON schema section above.
+              </div>
+
               <div class="row mb-3 align-items-center">
                 <div class="col-auto">
                   <i class="fa fa-check"></i>
