@@ -329,6 +329,8 @@ function initAnnotation() {
     spanAnnotator.setCurrentAnnotationType(0);
     renderExampleFields();
     updateOutputArea();
+    spanAnnotator.clearEventListeners('annotationAdded');
+    spanAnnotator.clearEventListeners('annotationRemoved');
 
     spanAnnotator.addEventListener('annotationAdded', function (data) {
         onAnnotationAdded(data.annotation);

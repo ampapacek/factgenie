@@ -62,6 +62,15 @@ class SpanAnnotator {
         this.eventListeners.get(eventName).push(callback);
     }
 
+    clearEventListeners(eventName = null) {
+        if (eventName === null) {
+            this.eventListeners.clear();
+            return;
+        }
+
+        this.eventListeners.set(eventName, []);
+    }
+
     _addToHistory(objectId) {
         const doc = this.documents.get(objectId);
         if (!this.history.has(objectId)) {
