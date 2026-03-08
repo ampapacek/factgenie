@@ -81,7 +81,7 @@ function renderExampleFields() {
             slidersWrapper.append(row);
         });
         $("#example-sliders").append(slidersWrapper);
-        $(".example-slider-input").off("input change").on("input change", function () {
+        $(".example-slider-input").off("input.exampleSliderValue change.exampleSliderValue").on("input.exampleSliderValue change.exampleSliderValue", function () {
             const valueId = `${$(this).attr("id")}-value`;
             $(`#${valueId}`).text($(this).val());
         });
@@ -340,9 +340,11 @@ function initAnnotation() {
         });
     });
 
-    $("#example-fields-area input, #example-fields-area select").off("input change").on("input change", function () {
+    $("#example-fields-area input, #example-fields-area select")
+        .off("input.exampleOutput change.exampleOutput")
+        .on("input.exampleOutput change.exampleOutput", function () {
         updateOutputArea();
-    });
+        });
 }
 
 function checkAndOpenModal() {
