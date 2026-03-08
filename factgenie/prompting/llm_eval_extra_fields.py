@@ -56,6 +56,10 @@ def build_extra_fields_followup_prompt(
     include_context: bool = False,
     annotations_field: str = "annotations_raw",
 ) -> str:
+    custom_prompt = str(config.get("extra_fields_prompt_template", "") or "").strip()
+    if custom_prompt:
+        return custom_prompt.replace("{annotations}", f"{{{annotations_field}}}")
+
     normalized = normalize_extra_fields_config(config)
 
     prompt_lines = []

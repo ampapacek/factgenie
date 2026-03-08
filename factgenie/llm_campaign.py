@@ -289,6 +289,7 @@ def parse_llm_eval_config(config):
         "options": config.get("options"),
         "sliders": config.get("sliders"),
         "text_fields": config.get("textFields"),
+        "extra_fields_prompt_template": config.get("extraFieldsPromptTemplate"),
     }
     return config
 

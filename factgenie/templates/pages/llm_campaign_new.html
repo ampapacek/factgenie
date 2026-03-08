@@ -401,6 +401,24 @@
                   <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addTextField();">+</button>
                 </div>
               </div>
+
+              <div class="row mt-4 mb-3 align-items-center" id="extra-fields-prompt-editor" style="display: none;">
+                <div class="col-auto">
+                  <i class="fa fa-commenting-o"></i>
+                  <span style="margin-left: 5px; margin-right: 10px;">Follow-up prompt for extra fields</span>
+                  <div class="mb-2">
+                    <small class="form-text text-muted">
+                      This second prompt is only used when at least one flag, option, slider, or text field is configured.
+                      It is prefilled automatically and you can edit it. You may use placeholders
+                      <code>{text}</code>, <code>{data}</code>, and <code>{annotations}</code>.
+                    </small>
+                  </div>
+                </div>
+                <div class="form-group mt-1">
+                  <textarea class="form-control" id="extra-fields-prompt-template" name="extra-fields-prompt-template"
+                    rows="12"></textarea>
+                </div>
+              </div>
               {% endif %}
 
               {% if mode == 'llm_eval' %}

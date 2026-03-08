@@ -73,7 +73,14 @@ class StructuredAnnotationStrategy(SequentialStrategy):
         if has_extra_fields(self.config):
             sequence.extend(
                 [
-                    t.Put(build_extra_fields_followup_prompt(self.config), EXTRA_FIELDS_PROMPT),
+                    t.ApplyTemplate(
+                        build_extra_fields_followup_prompt(
+                            self.config,
+                            include_context=True,
+                            annotations_field=ANNOTATIONS_RAW,
+                        ),
+                        EXTRA_FIELDS_PROMPT,
+                    ),
                     t.Log(text="Extra fields prompt: ", field=EXTRA_FIELDS_PROMPT, log_level="debug"),
                     t.ConverseLLM(EXTRA_FIELDS_PROMPT, CONVERSATION),
                     t.ConversationExtractResponse(CONVERSATION, EXTRA_FIELDS_RESPONSE),

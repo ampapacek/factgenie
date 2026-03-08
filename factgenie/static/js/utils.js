@@ -50,29 +50,44 @@ function addFlag() {
     const flags = $("#flags");
     const newFlag = createFlagElem("");
     flags.append(newFlag);
+    if (typeof updateExtraFieldsPromptEditor === "function") {
+        updateExtraFieldsPromptEditor();
+    }
 }
 
 function addOption() {
     const options = $("#options");
     const newOption = createOptionElem("", "");
     options.append(newOption);
+    if (typeof updateExtraFieldsPromptEditor === "function") {
+        updateExtraFieldsPromptEditor();
+    }
 }
 
 function addSlider() {
     const sliders = $("#sliders");
     const newSlider = createSliderElem("", "", "", "");
     sliders.append(newSlider);
+    if (typeof updateExtraFieldsPromptEditor === "function") {
+        updateExtraFieldsPromptEditor();
+    }
 }
 
 function addTextField() {
     const textFields = $("#textFields");
     const newTextField = createTextFieldElem("");
     textFields.append(newTextField);
+    if (typeof updateExtraFieldsPromptEditor === "function") {
+        updateExtraFieldsPromptEditor();
+    }
 }
 
 
 function deleteRow(button) {
     $(button).parent().parent().remove();
+    if (typeof updateExtraFieldsPromptEditor === "function") {
+        updateExtraFieldsPromptEditor();
+    }
 }
 
 function createFlagElem(key) {

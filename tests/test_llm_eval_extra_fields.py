@@ -73,6 +73,7 @@ class LlmEvalExtraFieldsTests(unittest.TestCase):
                 "options": [{"label": "Severity", "values": ["low", "high"]}],
                 "sliders": [{"label": "Confidence", "min": "1", "max": "5", "step": "1"}],
                 "textFields": ["Notes"],
+                "extraFieldsPromptTemplate": "Follow up on {annotations}",
             }
         )
 
@@ -83,6 +84,7 @@ class LlmEvalExtraFieldsTests(unittest.TestCase):
             [{"label": "Confidence", "min": "1", "max": "5", "step": "1"}],
         )
         self.assertEqual(parsed["text_fields"], ["Notes"])
+        self.assertEqual(parsed["extra_fields_prompt_template"], "Follow up on {annotations}")
 
     def test_parse_extra_fields_transform(self):
         transform = ParseExtraFields(
@@ -148,6 +150,24 @@ class LlmEvalExtraFieldsTests(unittest.TestCase):
         self.assertEqual(result["sliders"][0]["value"], 4)
         self.assertEqual(result["text_fields"][0]["value"], "Check source")
         self.assertEqual(result["metadata"]["extra_fields_thinking_trace"], "extra-trace")
+
+    def test_default_strategy_uses_custom_extra_fields_prompt_template(self):
+        config = make_extra_config() | {
+            "extra_fields_prompt_template": "Custom follow-up.\nAnnotations:\n{annotations}\nText:\n{text}"
+        }
+        api = SequenceAPI(
+            [
+                {"content": annotation_json(), "reasoning": "ann-trace"},
+                {"content": extra_fields_json(), "reasoning": "extra-trace"},
+            ]
+        )
+
+        StructuredAnnotationStrategy(config, CampaignMode.LLM_EVAL).get_output(api, {"question": "Q"}, "hello world")
+
+        self.assertEqual(len(api.calls), 2)
+        self.assertIn("Custom follow-up.", api.calls[1][-1]["content"])
+        self.assertIn(annotation_json(), api.calls[1][-1]["content"])
+        self.assertIn("hello world", api.calls[1][-1]["content"])
 
     def test_parse_raw_strategy_collects_extra_fields(self):
         api = SequenceAPI(
