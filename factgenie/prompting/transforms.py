@@ -589,6 +589,15 @@ class ParseAnnotations(Transform):
     def outputs_fields(self) -> list[str]:
         return [self.output_field]
 
+    def expand_to_word_boundaries(self, text: str, start_pos: int, end_pos: int) -> tuple[int, int]:
+        while start_pos > 0 and not text[start_pos - 1].isspace():
+            start_pos -= 1
+
+        while end_pos < len(text) and not text[end_pos].isspace():
+            end_pos += 1
+
+        return start_pos, end_pos
+
     def parse_annotations(self, c: dict, api: ModelAPI):
         """
         Parse annotations from JSON and validate them.
@@ -697,14 +706,18 @@ class ParseAnnotations(Transform):
                     start_pos = text.lower().find(annotated_span)
 
             if not self.annotation_overlap_allowed and start_pos != -1:
+                annotation_end = start_pos + len(annotated_span)
+                if self.annotation_granularity == "words":
+                    start_pos, annotation_end = self.expand_to_word_boundaries(text, start_pos, annotation_end)
+
                 # check if the annotation overlaps with any other annotation
                 for other_annotation in annotation_list:
                     other_start = other_annotation["start"]
                     other_end = other_start + len(other_annotation["text"])
 
-                    if start_pos < other_end and start_pos + len(annotated_span) > other_start:
+                    if start_pos < other_end and annotation_end > other_start:
                         logger.warning(
-                            f"❌ Span OVERLAP: {annotated_span} ({start_pos}:{start_pos + len(annotated_span)}) overlaps with {other_annotation['text']} ({other_start}:{other_end})"
+                            f"❌ Span OVERLAP: {annotated_span} ({start_pos}:{annotation_end}) overlaps with {other_annotation['text']} ({other_start}:{other_end})"
                         )
                         continue
 
@@ -717,6 +730,12 @@ class ParseAnnotations(Transform):
             # We do not use the name "type" in JSON schema for error types because it has much broader sense in the schema (e.g. string or integer)
             annotation_d["type"] = annotation.annotation_type
             del annotation_d["annotation_type"]
+
+            if self.annotation_granularity == "words":
+                start_pos, end_pos = self.expand_to_word_boundaries(text, start_pos, start_pos + len(annotation.text))
+                annotation_d["text"] = text[start_pos:end_pos]
+            else:
+                end_pos = start_pos + len(annotation.text)
 
             # Save the start position of the annotation
             annotation_d["start"] = start_pos
@@ -732,7 +751,7 @@ class ParseAnnotations(Transform):
                 continue
 
             logger.info(
-                f'[\033[32m\033[1m{annotation_type_str}\033[0m] "\033[32m{annotation.text}\033[0m" ({start_pos}:{start_pos + len(annotation.text)})'
+                f'[\033[32m\033[1m{annotation_type_str}\033[0m] "\033[32m{annotation_d["text"]}\033[0m" ({start_pos}:{end_pos})'
             )
 
             annotation_list.append(annotation_d)
