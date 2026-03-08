@@ -20,6 +20,7 @@
                         <li>Insert the example <b>input data</b> and example <b>output</b> generated from the data.</li>
                         <li>Annotate <b>manually</b> the example output.</li>
                         <li>Add <b>reasons</b> for each annotation in the table below.</li>
+                        <li>Fill any configured <b>flags, options, sliders, or text fields</b> for the example.</li>
                         <li>Click on the <b>Paste example into prompt template</b> button.</li>
                     </ul>
                 </div>
@@ -97,6 +98,23 @@
                                     <tbody id="errorarea">
                                     </tbody>
                                 </table>
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-3 align-items-center" id="example-fields-area" style="display: none;">
+                            <div class="col-auto">
+                                <i class="fa fa-sliders"></i>
+                                <span style="margin-left: 5px; margin-right: 10px;">Example-level fields</span>
+                                <div class="mb-2">
+                                    <small class="form-text text-muted">Select the example-level values that should be
+                                        included in the pasted output example.
+                                    </small>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div id="example-flags" class="mb-3"></div>
+                                <div id="example-options" class="mb-3"></div>
+                                <div id="example-sliders" class="mb-3"></div>
+                                <div id="example-text-fields"></div>
                             </div>
                         </div>
                         <pre id='outputarea'>
