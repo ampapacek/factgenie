@@ -225,12 +225,37 @@ function onAnnotationDeleted(annotation) {
     updateOutputArea();
 }
 
+function buildExamplePromptBlock(exampleData, exampleText, output) {
+    return `\n\n*Example:*\ninput:\n\`\`\`\n${exampleData}\n\`\`\`\ntext:\n\`\`\`\n${exampleText}\n\`\`\`\noutput:\n\`\`\`\n${JSON.stringify(output, null, 4)}\n`;
+}
+
 function pasteExampleIntoPrompt() {
     const exampleData = $('#example-data').val();
     const exampleText = $('#example-text').val();
-    const output = $('#outputarea').text();
-    const prompt = `\n\n*Example:*\ninput:\n\`\`\`\n${exampleData}\n\`\`\`\ntext:\n\`\`\`\n${exampleText}\n\`\`\`\noutput:\n\`\`\`\n${output}\n`;
-    $('#prompt-template').val($('#prompt-template').val() + prompt);
+    const output = JSON.parse($('#outputarea').text());
+    const annotationOutput = { annotations: output.annotations || [] };
+    const annotationPrompt = buildExamplePromptBlock(exampleData, exampleText, annotationOutput);
+    $('#prompt-template').val($('#prompt-template').val() + annotationPrompt);
+
+    const followUpOutput = {};
+    if (output.flags && output.flags.length > 0) {
+        followUpOutput.flags = output.flags;
+    }
+    if (output.options && output.options.length > 0) {
+        followUpOutput.options = output.options;
+    }
+    if (output.sliders && output.sliders.length > 0) {
+        followUpOutput.sliders = output.sliders;
+    }
+    if (output.text_fields && output.text_fields.length > 0) {
+        followUpOutput.text_fields = output.text_fields;
+    }
+
+    if (Object.keys(followUpOutput).length > 0 && $('#extra-fields-prompt-template').length > 0) {
+        const followUpPrompt = buildExamplePromptBlock(exampleData, exampleText, followUpOutput);
+        $('#extra-fields-prompt-template').val($('#extra-fields-prompt-template').val() + followUpPrompt);
+    }
+
     $('#exampleAnnotation').modal('hide');
 }
 
