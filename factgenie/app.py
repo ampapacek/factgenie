@@ -803,6 +803,11 @@ def render_example():
     example_idx = max(int(request.args.get("example_idx")), 0)
     setup_id = request.args.get("setup_id", None)
 
+    if split in (None, "", "null", "undefined"):
+        dataset = workflows.get_dataset(app, dataset_id)
+        if dataset is not None and getattr(dataset, "splits", None):
+            split = dataset.splits[0]
+
     if not _is_authenticated_viewer():
         dataset_config = utils.load_dataset_config().get(slugify(dataset_id))
         if dataset_config and dataset_config.get("hidden_from_regular_users", False):
