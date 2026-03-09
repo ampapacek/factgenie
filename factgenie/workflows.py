@@ -40,6 +40,16 @@ from factgenie.campaign import (
 logger = logging.getLogger("factgenie")
 
 
+def normalize_output_text(output):
+    if not isinstance(output, str):
+        return output
+
+    # Some imported outputs store escaped line breaks literally (`\\n`), which shifts
+    # span offsets during evaluation and browse. Normalize them at read time without
+    # mutating the original JSONL files.
+    return output.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\r")
+
+
 def get_dataset(app, dataset_id):
     return app.db["datasets_obj"].get(dataset_id)
 
@@ -358,6 +368,8 @@ def load_outputs_from_file(file_path, cols):
                         f"The output record in {file_path} at line {line_num + 1} is missing the 'output' key, skipping. Available keys: {list(j.keys())}"
                     )
                     continue
+
+                j["output"] = normalize_output_text(j["output"])
 
                 # drop any keys that are not in the key set
                 j = {k: v for k, v in j.items() if k in cols}

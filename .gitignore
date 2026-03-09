@@ -10,6 +10,8 @@ env/
 *.log
 .venv
 .vscode
+AGENTS.md
+docs/plans/
 build
 dist
 venv/

@@ -40,6 +40,7 @@ app.db["output_index"] = None
 app.db["output_index_cache"] = {}
 app.db["lock"] = threading.Lock()
 app.db["running_campaigns"] = set()
+app.db["running_campaign_threads"] = {}
 app.db["announcers"] = {}
 app.wsgi_app = ProxyFix(app.wsgi_app, x_host=1)
 
@@ -57,6 +58,72 @@ ANNOTATOR_PSEUDONYM_CITIES = [
     "Mumbai",
     "Mexico City",
 ]
+
+
+def run_llm_campaign_background(app, mode, campaign_id, announcer, campaign, datasets, model):
+    with app.app_context():
+        try:
+            running_campaigns = app.db["running_campaigns"]
+            response = llm_campaign.run_llm_campaign(
+                app, mode, campaign_id, announcer, campaign, datasets, model, running_campaigns
+            )
+
+            payload = response.get_json(silent=True) if hasattr(response, "get_json") else None
+            if payload and payload.get("success") is False:
+                llm_campaign.pause_llm_campaign(app, campaign_id)
+                utils.announce(
+                    announcer,
+                    {
+                        "campaign_id": campaign_id,
+                        "type": "error",
+                        "message": payload.get("error", "Unknown error while running campaign."),
+                    },
+                )
+
+        except Exception as e:
+            traceback.print_exc()
+            llm_campaign.pause_llm_campaign(app, campaign_id)
+            utils.announce(
+                announcer,
+                {
+                    "campaign_id": campaign_id,
+                    "type": "error",
+                    "message": f"Error while running campaign: {e}",
+                },
+            )
+        finally:
+            app.db["running_campaign_threads"].pop(campaign_id, None)
+
+
+def start_llm_campaign_background(app, mode, campaign_id, announcer, campaign, datasets, model):
+    thread = threading.Thread(
+        target=run_llm_campaign_background,
+        args=(app, mode, campaign_id, announcer, campaign, datasets, model),
+        daemon=True,
+    )
+    app.db["running_campaign_threads"][campaign_id] = thread
+    thread.start()
+    return thread
+
+
+def reconcile_llm_campaign_runtime_state(app, campaign):
+    campaign_id = campaign.metadata["id"]
+    thread = app.db["running_campaign_threads"].get(campaign_id)
+    is_running = thread is not None and thread.is_alive()
+
+    if not is_running and campaign_id in app.db["running_campaigns"]:
+        app.db["running_campaigns"].discard(campaign_id)
+        app.db["running_campaign_threads"].pop(campaign_id, None)
+        app.db["announcers"].pop(campaign_id, None)
+
+    if is_running and campaign.metadata["status"] != CampaignStatus.RUNNING:
+        campaign.metadata["status"] = CampaignStatus.RUNNING
+        campaign.update_metadata()
+    elif not is_running and campaign.metadata["status"] == CampaignStatus.RUNNING:
+        campaign.metadata["status"] = CampaignStatus.IDLE
+        campaign.update_metadata()
+
+    return is_running
 
 
 # -----------------
@@ -865,10 +932,7 @@ def llm_campaign_detail(campaign_id):
 
     mode = utils.get_mode_from_path(request.path)
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
-
-    if campaign.metadata["status"] == CampaignStatus.RUNNING and not app.db["announcers"].get(campaign_id):
-        campaign.metadata["status"] = CampaignStatus.IDLE
-        campaign.update_metadata()
+    reconcile_llm_campaign_runtime_state(app, campaign)
 
     overview = campaign.get_overview()
 
@@ -901,6 +965,7 @@ def llm_campaign_new():
 
     # get a list of available metrics
     llm_configs = workflows.load_configs(mode=mode)
+    crowdsourcing_configs = workflows.load_configs(mode=CampaignMode.CROWDSOURCING)
     model_apis = list(ModelFactory.get_model_apis().keys())
     prompt_strats = list(ModelFactory.get_prompt_strategies()[mode].keys())
 
@@ -919,6 +984,7 @@ def llm_campaign_new():
         default_prompts=default_prompts,
         available_data=available_data,
         configs=llm_configs,
+        crowdsourcing_configs=crowdsourcing_configs,
         model_apis=model_apis,
         prompt_strats=prompt_strats,
         host_prefix=app.config["host_prefix"],
@@ -933,28 +999,27 @@ def llm_campaign_run():
     data = request.get_json()
     campaign_id = data.get("campaignId")
 
+    campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    if campaign is None:
+        return utils.error(f"Unknown campaign: {campaign_id}")
+
+    if reconcile_llm_campaign_runtime_state(app, campaign):
+        return utils.error(f"Campaign {campaign_id} is already running.")
+
     app.db["announcers"][campaign_id] = announcer = utils.MessageAnnouncer()
     app.db["running_campaigns"].add(campaign_id)
 
     try:
-        campaign = workflows.load_campaign(app, campaign_id=campaign_id)
         datasets = app.db["datasets_obj"]
 
         config = campaign.metadata["config"]
         model = ModelFactory.from_config(config, mode=mode)
-        running_campaigns = app.db["running_campaigns"]
-
-        ret = llm_campaign.run_llm_campaign(
-            app, mode, campaign_id, announcer, campaign, datasets, model, running_campaigns
-        )
-
-        if hasattr(ret, "error"):
-            llm_campaign.pause_llm_campaign(app, campaign_id)
-            return utils.error(f"Error while running campaign: {ret.error}")
-        else:
-            return ret
+        start_llm_campaign_background(app, mode, campaign_id, announcer, campaign, datasets, model)
+        return jsonify(success=True, status=CampaignStatus.RUNNING)
 
     except Exception as e:
+        app.db["running_campaigns"].discard(campaign_id)
+        app.db["running_campaign_threads"].pop(campaign_id, None)
         traceback.print_exc()
         return utils.error(f"Error while running campaign: {e}")
 

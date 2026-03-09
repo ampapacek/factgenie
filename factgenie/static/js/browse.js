@@ -633,7 +633,6 @@ function fetchExample(dataset, split, example_idx) {
 
 function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
     const setup_id = output.setup_id;
-
     const normalized = normalizeNewlines(output.output);
     const contentHtml = normalized.replace(/\n/g, '<br>');
 
@@ -651,8 +650,8 @@ function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
 
         const parId = `out-text-${annId}-par`;
 
-        annotated_content = $('<p>', { id: parId }).html(normalized);
-        spanAnnotator.addDocument(parId, annotated_content, false);
+        annotated_content = $('<p>', { id: parId });
+        spanAnnotator.addDocument(parId, annotated_content, false, normalized);
         spanAnnotator.addAnnotations(parId, annotations.annotations);
     } else {
         // we do not have outputs for the particular campaign -> grey out the text

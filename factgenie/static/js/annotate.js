@@ -472,10 +472,10 @@ function loadAnnotations() {
             spanAnnotator.init(metadata.config.annotation_granularity, annotationOverlapAllowed, annotation_span_categories, annotateReason);
 
             for (const [annotation_idx, data] of Object.entries(examples_cached)) {
-                const p = $('<p>', { id: `out-text-${annotation_idx}-par`, class: 'annotatable-paragraph' })
-                    .html(normalizeNewlines(data.generated_outputs.output));
+                const normalizedOutput = normalizeNewlines(data.generated_outputs.output);
+                const p = $('<p>', { id: `out-text-${annotation_idx}-par`, class: 'annotatable-paragraph' });
                 $(`#out-text-${annotation_idx}`).append(p);
-                spanAnnotator.addDocument(`p${annotation_idx}`, p, true);
+                spanAnnotator.addDocument(`p${annotation_idx}`, p, true, normalizedOutput);
                 spanAnnotator.setCurrentAnnotationType(0);
                 addPageLink(annotation_idx);
             }

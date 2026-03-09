@@ -78,6 +78,34 @@
               </div>
             </div>
 
+            {% if mode == 'llm_eval' %}
+            <div class="row g-3 mb-3 align-items-center">
+              <div class="col-auto">
+                <span style="margin-left: 5px;">Import crowd config</span>
+              </div>
+              <div class="col-auto">
+                <select class="form-select" id="crowdsourcingImportConfig" name="crowdsourcingImportConfig">
+                  <option value="[None]">[None]</option>
+                  {% for config_name in crowdsourcing_configs.keys() %}
+                  <option value="{{ config_name }}">{{ config_name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-auto">
+                <button type="button" class="btn btn-outline-secondary" onclick="importCrowdsourcingConfigToLLM();">
+                  Import shared fields
+                </button>
+              </div>
+              <div class="col-12">
+                <small class="form-text text-muted">
+                  Copies annotator instructions into System message, plus annotation categories, granularity,
+                  overlap, flags, options, sliders, text fields, and reason collection from a crowdsourcing preset.
+                  It does not overwrite the LLM model, provider, or prompt template.
+                </small>
+              </div>
+            </div>
+            {% endif %}
+
             <div class="rounded-box mt-4">
               {% if mode == 'llm_eval' %}
               {% include 'include/annotation_span_categories.html' %}
@@ -370,6 +398,91 @@
               </div>
 
               {% if mode == 'llm_eval' %}
+              <div class="alert alert-light border small mt-3 mb-3">
+                Extra evaluation fields below are asked in a separate follow-up turn after the span annotations are
+                generated, so they do not need to be described in the annotation JSON schema section above.
+              </div>
+
+              <div class="row mb-3 align-items-center">
+                <div class="col-auto">
+                  <i class="fa fa-check"></i>
+                  <span style="margin-left: 5px; margin-right: 10px;">Flags</span>
+                  <div class="mb-2">
+                    <small class="form-text text-muted">Boolean follow-up questions for the model after span
+                      annotations are generated.</small>
+                  </div>
+                </div>
+                <div id="flags"></div>
+                <div class="col-auto mt-1">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addFlag();">+</button>
+                </div>
+              </div>
+
+              <div class="row mb-3 align-items-center">
+                <div class="col-auto">
+                  <i class="fa fa-list-ul"></i>
+                  <span style="margin-left: 5px; margin-right: 10px;">List of options</span>
+                  <div class="mb-2">
+                    <small class="form-text text-muted">Single-choice follow-up questions for the model after span
+                      annotations are generated.</small>
+                  </div>
+                </div>
+                <div id="options"></div>
+                <div class="col-auto mt-1">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addOption();">+</button>
+                </div>
+              </div>
+
+              <div class="row mb-3 mt-3 align-items-center">
+                <div class="col-auto">
+                  <i class="fa fa-sliders"></i>
+                  <span style="margin-left: 5px; margin-right: 10px;">Sliders</span>
+                  <div class="mb-2">
+                    <small class="form-text text-muted">Numeric follow-up questions for the model after span
+                      annotations are generated.</small>
+                  </div>
+                </div>
+                <div id="sliders"></div>
+                <div class="col-auto mt-1">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addSlider();">+</button>
+                </div>
+              </div>
+
+              <div class="row mt-3 mb-1 align-items-center">
+                <div class="col-auto">
+                  <i class="fa fa-file-text-o"></i>
+                  <span style="margin-left: 5px; margin-right: 10px;">Text fields</span>
+                  <div class="mb-2">
+                    <small class="form-text text-muted">Free-text follow-up questions for the model after span
+                      annotations are generated.</small>
+                  </div>
+                </div>
+                <div id="textFields"></div>
+                <div class="col-auto mt-1">
+                  <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addTextField();">+</button>
+                </div>
+              </div>
+
+              <div class="row mt-4 mb-3 align-items-center" id="extra-fields-prompt-editor" style="display: none;">
+                <div class="col-auto">
+                  <i class="fa fa-commenting-o"></i>
+                  <span style="margin-left: 5px; margin-right: 10px;">Follow-up prompt for extra fields</span>
+                  <div class="mb-2">
+                    <small class="form-text text-muted">
+                      This second prompt is only used when at least one flag, option, slider, or text field is configured.
+                      It is prefilled automatically and you can edit it. You may use placeholders
+                      <code>{text}</code>, <code>{data}</code>, and <code>{annotations}</code>.
+                    </small>
+                  </div>
+                </div>
+                <div class="form-group mt-1">
+                  <textarea class="form-control" id="extra-fields-prompt-template" name="extra-fields-prompt-template"
+                    rows="12"></textarea>
+                </div>
+              </div>
+              {% endif %}
+
+              {% if mode == 'llm_eval' %}
               <div class="form-group mt-4 mb-3">
                 <i class="fa fa-text-width"></i>
                 <label style="margin-left: 5px; margin-right: 10px;" for="annotationGranularity">Annotation
@@ -470,6 +583,7 @@
   window.url_prefix = "{{ host_prefix }}";
   window.available_data = {{ available_data | tojson | safe }};
   window.configs = {{ configs | tojson | safe }};
+  window.crowdsourcing_configs = {{ crowdsourcing_configs | tojson | safe }};
   window.datasets = {{ datasets | tojson | safe }};
   window.default_prompts = {{ default_prompts | tojson | safe }};
   window.mode = "{{ mode }}";
