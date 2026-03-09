@@ -349,13 +349,31 @@ function initAnnotation() {
         });
 }
 
+function resetExampleAnnotationModal() {
+    $("#nextsteparea").hide();
+    $("#example-fields-area").hide();
+    $("#errorarea").empty();
+    $("#outputarea").empty();
+    $("#annotationarea").empty();
+    $("#example-flags").empty();
+    $("#example-options").empty();
+    $("#example-sliders").empty();
+    $("#example-text-fields").empty();
+    annotations = [];
+}
+
 function checkAndOpenModal() {
     const annotationSpanCategories = getAnnotationSpanCategories();
     if (annotationSpanCategories.length == 0) {
         alert("Please add at least one annotation span category.");
         return;
     }
+    resetExampleAnnotationModal();
     createButtons();
     var modal = new bootstrap.Modal('#exampleAnnotation');
     modal.show();
 }
+
+$('#exampleAnnotation').on('hidden.bs.modal', function () {
+    resetExampleAnnotationModal();
+});
