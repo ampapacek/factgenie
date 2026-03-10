@@ -617,6 +617,28 @@ body.overlay-open {
     padding-bottom: 40px;
 }
 
+.overlay-preference-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid #d8d8d8;
+    border-radius: 0.5rem;
+    background: #fafafa;
+}
+
+.overlay-preference-box .form-check-input {
+    margin-top: 0;
+    margin-left: 0;
+    position: static;
+    flex: 0 0 auto;
+    border-color: #8f8f8f;
+}
+
+.overlay-preference-box .form-check-label {
+    margin-bottom: 0;
+}
+
 #submit-annotation-box {
     margin-top: 20px;
     margin-bottom: 20px;

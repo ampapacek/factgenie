@@ -157,7 +157,13 @@
       <div id="overlay-start-instructions" {% if annotator_preferences.hide_instructions_next_time %}style="display: none;"{% endif %}>
         {{ instructions | safe }}
       </div>
-      <div class="mt-3">
+      <div class="mt-3 d-flex flex-wrap align-items-center gap-3">
+        <div class="form-check overlay-preference-box">
+          <input class="form-check-input" type="checkbox" id="hide-instructions-next-time" {% if annotator_preferences.hide_instructions_next_time %}checked{% endif %}>
+          <label class="form-check-label" for="hide-instructions-next-time">
+            Hide instructions next time
+          </label>
+        </div>
         <button id="hideOverlayBtn" class="btn btn-primary" disabled>Loading examples...</button>
       </div>
     </div>

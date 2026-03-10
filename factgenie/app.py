@@ -581,6 +581,30 @@ def annotator_login():
         hide_instructions_next_time=existing.get("hide_instructions_next_time", False),
     )
 
+
+@app.route("/annotator/update_preferences", methods=["POST"])
+def annotator_update_preferences():
+    data = request.get_json() or {}
+    campaign_id = data.get("campaign_id")
+    annotator_id = _normalize_annotator_id(data.get("annotator_id"))
+
+    if not campaign_id or not annotator_id:
+        return utils.error("Missing campaign_id or annotator_id")
+
+    annotators = _load_annotator_registry(campaign_id)
+    existing = _find_existing_annotator(annotators, annotator_id)
+    if not existing:
+        return utils.error("Annotator not found.")
+
+    existing["hide_instructions_next_time"] = bool(data.get("hide_instructions_next_time", False))
+    _save_annotator_registry(campaign_id, annotators)
+
+    return jsonify(
+        success=True,
+        annotator_id=existing["id"],
+        hide_instructions_next_time=existing["hide_instructions_next_time"],
+    )
+
 @app.route("/app_config", methods=["GET"])
 @login_required
 def app_config():

@@ -166,6 +166,7 @@ function applyOverlayInstructionPreference() {
     const url = new URL(window.location.href);
     const forceShowInstructions = url.searchParams.get("showInstructions") === "1";
     const hidden = !forceShowInstructions && !!annotator_preferences.hide_instructions_next_time;
+    $("#hide-instructions-next-time").prop("checked", !!annotator_preferences.hide_instructions_next_time);
     $("#overlay-start-hidden-message").toggle(hidden);
     $("#overlay-start-instructions").toggle(!hidden);
 
@@ -179,6 +180,24 @@ function checkAnnotatorExists(annotatorId) {
     return $.get(`${url_prefix}/annotator/exists`, {
         campaign_id: metadata.id,
         annotator_id: annotatorId,
+    });
+}
+
+function saveOverlayInstructionPreference() {
+    const hidden = $("#hide-instructions-next-time").is(":checked");
+    annotator_preferences.hide_instructions_next_time = hidden;
+
+    return $.ajax({
+        method: "POST",
+        url: `${url_prefix}/annotator/update_preferences`,
+        contentType: "application/json",
+        data: JSON.stringify({
+            campaign_id: metadata.id,
+            annotator_id: annotator_id,
+            hide_instructions_next_time: hidden,
+        }),
+    }).fail(function () {
+        console.error("Failed to update annotator preferences.");
     });
 }
 
@@ -723,6 +742,7 @@ function syncOverlayScrollLock() {
 
 
 $("#hideOverlayBtn").click(function () {
+    saveOverlayInstructionPreference();
     $("body").addClass("annotation-ui-ready");
     $("#overlay-start").fadeOut(function () {
         syncOverlayScrollLock();
