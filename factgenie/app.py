@@ -1045,6 +1045,26 @@ def llm_campaign_update_config():
     return utils.success()
 
 
+@app.route("/llm_campaign/validate_model", methods=["POST"])
+@login_required
+def llm_campaign_validate_model():
+    data = request.get_json() or {}
+    provider = data.get("provider")
+    model_name = data.get("model")
+
+    if provider != "openrouter":
+        return jsonify(
+            success=True,
+            available=True,
+            lookup_failed=False,
+            suggestions=[],
+            message=None,
+        )
+
+    result = llm_campaign.validate_openrouter_model(model_name)
+    return jsonify(success=True, **result)
+
+
 @app.route("/llm_campaign/progress/<campaign_id>", methods=["GET", "POST"])
 @login_required
 def listen(campaign_id):

@@ -2,6 +2,7 @@
 
 import ast
 import datetime
+import difflib
 import json
 import logging
 import os
@@ -21,6 +22,7 @@ from factgenie import CAMPAIGN_DIR, OUTPUT_DIR, TEMPLATES_DIR
 from factgenie.campaign import CampaignMode, CampaignStatus, ExampleStatus
 
 logger = logging.getLogger("factgenie")
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
 
 def format_campaign_processing_error(dataset_id, split, example_idx, error):
@@ -256,6 +258,86 @@ def pause_llm_campaign(app, campaign_id):
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
     campaign.metadata["status"] = CampaignStatus.IDLE
     campaign.update_metadata()
+
+
+def _openrouter_headers():
+    headers = {"Accept": "application/json"}
+
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    return headers
+
+
+def fetch_openrouter_model_ids(timeout=10):
+    response = requests.get(OPENROUTER_MODELS_URL, headers=_openrouter_headers(), timeout=timeout)
+    response.raise_for_status()
+
+    payload = response.json()
+    models = payload.get("data")
+    if not isinstance(models, list):
+        raise ValueError("OpenRouter response did not contain a valid `data` list.")
+
+    model_ids = []
+    for model in models:
+        model_id = model.get("id")
+        if isinstance(model_id, str) and model_id:
+            model_ids.append(model_id)
+
+    if not model_ids:
+        raise ValueError("OpenRouter response did not contain any model IDs.")
+
+    return sorted(set(model_ids))
+
+
+def suggest_openrouter_models(model_name, model_ids, limit=3):
+    normalized_to_original = {model_id.lower(): model_id for model_id in model_ids}
+    lower_matches = difflib.get_close_matches(model_name.lower(), normalized_to_original.keys(), n=limit, cutoff=0.5)
+    return [normalized_to_original[match] for match in lower_matches]
+
+
+def validate_openrouter_model(model_name):
+    model_name = (model_name or "").strip()
+
+    if not model_name:
+        return {
+            "available": False,
+            "lookup_failed": False,
+            "suggestions": [],
+            "message": "Please enter an OpenRouter model name.",
+        }
+
+    try:
+        model_ids = fetch_openrouter_model_ids()
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning(f"OpenRouter model lookup failed for {model_name}: {exc}")
+        return {
+            "available": False,
+            "lookup_failed": True,
+            "suggestions": [],
+            "message": f"Could not verify OpenRouter model availability: {exc}",
+        }
+
+    if model_name in model_ids:
+        return {
+            "available": True,
+            "lookup_failed": False,
+            "suggestions": [],
+            "message": f"OpenRouter model `{model_name}` is available.",
+        }
+
+    suggestions = suggest_openrouter_models(model_name, model_ids)
+    message = f"OpenRouter model `{model_name}` is not available."
+    if suggestions:
+        message += " Did you mean: " + ", ".join(f"`{suggestion}`" for suggestion in suggestions) + "?"
+
+    return {
+        "available": False,
+        "lookup_failed": False,
+        "suggestions": suggestions,
+        "message": message,
+    }
 
 
 def parse_llm_gen_config(config):

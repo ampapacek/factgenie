@@ -135,6 +135,16 @@ class OpenAIAPI(ModelAPI):
         return ""
 
 
+@register_model_api(name="openrouter")
+class OpenRouterAPI(ModelAPI):
+    # https://docs.litellm.ai/docs/providers/openrouter
+    def __init__(self, config, api_kwargs: dict = {}):
+        super().__init__(config, api_kwargs)
+
+    def _service_prefix(self):
+        return "openrouter/"
+
+
 @register_model_api(name="ollama")
 class OllamaAPI(ModelAPI):
     # https://docs.litellm.ai/docs/providers/ollama
