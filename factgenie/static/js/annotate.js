@@ -128,11 +128,9 @@ function setAnnotatorAuthMode(mode) {
     if (mode === "register") {
         $("#annotator-auth-register-btn").addClass("active");
         $("#annotator-auth-login-btn").removeClass("active");
-        $("#annotator-register-preference-box").show();
     } else {
         $("#annotator-auth-login-btn").addClass("active");
         $("#annotator-auth-register-btn").removeClass("active");
-        $("#annotator-register-preference-box").hide();
     }
 }
 
@@ -173,6 +171,11 @@ function applyOverlayInstructionPreference() {
     if (forceShowInstructions) {
         url.searchParams.delete("showInstructions");
         window.history.replaceState({}, "", url.toString());
+    } else if (hidden) {
+        $("body").addClass("annotation-ui-ready");
+        $("#overlay-start").hide();
+        syncOverlayScrollLock();
+        window.dispatchEvent(new Event("resize"));
     }
 }
 
@@ -219,7 +222,6 @@ function submitAnnotatorAuth() {
         data: JSON.stringify({
             campaign_id: metadata.id,
             annotator_id: normalized,
-            hide_instructions_next_time: $("#annotator-hide-instructions-next-time").is(":checked"),
         }),
         success: function (response) {
             if (response.success !== true) {
@@ -229,7 +231,7 @@ function submitAnnotatorAuth() {
                 return;
             }
             localStorage.setItem(`factgenie_annotator_id_${metadata.id}`, response.annotator_id);
-            redirectWithAnnotatorId(response.annotator_id, endpoint === "register");
+            redirectWithAnnotatorId(response.annotator_id);
         },
         error: function (xhr) {
             const errorMsg = xhr.responseJSON?.error || "Authentication failed.";

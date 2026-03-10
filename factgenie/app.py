@@ -522,7 +522,7 @@ def annotator_register():
     data = request.get_json() or {}
     campaign_id = data.get("campaign_id")
     annotator_id = _normalize_annotator_id(data.get("annotator_id"))
-    hide_instructions_next_time = bool(data.get("hide_instructions_next_time", True))
+    hide_instructions_next_time = bool(data.get("hide_instructions_next_time", False))
 
     if not campaign_id or not annotator_id:
         return utils.error("Missing campaign_id or annotator_id")
