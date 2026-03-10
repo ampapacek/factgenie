@@ -1,6 +1,65 @@
 const available_data = window.available_data;
 window.llmCampaignListeners = window.llmCampaignListeners || {};
 
+function submitLLMCampaignCreate(campaignId, campaignData, config) {
+    $.post({
+        url: `${url_prefix}/${mode}/create`,
+        contentType: 'application/json',
+        data: JSON.stringify({
+            campaignId: campaignId,
+            campaignData: campaignData,
+            config: config
+        }),
+        success: function (response) {
+            console.log(response);
+
+            if (response.success !== true) {
+                alert(response.error);
+            } else {
+                window.location.href = `${url_prefix}/${mode}`;
+            }
+        }
+    });
+}
+
+function validateOpenRouterModel(config, onValid) {
+    $.post({
+        url: `${url_prefix}/llm_campaign/validate_model`,
+        contentType: 'application/json',
+        data: JSON.stringify({
+            provider: config.apiProvider,
+            model: config.modelName,
+        }),
+        success: function (response) {
+            console.log(response);
+
+            if (response.success !== true) {
+                alert(response.error || "Failed to validate the OpenRouter model.");
+                return;
+            }
+
+            if (response.lookup_failed) {
+                alert(response.message || "Could not verify OpenRouter model availability. Proceeding anyway.");
+                onValid();
+                return;
+            }
+
+            if (!response.available) {
+                alert(response.message || "OpenRouter model is not available.");
+                return;
+            }
+
+            onValid();
+        },
+        error: function (error) {
+            const message = (error.responseJSON && error.responseJSON.error)
+                || "Could not verify OpenRouter model availability. Proceeding anyway.";
+            alert(message);
+            onValid();
+        }
+    });
+}
+
 function clearCampaign(campaignId) {
     // ask for confirmation
     if (!confirm("Are you sure you want to clear all campaign outputs?")) {
@@ -51,7 +110,7 @@ function createLLMCampaign() {
     // const llmConfig = $('#llmConfig').val();
 
     const config = gatherConfig();
-    var campaignData = gatherSelectedCombinations();
+    const campaignData = gatherSelectedCombinations();
 
     // if no annotation categories are created, show an alert
     if (mode != "llm_gen" && config.annotationSpanCategories.length == 0) {
@@ -65,24 +124,14 @@ function createLLMCampaign() {
         return;
     }
 
-    $.post({
-        url: `${url_prefix}/${mode}/create`,
-        contentType: 'application/json', // Specify JSON content type
-        data: JSON.stringify({
-            campaignId: campaignId,
-            campaignData: campaignData,
-            config: config
-        }),
-        success: function (response) {
-            console.log(response);
+    if (config.apiProvider === "openrouter") {
+        validateOpenRouterModel(config, function () {
+            submitLLMCampaignCreate(campaignId, campaignData, config);
+        });
+        return;
+    }
 
-            if (response.success !== true) {
-                alert(response.error);
-            } else {
-                window.location.href = `${url_prefix}/${mode}`;
-            }
-        }
-    });
+    submitLLMCampaignCreate(campaignId, campaignData, config);
 }
 
 function createHumanCampaign() {
