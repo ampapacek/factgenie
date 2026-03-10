@@ -23,6 +23,8 @@ api_keys:
   GEMINI_API_KEY: ''
   # https://docs.litellm.ai/docs/providers/openai
   OPENAI_API_KEY: ''
+  # https://docs.litellm.ai/docs/providers/openrouter
+  OPENROUTER_API_KEY: ''
   # https://docs.litellm.ai/docs/providers/vertex
   VERTEXAI_LOCATION: ''
   VERTEXAI_PROJECT: ''
