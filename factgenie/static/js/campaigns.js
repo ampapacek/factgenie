@@ -1,5 +1,65 @@
 const available_data = window.available_data;
 window.llmCampaignListeners = window.llmCampaignListeners || {};
+let openRouterValidationTimer = null;
+let openRouterValidationRequestId = 0;
+
+function setOpenRouterModelStatus(message, level) {
+    const statusElem = $("#openrouter-model-status");
+    if (statusElem.length === 0) {
+        return;
+    }
+
+    statusElem
+        .removeClass("d-none text-muted text-success text-warning text-danger")
+        .addClass(level)
+        .text(message);
+}
+
+function clearOpenRouterModelStatus() {
+    const statusElem = $("#openrouter-model-status");
+    if (statusElem.length === 0) {
+        return;
+    }
+
+    statusElem
+        .removeClass("text-success text-warning text-danger")
+        .addClass("d-none text-muted")
+        .text("");
+}
+
+function scheduleOpenRouterValidation() {
+    if (openRouterValidationTimer) {
+        clearTimeout(openRouterValidationTimer);
+    }
+
+    const provider = $("#api-provider").val();
+    const modelName = $("#model-name").val().trim();
+
+    if (provider !== "openrouter") {
+        clearOpenRouterModelStatus();
+        return;
+    }
+
+    if (modelName.length === 0) {
+        setOpenRouterModelStatus("Enter an OpenRouter model name to validate it while typing.", "text-muted");
+        return;
+    }
+
+    setOpenRouterModelStatus("Checking OpenRouter model availability...", "text-muted");
+    openRouterValidationTimer = setTimeout(function () {
+        validateOpenRouterModel(
+            {
+                apiProvider: provider,
+                modelName: modelName,
+            },
+            {
+                showAlerts: false,
+                allowLookupFailure: false,
+                updateStatus: true,
+            }
+        );
+    }, 350);
+}
 
 function submitLLMCampaignCreate(campaignId, campaignData, config) {
     $.post({
@@ -22,7 +82,10 @@ function submitLLMCampaignCreate(campaignId, campaignData, config) {
     });
 }
 
-function validateOpenRouterModel(config, onValid) {
+function validateOpenRouterModel(config, options) {
+    options = options || {};
+    const requestId = ++openRouterValidationRequestId;
+
     $.post({
         url: `${url_prefix}/llm_campaign/validate_model`,
         contentType: 'application/json',
@@ -33,29 +96,70 @@ function validateOpenRouterModel(config, onValid) {
         success: function (response) {
             console.log(response);
 
+            if (options.updateStatus && requestId !== openRouterValidationRequestId) {
+                return;
+            }
+
             if (response.success !== true) {
-                alert(response.error || "Failed to validate the OpenRouter model.");
+                if (options.updateStatus) {
+                    setOpenRouterModelStatus(response.error || "Failed to validate the OpenRouter model.", "text-danger");
+                }
+                if (options.showAlerts) {
+                    alert(response.error || "Failed to validate the OpenRouter model.");
+                }
                 return;
             }
 
             if (response.lookup_failed) {
-                alert(response.message || "Could not verify OpenRouter model availability. Proceeding anyway.");
-                onValid();
+                if (options.updateStatus) {
+                    setOpenRouterModelStatus(
+                        response.message || "Could not verify OpenRouter model availability.",
+                        "text-warning"
+                    );
+                }
+                if (options.showAlerts) {
+                    alert(response.message || "Could not verify OpenRouter model availability. Proceeding anyway.");
+                }
+                if (options.allowLookupFailure && options.onValid) {
+                    options.onValid();
+                }
                 return;
             }
 
             if (!response.available) {
-                alert(response.message || "OpenRouter model is not available.");
+                if (options.updateStatus) {
+                    setOpenRouterModelStatus(response.message || "OpenRouter model is not available.", "text-danger");
+                }
+                if (options.showAlerts) {
+                    alert(response.message || "OpenRouter model is not available.");
+                }
                 return;
             }
 
-            onValid();
+            if (options.updateStatus) {
+                setOpenRouterModelStatus(response.message || "OpenRouter model is available.", "text-success");
+            }
+            if (options.onValid) {
+                options.onValid();
+            }
         },
         error: function (error) {
             const message = (error.responseJSON && error.responseJSON.error)
                 || "Could not verify OpenRouter model availability. Proceeding anyway.";
-            alert(message);
-            onValid();
+
+            if (options.updateStatus && requestId !== openRouterValidationRequestId) {
+                return;
+            }
+
+            if (options.updateStatus) {
+                setOpenRouterModelStatus(message, "text-warning");
+            }
+            if (options.showAlerts) {
+                alert(message);
+            }
+            if (options.allowLookupFailure && options.onValid) {
+                options.onValid();
+            }
         }
     });
 }
@@ -125,8 +229,13 @@ function createLLMCampaign() {
     }
 
     if (config.apiProvider === "openrouter") {
-        validateOpenRouterModel(config, function () {
-            submitLLMCampaignCreate(campaignId, campaignData, config);
+        validateOpenRouterModel(config, {
+            showAlerts: true,
+            allowLookupFailure: true,
+            updateStatus: true,
+            onValid: function () {
+                submitLLMCampaignCreate(campaignId, campaignData, config);
+            }
         });
         return;
     }
@@ -1019,6 +1128,8 @@ function updateLLMMetricConfig() {
         const start_with = cfg.start_with;
         $("#start-with").val(start_with);
     }
+
+    scheduleOpenRouterValidation();
 }
 
 $(document).on("input", "#extra-fields-prompt-template", function () {
@@ -1032,3 +1143,5 @@ $(document).on(
         updateExtraFieldsPromptEditor();
     }
 );
+$("#api-provider").on("change", scheduleOpenRouterValidation);
+$("#model-name").on("input", scheduleOpenRouterValidation);
