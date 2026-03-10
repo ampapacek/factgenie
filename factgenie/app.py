@@ -332,6 +332,12 @@ def annotate(campaign_id):
             template_annotator_id = raw_annotator_id.strip()
 
     metadata = campaign.metadata
+    annotator_preferences = {"hide_instructions_next_time": False}
+    normalized_annotator_id = _normalize_annotator_id(template_annotator_id)
+    if normalized_annotator_id and normalized_annotator_id != PREVIEW_STUDY_ID:
+        existing = _find_existing_annotator(_load_annotator_registry(campaign_id), normalized_annotator_id)
+        if existing:
+            annotator_preferences["hide_instructions_next_time"] = existing.get("hide_instructions_next_time", False)
     annotation_set = crowdsourcing.get_annotator_batch(app, campaign, service_ids, batch_idx=batch_idx)
 
     if not annotation_set:
@@ -347,6 +353,7 @@ def annotate(campaign_id):
         host_prefix=app.config["host_prefix"],
         annotation_set=annotation_set,
         annotator_id=template_annotator_id,
+        annotator_preferences=annotator_preferences,
         metadata=metadata,
     )
 
@@ -409,8 +416,17 @@ def _normalize_annotator_records(records):
 
         if not alias or alias in used_aliases:
             alias = _next_available_alias(used_aliases)
+        hide_instructions_next_time = False
+        if isinstance(record, dict):
+            hide_instructions_next_time = bool(record.get("hide_instructions_next_time", False))
 
-        normalized.append({"id": annotator_id, "alias": alias})
+        normalized.append(
+            {
+                "id": annotator_id,
+                "alias": alias,
+                "hide_instructions_next_time": hide_instructions_next_time,
+            }
+        )
         seen_ids.add(key)
         used_aliases.add(alias)
 
@@ -497,6 +513,7 @@ def annotator_exists():
         exists=existing is not None,
         annotator_id=(existing["id"] if existing else annotator_id),
         annotator_alias=(existing["alias"] if existing else None),
+        hide_instructions_next_time=(existing.get("hide_instructions_next_time", False) if existing else False),
     )
 
 
@@ -505,6 +522,7 @@ def annotator_register():
     data = request.get_json() or {}
     campaign_id = data.get("campaign_id")
     annotator_id = _normalize_annotator_id(data.get("annotator_id"))
+    hide_instructions_next_time = bool(data.get("hide_instructions_next_time", True))
 
     if not campaign_id or not annotator_id:
         return utils.error("Missing campaign_id or annotator_id")
@@ -515,13 +533,31 @@ def annotator_register():
     annotators = _load_annotator_registry(campaign_id)
     existing = _find_existing_annotator(annotators, annotator_id)
     if existing:
-        return jsonify(success=True, annotator_id=existing["id"], annotator_alias=existing["alias"], exists=True)
+        return jsonify(
+            success=True,
+            annotator_id=existing["id"],
+            annotator_alias=existing["alias"],
+            exists=True,
+            hide_instructions_next_time=existing.get("hide_instructions_next_time", False),
+        )
 
     used_aliases = {record["alias"] for record in annotators}
     alias = _next_available_alias(used_aliases)
-    annotators.append({"id": annotator_id, "alias": alias})
+    annotators.append(
+        {
+            "id": annotator_id,
+            "alias": alias,
+            "hide_instructions_next_time": hide_instructions_next_time,
+        }
+    )
     _save_annotator_registry(campaign_id, annotators)
-    return jsonify(success=True, annotator_id=annotator_id, annotator_alias=alias, exists=False)
+    return jsonify(
+        success=True,
+        annotator_id=annotator_id,
+        annotator_alias=alias,
+        exists=False,
+        hide_instructions_next_time=hide_instructions_next_time,
+    )
 
 
 @app.route("/annotator/login", methods=["POST"])
@@ -538,8 +574,12 @@ def annotator_login():
     if not existing:
         return utils.error("Annotator not found. Please register first.")
 
-    return jsonify(success=True, annotator_id=existing["id"], annotator_alias=existing["alias"])
-
+    return jsonify(
+        success=True,
+        annotator_id=existing["id"],
+        annotator_alias=existing["alias"],
+        hide_instructions_next_time=existing.get("hide_instructions_next_time", False),
+    )
 
 @app.route("/app_config", methods=["GET"])
 @login_required

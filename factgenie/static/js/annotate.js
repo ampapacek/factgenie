@@ -7,6 +7,7 @@ var current_example_idx = 0;
 var annotation_set = window.annotation_set;
 
 const total_examples = annotation_set.length;
+const annotator_preferences = window.annotator_preferences || { hide_instructions_next_time: false };
 
 var examples_cached = {};
 var annotatorAuthMode = "login";
@@ -127,9 +128,11 @@ function setAnnotatorAuthMode(mode) {
     if (mode === "register") {
         $("#annotator-auth-register-btn").addClass("active");
         $("#annotator-auth-login-btn").removeClass("active");
+        $("#annotator-register-preference-box").show();
     } else {
         $("#annotator-auth-login-btn").addClass("active");
         $("#annotator-auth-register-btn").removeClass("active");
+        $("#annotator-register-preference-box").hide();
     }
 }
 
@@ -147,11 +150,29 @@ function showAnnotatorAuthModal(mode, message) {
     annotatorAuthModal.show();
 }
 
-function redirectWithAnnotatorId(annotatorId) {
+function redirectWithAnnotatorId(annotatorId, forceShowInstructions = false) {
     const url = new URL(window.location.href);
     url.searchParams.set("annotatorId", annotatorId);
+    if (forceShowInstructions) {
+        url.searchParams.set("showInstructions", "1");
+    } else {
+        url.searchParams.delete("showInstructions");
+    }
     window.onbeforeunload = null;
     window.location.href = url.toString();
+}
+
+function applyOverlayInstructionPreference() {
+    const url = new URL(window.location.href);
+    const forceShowInstructions = url.searchParams.get("showInstructions") === "1";
+    const hidden = !forceShowInstructions && !!annotator_preferences.hide_instructions_next_time;
+    $("#overlay-start-hidden-message").toggle(hidden);
+    $("#overlay-start-instructions").toggle(!hidden);
+
+    if (forceShowInstructions) {
+        url.searchParams.delete("showInstructions");
+        window.history.replaceState({}, "", url.toString());
+    }
 }
 
 function checkAnnotatorExists(annotatorId) {
@@ -179,6 +200,7 @@ function submitAnnotatorAuth() {
         data: JSON.stringify({
             campaign_id: metadata.id,
             annotator_id: normalized,
+            hide_instructions_next_time: $("#annotator-hide-instructions-next-time").is(":checked"),
         }),
         success: function (response) {
             if (response.success !== true) {
@@ -188,7 +210,7 @@ function submitAnnotatorAuth() {
                 return;
             }
             localStorage.setItem(`factgenie_annotator_id_${metadata.id}`, response.annotator_id);
-            redirectWithAnnotatorId(response.annotator_id);
+            redirectWithAnnotatorId(response.annotator_id, endpoint === "register");
         },
         error: function (xhr) {
             const errorMsg = xhr.responseJSON?.error || "Authentication failed.";
@@ -751,6 +773,13 @@ $(document).ready(function () {
     syncOverlayScrollLock();
 
     initStickyAnnotationCategories();
+    applyOverlayInstructionPreference();
+
+    $("#show-overlay-instructions-link").on("click", function (e) {
+        e.preventDefault();
+        $("#overlay-start-hidden-message").hide();
+        $("#overlay-start-instructions").show();
+    });
 
     $("#close-error-overlay-btn").click(function () {
         setTimeout(syncOverlayScrollLock, 0);

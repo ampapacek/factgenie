@@ -78,6 +78,7 @@ def create_crowdsourcing_page(campaign_id, config):
 
     rendered_content = template.render(
         instructions=instructions_html,
+        annotator_preferences={"hide_instructions_next_time": False},
         annotation_span_categories=config.get("annotation_span_categories", []),
         flags=generate_flags(config.get("flags", [])),
         options=generate_options(config.get("options", [])),
