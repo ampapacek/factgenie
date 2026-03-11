@@ -182,8 +182,14 @@ def is_view_allowed(path):
     if app.config["login"].get("lock_view_pages", True):
         return False
 
-    # otherwise allow to view the main page, browse and analyze pages
-    if path == "/" or path.startswith("/browse") or path.startswith("/analyze"):
+    # otherwise allow the main page and whichever public view pages are enabled
+    if path == "/":
+        return True
+
+    if path.startswith("/browse"):
+        return True
+
+    if path.startswith("/analyze") and app.config["login"].get("show_analyze_without_login", True):
         return True
 
     # and lock the rest of pages

@@ -481,6 +481,9 @@ def create_app(**kwargs):
     config["login"]["lock_view_pages"] = os.getenv(
         "FACTGENIE_LOCK_VIEW_PAGES", config["login"].get("lock_view_pages", True)
     )
+    config["login"]["show_analyze_without_login"] = os.getenv(
+        "FACTGENIE_SHOW_ANALYZE_WITHOUT_LOGIN", config["login"].get("show_analyze_without_login", True)
+    )
     config["login"]["username"] = os.getenv("FACTGENIE_LOGIN_USERNAME", config["login"]["username"])
     config["login"]["password"] = os.getenv("FACTGENIE_LOGIN_PASSWORD", config["login"]["password"])
 

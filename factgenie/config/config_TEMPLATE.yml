@@ -2,8 +2,10 @@
 login:
   # require user login for all pages except the page for human annotators
   active: false
-  # if set to `false`, the Browse and Analyze pages will not require login even when login is active (useful for publishing results)
+  # if set to `false`, view pages can be opened without login depending on the per-page flags below
   lock_view_pages: true
+  # if view pages are public, also allow the Analyze pages without login
+  show_analyze_without_login: true
   # !!! change the default values !!!
   username: admin
   password: factgenie

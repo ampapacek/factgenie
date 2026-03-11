@@ -9,6 +9,7 @@ function updateConfig() {
         login: {
             active: $('#login_active').is(':checked'),
             lock_view_pages: $('#lock_view_pages').is(':checked'),
+            show_analyze_without_login: $('#show_analyze_without_login').is(':checked'),
             username: $('#login_username').val(),
             password: $('#login_password').val()
         },
