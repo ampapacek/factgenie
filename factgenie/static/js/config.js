@@ -16,6 +16,7 @@ function updateConfig() {
         api_keys: {
             OLLAMA_API_KEY: $('#ollama_api_key').val(),
             OPENAI_API_KEY: $('#openai_api_key').val(),
+            OPENROUTER_API_KEY: $('#openrouter_api_key').val(),
             ANTHROPIC_API_KEY: $('#anthropic_api_key').val(),
             GEMINI_API_KEY: $('#gemini_api_key').val(),
             VERTEXAI_PROJECT: $('#vertexai_project').val(),
