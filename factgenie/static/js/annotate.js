@@ -375,7 +375,8 @@ function fetchAnnotation(dataset, split, setup_id, example_idx, annotation_idx) 
             "dataset": dataset,
             "example_idx": example_idx,
             "split": split,
-            "setup_id": setup_id
+            "setup_id": setup_id,
+            "mode": window.mode,
         }, function (data) {
             $('<div>', {
                 id: `out-text-${annotation_idx}`,
