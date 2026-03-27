@@ -128,7 +128,7 @@ def instantiate_campaign(app, campaign_id, mode):
 
     if mode == CampaignMode.CROWDSOURCING:
         scheduler = app.db["scheduler"]
-        campaign = HumanCampaign(campaign_id=campaign_id, scheduler=scheduler)
+        campaign = HumanCampaign(campaign_id=campaign_id, scheduler=scheduler, lock=app.db["lock"])
     elif mode == CampaignMode.LLM_EVAL:
         campaign = LLMCampaignEval(campaign_id=campaign_id)
     elif mode == CampaignMode.LLM_GEN:

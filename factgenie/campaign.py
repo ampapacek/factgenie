@@ -155,23 +155,34 @@ class ExternalCampaign(Campaign):
 
 
 class HumanCampaign(Campaign):
-    def __init__(self, campaign_id, scheduler):
+    def __init__(self, campaign_id, scheduler, lock=None):
         super().__init__(campaign_id)
+        self.lock = lock
 
         scheduler.add_job(
             self.check_idle_time, "interval", minutes=1, id=f"idle_time_{self.campaign_id}", replace_existing=True
         )
 
     def check_idle_time(self):
-        current_time = datetime.now()
-        for _, example in self.db.iterrows():
-            if (
-                example.status == ExampleStatus.ASSIGNED
-                and (current_time - datetime.fromtimestamp(example.start)).total_seconds()
-                > self.metadata["config"]["idle_time"] * 60
-            ):
+        if self.lock is None:
+            return
+
+        with self.lock:
+            self.load_db()
+            current_time = datetime.now()
+            idle_indexes = []
+
+            for _, example in self.db.iterrows():
+                if (
+                    example.status == ExampleStatus.ASSIGNED
+                    and (current_time - datetime.fromtimestamp(example.start)).total_seconds()
+                    > self.metadata["config"]["idle_time"] * 60
+                ):
+                    idle_indexes.append(example.name)
+
+            for db_index in idle_indexes:
+                example = self.db.loc[db_index]
                 logger.info(f"Freeing example {example.example_idx} for {self.campaign_id} due to idle time")
-                db_index = example.name
                 self.clear_output_by_idx(db_index)
 
     def get_stats(self):

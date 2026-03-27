@@ -363,10 +363,10 @@ def get_examples_for_batch(db, batch_idx):
 
 
 def get_annotator_batch(app, campaign, service_ids, batch_idx=None):
-    db = campaign.db
-
     # simple locking over the CSV file to prevent double writes
     with app.db["lock"]:
+        campaign.load_db()
+        db = campaign.db
         annotator_id = service_ids["annotator_id"]
 
         logger.info(f"Acquiring lock for {annotator_id}")
@@ -409,6 +409,7 @@ def save_annotations(app, campaign_id, annotation_set, annotator_id, is_backup_i
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
 
     with app.db["lock"]:
+        campaign.load_db()
         db = campaign.db
         batch_idx = annotation_set[0]["batch_idx"]
 
