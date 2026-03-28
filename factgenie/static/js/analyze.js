@@ -199,6 +199,101 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function formatCoverageTimestamp(timestamp, options) {
+    const numericTimestamp = Number(timestamp);
+    if (!Number.isFinite(numericTimestamp) || numericTimestamp <= 0) {
+        return '';
+    }
+
+    const date = new Date(numericTimestamp * 1000);
+    if (Number.isNaN(date.getTime())) {
+        return '';
+    }
+
+    const formatter = new Intl.DateTimeFormat(undefined, {
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        ...(options || {}),
+    });
+    return formatter.format(date);
+}
+
+function formatCoverageElapsed(startTimestamp, endTimestamp) {
+    const start = Number(startTimestamp);
+    if (!Number.isFinite(start) || start <= 0) {
+        return '';
+    }
+
+    const end = Number(endTimestamp);
+    const endMs = Number.isFinite(end) && end > 0 ? end * 1000 : Date.now();
+    const diffSeconds = Math.max(0, Math.floor((endMs - (start * 1000)) / 1000));
+
+    const hours = Math.floor(diffSeconds / 3600);
+    const minutes = Math.floor((diffSeconds % 3600) / 60);
+    const seconds = diffSeconds % 60;
+
+    if (hours > 0) {
+        return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+    }
+    if (minutes > 0) {
+        return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+    }
+    return `${seconds}s`;
+}
+
+function formatCoverageStateLabel(state) {
+    if (state === 'done') {
+        return 'Done';
+    }
+    if (state === 'skipped') {
+        return 'Skipped';
+    }
+    if (state === 'assigned') {
+        return 'Assigned';
+    }
+    return 'Todo';
+}
+
+function buildCoverageTooltip(cell) {
+    const state = cell?.state || 'todo';
+    const start = formatCoverageTimestamp(cell?.start, { second: '2-digit' });
+    const end = formatCoverageTimestamp(cell?.end, { second: '2-digit' });
+    const elapsed = formatCoverageElapsed(cell?.start, cell?.end);
+
+    return [
+        `<div><strong>State:</strong> ${escapeHtml(formatCoverageStateLabel(state))}</div>`,
+        `<div><strong>Started:</strong> ${escapeHtml(start || '-')}</div>`,
+        `<div><strong>Ended:</strong> ${escapeHtml(end || '-')}</div>`,
+        `<div><strong>Elapsed time:</strong> ${escapeHtml(elapsed || '-')}</div>`,
+    ].join('');
+}
+
+function buildCoverageCellMeta(cell) {
+    const start = formatCoverageTimestamp(cell?.start);
+    const end = formatCoverageTimestamp(cell?.end, { hour: '2-digit', minute: '2-digit' });
+    const elapsed = formatCoverageElapsed(cell?.start, cell?.end);
+
+    if (!start && !end && !elapsed) {
+        return '';
+    }
+
+    const parts = [];
+    if (start && end) {
+        parts.push(`${escapeHtml(start)} -> ${escapeHtml(end)}`);
+    } else if (start) {
+        parts.push(escapeHtml(start));
+    } else if (end) {
+        parts.push(escapeHtml(end));
+    }
+    if (elapsed) {
+        parts.push(escapeHtml(elapsed));
+    }
+
+    return `<div class="small text-muted mt-1">${parts.join(' · ')}</div>`;
+}
+
 function slugifyField(label) {
     const base = String(label ?? '')
         .toLowerCase()
@@ -367,6 +462,9 @@ function statusBadge(status) {
     if (status === 'skipped') {
         return '<span class="badge bg-warning text-dark">skipped</span>';
     }
+    if (status === 'assigned') {
+        return '<span class="badge bg-assigned">assigned</span>';
+    }
     return '<span class="badge bg-secondary">todo</span>';
 }
 
@@ -522,7 +620,17 @@ function renderCoverageMatrix(coverageStats) {
         annotators.forEach((ann) => {
             const groupKey = ann.annotator_group_key;
             const status = row.statuses?.[groupKey] || 'todo';
-            html += `<td class="text-center"><a href="${browseUrl}" target="_blank">${statusBadge(status)}</a></td>`;
+            const cell = row.cell_details?.[groupKey] || { state: status };
+            const tooltip = buildCoverageTooltip(cell);
+            const meta = buildCoverageCellMeta(cell);
+            html += `
+                <td class="text-center">
+                  <a href="${browseUrl}" target="_blank" data-bs-toggle="tooltip" data-bs-html="true" title="${tooltip}">
+                    ${statusBadge(status)}
+                  </a>
+                  ${meta}
+                </td>
+            `;
         });
 
         html += `<td>${questionPreview}</td>`;
@@ -536,6 +644,7 @@ function renderCoverageMatrix(coverageStats) {
     `;
 
     $('#coverage-matrix-container').html(html);
+    enableTooltips();
 
     $('#coverage-export-csv-btn').off('click').on('click', function () {
         exportCoverageTable({

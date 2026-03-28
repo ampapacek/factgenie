@@ -421,6 +421,45 @@ def _normalize_annotator_group(group):
     return str(group)
 
 
+def _first_non_empty_value(values):
+    for value in values:
+        if value is None:
+            continue
+        if pd.isna(value):
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _aggregate_assignment_status(values):
+    normalized = [str(value).strip().lower() for value in values if value is not None and not pd.isna(value)]
+    if any(value == "finished" for value in normalized):
+        return "finished"
+    if any(value == "assigned" for value in normalized):
+        return "assigned"
+    return "free"
+
+
+def _normalize_timestamp_value(value):
+    if value is None or pd.isna(value):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _matrix_state_from_assignment_status(status):
+    normalized = str(status).strip().lower()
+    if normalized == "finished":
+        return "done"
+    if normalized == "assigned":
+        return "assigned"
+    return "todo"
+
+
 def _coverage_status(annotated_count, expected_count):
     if annotated_count <= 0:
         return "missing"
@@ -540,19 +579,42 @@ def compute_question_coverage_stats(app, campaign, example_index):
     assignment_cols = key_cols + ["annotator_group_key"]
 
     expected = pd.DataFrame(columns=assignment_cols)
+    assignment_details = pd.DataFrame(columns=assignment_cols + ["annotator_id", "assignment_status", "start", "end"])
     campaign_db = getattr(campaign, "db", pd.DataFrame())
 
     if isinstance(campaign_db, pd.DataFrame) and not campaign_db.empty and set(key_cols).issubset(campaign_db.columns):
-        expected = campaign_db[key_cols + (["annotator_group"] if "annotator_group" in campaign_db.columns else [])].copy()
-        if "annotator_group" not in expected.columns:
-            expected["annotator_group"] = 0
+        assignment_source = campaign_db.copy()
+        if "annotator_group" not in assignment_source.columns:
+            assignment_source["annotator_group"] = 0
+        if "annotator_id" not in assignment_source.columns:
+            assignment_source["annotator_id"] = ""
+        if "status" not in assignment_source.columns:
+            assignment_source["status"] = "free"
+        if "start" not in assignment_source.columns:
+            assignment_source["start"] = None
+        if "end" not in assignment_source.columns:
+            assignment_source["end"] = None
 
-        expected["example_idx"] = pd.to_numeric(expected["example_idx"], errors="coerce")
-        expected = expected.dropna(subset=key_cols)
-        if not expected.empty:
-            expected["example_idx"] = expected["example_idx"].astype(int)
-            expected["annotator_group_key"] = expected["annotator_group"].apply(_normalize_annotator_group)
-            expected = expected[key_cols + ["annotator_group_key"]].drop_duplicates()
+        assignment_source["example_idx"] = pd.to_numeric(assignment_source["example_idx"], errors="coerce")
+        assignment_source = assignment_source.dropna(subset=key_cols)
+        if not assignment_source.empty:
+            assignment_source["example_idx"] = assignment_source["example_idx"].astype(int)
+            assignment_source["annotator_group_key"] = assignment_source["annotator_group"].apply(_normalize_annotator_group)
+            assignment_source["annotator_id"] = assignment_source["annotator_id"].fillna("").astype(str).str.strip()
+            assignment_source["start"] = pd.to_numeric(assignment_source["start"], errors="coerce")
+            assignment_source["end"] = pd.to_numeric(assignment_source["end"], errors="coerce")
+
+            assignment_details = (
+                assignment_source.groupby(assignment_cols)
+                .agg(
+                    annotator_id=("annotator_id", _first_non_empty_value),
+                    assignment_status=("status", _aggregate_assignment_status),
+                    start=("start", "min"),
+                    end=("end", "max"),
+                )
+                .reset_index()
+            )
+            expected = assignment_details[assignment_cols].drop_duplicates()
 
     if expected.empty and not example_index.empty and set(key_cols).issubset(example_index.columns):
         expected = example_index.copy()
@@ -710,7 +772,27 @@ def compute_question_coverage_stats(app, campaign, example_index):
     alias_map = _load_campaign_annotator_alias_map(campaign)
 
     annotator_values = []
-    matrix_status = {}
+    annotator_value_set = set()
+    matrix_cells = {}
+
+    if not assignment_details.empty:
+        for _, assignment_row in assignment_details.iterrows():
+            annotator_id = str(assignment_row.get("annotator_id", "")).strip()
+            if not annotator_id:
+                continue
+
+            output_key = (
+                assignment_row["dataset"],
+                assignment_row["split"],
+                assignment_row["setup_id"],
+                int(assignment_row["example_idx"]),
+            )
+            annotator_value_set.add(annotator_id)
+            matrix_cells[(output_key, annotator_id)] = {
+                "state": _matrix_state_from_assignment_status(assignment_row.get("assignment_status", "free")),
+                "start": _normalize_timestamp_value(assignment_row.get("start")),
+                "end": _normalize_timestamp_value(assignment_row.get("end")),
+            }
 
     if (
         not example_index.empty
@@ -738,8 +820,6 @@ def compute_question_coverage_stats(app, campaign, example_index):
                 .reset_index()
             )
 
-            annotator_values = sorted(ann_agg["annotator_id"].unique(), key=lambda value: value.lower())
-
             for _, ann_row in ann_agg.iterrows():
                 output_key = (
                     ann_row["dataset"],
@@ -748,13 +828,22 @@ def compute_question_coverage_stats(app, campaign, example_index):
                     int(ann_row["example_idx"]),
                 )
                 annotator_id = ann_row["annotator_id"]
+                annotator_value_set.add(annotator_id)
                 if bool(ann_row["has_annotations_excluding_skipped"]):
                     status = "done"
                 elif bool(ann_row["skip_selected"]):
                     status = "skipped"
                 else:
                     status = "todo"
-                matrix_status[(output_key, annotator_id)] = status
+                cell_key = (output_key, annotator_id)
+                existing_cell = matrix_cells.get(cell_key, {})
+                matrix_cells[cell_key] = {
+                    "state": status,
+                    "start": existing_cell.get("start"),
+                    "end": existing_cell.get("end"),
+                }
+
+    annotator_values = sorted(annotator_value_set, key=lambda value: value.lower())
 
     # Question preview text for last column
     question_preview_map = {}
@@ -803,10 +892,13 @@ def compute_question_coverage_stats(app, campaign, example_index):
         group_parity = group_idx % 2
 
         row_statuses = {}
+        row_cell_details = {}
         row_done_count = 0
         for annotator_id in annotator_values:
-            status = matrix_status.get((output_key, annotator_id), "todo")
+            cell = matrix_cells.get((output_key, annotator_id), {"state": "todo", "start": None, "end": None})
+            status = cell["state"]
             row_statuses[annotator_id] = status
+            row_cell_details[annotator_id] = cell
             if status == "done":
                 row_done_count += 1
 
@@ -820,6 +912,7 @@ def compute_question_coverage_stats(app, campaign, example_index):
                 "group_parity": int(group_parity),
                 "question_preview": question_preview_map.get(question_key, ""),
                 "statuses": row_statuses,
+                "cell_details": row_cell_details,
             }
         )
 

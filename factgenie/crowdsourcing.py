@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -371,9 +372,10 @@ def get_annotator_batch(app, campaign, service_ids, batch_idx=None):
 
         logger.info(f"Acquiring lock for {annotator_id}")
         start = int(time.time())
-        seed = random.seed(str(start) + str(service_ids.values()))
+        seed_source = json.dumps({"start": start, "service_ids": service_ids}, sort_keys=True, default=str)
+        seed = int(hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:16], 16)
 
-        if not batch_idx:
+        if batch_idx is None or batch_idx == "":
             # usual case: an annotator opened the annotation page, we need to select the batch
             try:
                 batch_idx = select_batch(db, seed, annotator_id)
