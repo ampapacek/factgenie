@@ -251,8 +251,7 @@ function ensureAnnotatorAuth() {
         const isInvalid = INVALID_ANNOTATOR_IDS.includes(normalized);
 
         if (isInvalid) {
-            const stored = localStorage.getItem(`factgenie_annotator_id_${metadata.id}`) || "";
-            $("#annotator-name-input").val(stored);
+            $("#annotator-name-input").val("");
             showAnnotatorAuthModal("register");
             return;
         }
