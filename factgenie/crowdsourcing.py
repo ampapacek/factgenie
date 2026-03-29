@@ -373,7 +373,7 @@ def get_annotator_batch(app, campaign, service_ids, batch_idx=None):
         logger.info(f"Acquiring lock for {annotator_id}")
         start = int(time.time())
         seed_source = json.dumps({"start": start, "service_ids": service_ids}, sort_keys=True, default=str)
-        seed = int(hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:16], 16)
+        seed = int(hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:8], 16)
 
         if batch_idx is None or batch_idx == "":
             # usual case: an annotator opened the annotation page, we need to select the batch
