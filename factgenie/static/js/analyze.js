@@ -270,30 +270,6 @@ function buildCoverageTooltip(cell) {
     ].join('');
 }
 
-function buildCoverageCellMeta(cell) {
-    const start = formatCoverageTimestamp(cell?.start);
-    const end = formatCoverageTimestamp(cell?.end, { hour: '2-digit', minute: '2-digit' });
-    const elapsed = formatCoverageElapsed(cell?.start, cell?.end);
-
-    if (!start && !end && !elapsed) {
-        return '';
-    }
-
-    const parts = [];
-    if (start && end) {
-        parts.push(`${escapeHtml(start)} -> ${escapeHtml(end)}`);
-    } else if (start) {
-        parts.push(escapeHtml(start));
-    } else if (end) {
-        parts.push(escapeHtml(end));
-    }
-    if (elapsed) {
-        parts.push(escapeHtml(elapsed));
-    }
-
-    return `<div class="small text-muted mt-1">${parts.join(' · ')}</div>`;
-}
-
 function slugifyField(label) {
     const base = String(label ?? '')
         .toLowerCase()
@@ -622,13 +598,11 @@ function renderCoverageMatrix(coverageStats) {
             const status = row.statuses?.[groupKey] || 'todo';
             const cell = row.cell_details?.[groupKey] || { state: status };
             const tooltip = buildCoverageTooltip(cell);
-            const meta = buildCoverageCellMeta(cell);
             html += `
                 <td class="text-center">
                   <a href="${browseUrl}" target="_blank" data-bs-toggle="tooltip" data-bs-html="true" title="${tooltip}">
                     ${statusBadge(status)}
                   </a>
-                  ${meta}
                 </td>
             `;
         });
