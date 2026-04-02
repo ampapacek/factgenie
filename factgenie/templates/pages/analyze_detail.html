@@ -253,9 +253,17 @@
         <div id="coverage-stats-content" style="display:none;">
           <div class="d-flex justify-content-between align-items-center mt-2">
             <h5 class="mb-0">Annotation Matrix (outputs x annotators)</h5>
-            <div>
-              <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="coverage-export-csv-btn">Export CSV</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary" id="coverage-export-xls-btn">Export Excel</button>
+            <div class="columns columns-right btn-group float-right">
+              <div class="btn-group">
+                <button class="btn btn-secondary btn-sm dropdown-toggle" type="button"
+                  id="coverage-export-btn" data-bs-toggle="dropdown" aria-expanded="false" title="Export data">
+                  <i class="fa fa-download"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="coverage-export-btn">
+                <li><button class="dropdown-item" type="button" id="coverage-export-csv-btn">CSV</button></li>
+                <li><button class="dropdown-item" type="button" id="coverage-export-xls-btn">Excel</button></li>
+                </ul>
+              </div>
             </div>
           </div>
           <div class="text-muted small mt-2">
