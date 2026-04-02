@@ -508,6 +508,34 @@ body:not(.annotation-ui-ready) #text-type-info {
     display: none !important;
 }
 
+.coverage-matrix-wrapper {
+    overflow-x: auto;
+}
+
+.coverage-matrix-sticky-header {
+    position: fixed;
+    top: 0;
+    z-index: 1035;
+    display: none;
+    overflow: hidden;
+    pointer-events: none;
+    background: var(--bs-body-bg, #fff);
+    box-shadow: 0 2px 8px rgba(24, 39, 75, 0.12);
+}
+
+.coverage-matrix-sticky-header.is-visible {
+    display: block;
+}
+
+.coverage-matrix-sticky-header table {
+    margin-bottom: 0;
+    background: var(--bs-body-bg, #fff);
+}
+
+.coverage-matrix-sticky-header th {
+    background: var(--bs-body-bg, #fff);
+}
+
 .instructions-accordion-body {
     background-color: #eeeeee !important;
 }

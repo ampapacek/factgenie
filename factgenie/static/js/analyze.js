@@ -502,12 +502,132 @@ function exportCoverageXlsx(fileName) {
     }
 }
 
+let coverageStickyFrame = null;
+
+function scheduleCoverageStickySync() {
+    if (coverageStickyFrame !== null) {
+        return;
+    }
+
+    coverageStickyFrame = window.requestAnimationFrame(() => {
+        coverageStickyFrame = null;
+        syncCoverageStickyHeader();
+    });
+}
+
+function destroyCoverageStickyHeader() {
+    $(window).off('.coverageSticky');
+    $(document).off('.coverageSticky');
+    $('.coverage-matrix-wrapper').off('.coverageSticky');
+
+    if (coverageStickyFrame !== null) {
+        window.cancelAnimationFrame(coverageStickyFrame);
+        coverageStickyFrame = null;
+    }
+
+    $('#coverage-matrix-sticky-header').remove();
+}
+
+function buildCoverageStickyHeader() {
+    const table = document.getElementById('coverage-matrix-table');
+    if (!table) {
+        return null;
+    }
+
+    const thead = table.querySelector('thead');
+    if (!thead) {
+        return null;
+    }
+
+    let stickyHost = document.getElementById('coverage-matrix-sticky-header');
+    if (!stickyHost) {
+        stickyHost = document.createElement('div');
+        stickyHost.id = 'coverage-matrix-sticky-header';
+        stickyHost.className = 'coverage-matrix-sticky-header';
+        document.body.appendChild(stickyHost);
+    }
+
+    const stickyTable = document.createElement('table');
+    stickyTable.className = table.className;
+    stickyTable.appendChild(thead.cloneNode(true));
+
+    stickyHost.replaceChildren(stickyTable);
+    return stickyHost;
+}
+
+function syncCoverageStickyHeader() {
+    const wrapper = document.querySelector('#coverage-matrix-container .coverage-matrix-wrapper');
+    const table = document.getElementById('coverage-matrix-table');
+    const thead = table?.querySelector('thead');
+    const stickyHost = document.getElementById('coverage-matrix-sticky-header');
+    const stickyTable = stickyHost?.querySelector('table');
+
+    if (!wrapper || !table || !thead || !stickyHost || !stickyTable) {
+        return;
+    }
+
+    if (wrapper.offsetParent === null || table.offsetWidth === 0 || wrapper.clientWidth === 0) {
+        stickyHost.classList.remove('is-visible');
+        return;
+    }
+
+    const sourceCells = table.querySelectorAll('thead th');
+    const stickyCells = stickyTable.querySelectorAll('thead th');
+
+    if (sourceCells.length !== stickyCells.length) {
+        buildCoverageStickyHeader();
+        scheduleCoverageStickySync();
+        return;
+    }
+
+    sourceCells.forEach((cell, index) => {
+        const width = Math.ceil(cell.getBoundingClientRect().width);
+        stickyCells[index].style.width = `${width}px`;
+        stickyCells[index].style.minWidth = `${width}px`;
+        stickyCells[index].style.maxWidth = `${width}px`;
+    });
+
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const tableRect = table.getBoundingClientRect();
+    const headerRect = thead.getBoundingClientRect();
+    const headerHeight = Math.ceil(headerRect.height || 0);
+
+    stickyHost.style.left = `${Math.round(wrapperRect.left)}px`;
+    stickyHost.style.width = `${Math.round(wrapperRect.width)}px`;
+    stickyTable.style.width = `${Math.ceil(tableRect.width)}px`;
+    stickyTable.style.transform = `translateX(${-wrapper.scrollLeft}px)`;
+
+    const shouldShow = headerRect.top <= 0 && tableRect.bottom - headerHeight > 0;
+    stickyHost.classList.toggle('is-visible', shouldShow);
+}
+
+function setupCoverageStickyHeader() {
+    if (!buildCoverageStickyHeader()) {
+        return;
+    }
+
+    scheduleCoverageStickySync();
+
+    $(window)
+        .off('scroll.coverageSticky resize.coverageSticky')
+        .on('scroll.coverageSticky resize.coverageSticky', scheduleCoverageStickySync);
+
+    $(document)
+        .off('shown.bs.tab.coverageSticky')
+        .on('shown.bs.tab.coverageSticky', '[data-bs-toggle="pill"], [data-bs-toggle="tab"]', scheduleCoverageStickySync);
+
+    $('.coverage-matrix-wrapper')
+        .off('scroll.coverageSticky')
+        .on('scroll.coverageSticky', scheduleCoverageStickySync);
+}
+
 function renderCoverageMatrix(coverageStats) {
     const matrix = coverageStats?.matrix;
     const annotators = matrix?.annotators || [];
     const rows = matrix?.rows || [];
 
     if (!matrix || annotators.length === 0 || rows.length === 0) {
+        destroyCoverageStickyHeader();
         $('#coverage-stats-empty').show();
         $('#coverage-stats-content').hide();
         return;
@@ -537,7 +657,7 @@ function renderCoverageMatrix(coverageStats) {
     })();
 
     let html = `
-      <div class="table-responsive">
+      <div class="coverage-matrix-wrapper">
         <table id="coverage-matrix-table" class="table table-bordered table-sm align-middle">
           <thead>
             <tr>
@@ -618,6 +738,7 @@ function renderCoverageMatrix(coverageStats) {
     `;
 
     $('#coverage-matrix-container').html(html);
+    setupCoverageStickyHeader();
     enableTooltips();
 
     $('#coverage-export-csv-btn').off('click').on('click', function () {
