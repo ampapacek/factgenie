@@ -621,6 +621,55 @@ function setupCoverageStickyHeader() {
         .on('scroll.coverageSticky', scheduleCoverageStickySync);
 }
 
+function computeCoverageHeaderCounts(rows, annotators) {
+    const countsByGroup = {};
+
+    annotators.forEach((ann) => {
+        countsByGroup[ann.annotator_group_key] = {
+            done: 0,
+            skipped: 0,
+            todo: 0,
+        };
+    });
+
+    rows.forEach((row) => {
+        annotators.forEach((ann) => {
+            const groupKey = ann.annotator_group_key;
+            const status = row.statuses?.[groupKey] || 'todo';
+            if (status === 'done') {
+                countsByGroup[groupKey].done += 1;
+            } else if (status === 'skipped') {
+                countsByGroup[groupKey].skipped += 1;
+            } else {
+                countsByGroup[groupKey].todo += 1;
+            }
+        });
+    });
+
+    return countsByGroup;
+}
+
+function computeCoverageRowCounts(row, annotators) {
+    const counts = {
+        done: 0,
+        skipped: 0,
+        todo: 0,
+    };
+
+    annotators.forEach((ann) => {
+        const status = row.statuses?.[ann.annotator_group_key] || 'todo';
+        if (status === 'done') {
+            counts.done += 1;
+        } else if (status === 'skipped') {
+            counts.skipped += 1;
+        } else {
+            counts.todo += 1;
+        }
+    });
+
+    return counts;
+}
+
 function renderCoverageMatrix(coverageStats) {
     const matrix = coverageStats?.matrix;
     const annotators = matrix?.annotators || [];
@@ -635,6 +684,8 @@ function renderCoverageMatrix(coverageStats) {
 
     $('#coverage-stats-empty').hide();
     $('#coverage-stats-content').show();
+
+    const headerCounts = computeCoverageHeaderCounts(rows, annotators);
 
     const outputPaths = rows.map((row) => `${row.dataset}/${row.split}/${row.setup_id}`);
     const commonPrefix = (() => {
@@ -661,7 +712,7 @@ function renderCoverageMatrix(coverageStats) {
         <table id="coverage-matrix-table" class="table table-bordered table-sm align-middle">
           <thead>
             <tr>
-              <th rowspan="3" style="min-width: 75px;">Done</th>
+              <th rowspan="3" style="min-width: 88px;">Totals</th>
               <th rowspan="3" style="min-width: 160px;">Output</th>
     `;
 
@@ -686,7 +737,16 @@ function renderCoverageMatrix(coverageStats) {
     `;
 
     annotators.forEach((ann) => {
-        html += `<th class="text-center">${ann.done_count ?? 0}</th>`;
+        const counts = headerCounts[ann.annotator_group_key] || { done: 0, skipped: 0, todo: 0 };
+        html += `
+            <th class="text-center">
+              <div class="d-flex justify-content-center align-items-center gap-1 flex-wrap">
+                <span class="badge bg-success">${counts.done}</span>
+                <span class="badge bg-warning text-dark">${counts.skipped}</span>
+                <span class="badge bg-secondary">${counts.todo}</span>
+              </div>
+            </th>
+        `;
     });
 
     html += `
@@ -696,7 +756,7 @@ function renderCoverageMatrix(coverageStats) {
     `;
 
     rows.forEach((row) => {
-        const rowDone = Number(row.row_done_count || 0);
+        const rowCounts = computeCoverageRowCounts(row, annotators);
         const rowClass = Number(row.group_parity || 0) % 2 === 0 ? 'table-light' : '';
         const questionPreview = escapeHtml(row.question_preview || '');
         const fullOutputPath = `${row.dataset}/${row.split}/${row.setup_id}`;
@@ -705,12 +765,16 @@ function renderCoverageMatrix(coverageStats) {
             : fullOutputPath;
         const outputLabel = `${escapeHtml(outputPath)} #${row.example_idx}`;
         const browseUrl = buildBrowseUrl(row);
-        const doneCell = rowDone > 0
-            ? `<span class="badge bg-success">${rowDone}</span>`
-            : `<span class="badge bg-danger">${rowDone}</span>`;
+        const totalsCell = `
+            <div class="d-flex justify-content-center align-items-center gap-1 flex-wrap">
+              <span class="badge bg-success">${rowCounts.done}</span>
+              <span class="badge bg-warning text-dark">${rowCounts.skipped}</span>
+              <span class="badge bg-secondary">${rowCounts.todo}</span>
+            </div>
+        `;
 
         html += `<tr class="${rowClass}">`;
-        html += `<td class="text-center">${doneCell}</td>`;
+        html += `<td class="text-center">${totalsCell}</td>`;
         html += `<td><a href="${browseUrl}" target="_blank">${outputLabel}</a></td>`;
 
         annotators.forEach((ann) => {
