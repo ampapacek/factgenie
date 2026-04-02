@@ -431,6 +431,36 @@ function buildBrowseUrl(row) {
     return `${url_prefix}/browse?${params.toString()}`;
 }
 
+function normalizeCoverageAnnotatorKey(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (!text) {
+        return '';
+    }
+    return text.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function buildCoverageCellBrowseUrl(row, annotatorId, status) {
+    const browseUrl = buildBrowseUrl(row);
+    if (!['done', 'skipped'].includes(status)) {
+        return browseUrl;
+    }
+
+    const campaignId = String(metadata?.id || '').trim();
+    const annotatorKey = normalizeCoverageAnnotatorKey(annotatorId);
+    if (!campaignId || !annotatorKey) {
+        return browseUrl;
+    }
+
+    const params = new URLSearchParams({
+        dataset: row.dataset,
+        split: row.split,
+        example_idx: row.example_idx,
+        setup_id: row.setup_id,
+        ann_campaign: `${campaignId}-ann-${annotatorKey}`,
+    });
+    return `${url_prefix}/browse?${params.toString()}`;
+}
+
 function statusBadge(status) {
     if (status === 'done') {
         return '<span class="badge bg-success">done</span>';
@@ -782,9 +812,10 @@ function renderCoverageMatrix(coverageStats) {
             const status = row.statuses?.[groupKey] || 'todo';
             const cell = row.cell_details?.[groupKey] || { state: status };
             const tooltip = buildCoverageTooltip(cell);
+            const cellBrowseUrl = buildCoverageCellBrowseUrl(row, groupKey, status);
             html += `
                 <td class="text-center">
-                  <a href="${browseUrl}" target="_blank" data-bs-toggle="tooltip" data-bs-html="true" title="${tooltip}">
+                  <a href="${cellBrowseUrl}" target="_blank" data-bs-toggle="tooltip" data-bs-html="true" title="${tooltip}">
                     ${statusBadge(status)}
                   </a>
                 </td>
