@@ -310,6 +310,165 @@ function buildExampleCell(row) {
     `;
 }
 
+function collectSliderLabelOrder(sliderStats) {
+    const labels = [];
+    const seen = new Set();
+
+    (sliderStats?.overall || []).forEach((row) => {
+        const label = row?.label;
+        if (label && !seen.has(label)) {
+            seen.add(label);
+            labels.push(label);
+        }
+    });
+
+    (sliderStats?.by_setup || []).forEach((setup) => {
+        (setup?.slider_labels || []).forEach((label) => {
+            if (label && !seen.has(label)) {
+                seen.add(label);
+                labels.push(label);
+            }
+        });
+    });
+
+    return labels;
+}
+
+function deriveSetupAnnotationCount(setup) {
+    const countsByLabel = {};
+
+    (setup?.rows || []).forEach((row) => {
+        Object.entries(row.stats || {}).forEach(([label, stats]) => {
+            countsByLabel[label] = (countsByLabel[label] || 0) + (Number(stats?.count) || 0);
+        });
+    });
+
+    const totals = Object.values(countsByLabel);
+    return totals.length > 0 ? Math.max(...totals) : 0;
+}
+
+function renderSliderSetupSummaryTable(sliderStats) {
+    const table = $('#slider-setup-summary-table');
+    const headerRow = table.find('thead tr');
+    headerRow.empty();
+
+    if (!sliderStats || !sliderStats.by_setup || sliderStats.by_setup.length === 0) {
+        table.hide();
+        return;
+    }
+
+    table.show();
+
+    const sliderLabels = collectSliderLabelOrder(sliderStats);
+    const columns = ['slider_label', 'metric'];
+    headerRow.append('<th data-sortable="true" data-field="slider_label">Slider</th>');
+    headerRow.append('<th data-sortable="true" data-field="metric">Metric</th>');
+
+    const setupSummaries = sliderStats.by_setup.map((setup, index) => {
+        const aggregates = {};
+
+        (setup.rows || []).forEach((row) => {
+            Object.entries(row.stats || {}).forEach(([label, stats]) => {
+                if (!aggregates[label]) {
+                    aggregates[label] = {
+                        count: 0,
+                        weightedSum: 0,
+                        min_value: null,
+                        max_value: null,
+                    };
+                }
+
+                const count = Number(stats.count) || 0;
+                const avgValue = Number(stats.avg_value);
+                const minValue = Number(stats.min_value);
+                const maxValue = Number(stats.max_value);
+
+                aggregates[label].count += count;
+                if (Number.isFinite(avgValue)) {
+                    aggregates[label].weightedSum += avgValue * count;
+                }
+                if (Number.isFinite(minValue)) {
+                    aggregates[label].min_value = aggregates[label].min_value === null
+                        ? minValue
+                        : Math.min(aggregates[label].min_value, minValue);
+                }
+                if (Number.isFinite(maxValue)) {
+                    aggregates[label].max_value = aggregates[label].max_value === null
+                        ? maxValue
+                        : Math.max(aggregates[label].max_value, maxValue);
+                }
+            });
+        });
+
+        const field = `setup_${index}`;
+        const title = sliderStats.by_setup.length > 1
+            ? escapeHtml(setup.setup_id)
+            : escapeHtml(`${setup.dataset} / ${setup.split} / ${setup.setup_id}`);
+
+        columns.push(field);
+        headerRow.append(`<th data-sortable="true" data-field="${field}">${title}</th>`);
+
+        return {
+            field,
+            annotation_count: Number(setup.annotation_count) > 0
+                ? Number(setup.annotation_count)
+                : deriveSetupAnnotationCount(setup),
+            aggregates,
+        };
+    });
+
+    const rows = [];
+
+    const countRow = {
+        slider_label: 'All sliders',
+        metric: 'Non-skipped annotations',
+    };
+    setupSummaries.forEach((setup) => {
+        countRow[setup.field] = setup.annotation_count;
+    });
+    rows.push(countRow);
+
+    sliderLabels.forEach((label) => {
+        ['avg_value', 'min_value', 'max_value'].forEach((metricKey) => {
+            const metricMeta = sliderMetrics.find((metric) => metric.key === metricKey);
+            const rowData = {
+                slider_label: label,
+                metric: metricMeta?.label || metricKey,
+            };
+
+            setupSummaries.forEach((setup) => {
+                const stats = setup.aggregates[label];
+                if (!stats) {
+                    rowData[setup.field] = '';
+                    return;
+                }
+
+                if (metricKey === 'avg_value') {
+                    rowData[setup.field] = stats.count > 0 ? Number((stats.weightedSum / stats.count).toFixed(3)) : '';
+                    return;
+                }
+
+                rowData[setup.field] = stats[metricKey] === null ? '' : Number(stats[metricKey].toFixed(3));
+            });
+
+            rows.push(rowData);
+        });
+    });
+
+    populateTable('slider-setup-summary-table', rows, columns);
+
+    let mergeIndex = 1;
+    sliderLabels.forEach(() => {
+        $('#slider-setup-summary-table').bootstrapTable('mergeCells', {
+            index: mergeIndex,
+            field: 'slider_label',
+            rowspan: 3,
+            colspan: 1,
+        });
+        mergeIndex += 3;
+    });
+}
+
 function renderSliderSetupTables(sliderStats) {
     const container = $('#slider-setup-tables');
     container.empty();
@@ -883,6 +1042,7 @@ $(document).ready(function () {
 
         if (statistics.slider_stats) {
             populateTable('slider-overall-table', statistics.slider_stats.overall, sliderOverallColumns);
+            renderSliderSetupSummaryTable(statistics.slider_stats);
             renderSliderSetupTables(statistics.slider_stats);
         } else {
             $('#slider-stats-empty').show();

@@ -956,6 +956,15 @@ def compute_question_coverage_stats(app, campaign, example_index):
 
 def compute_slider_stats(example_index, datasets, slider_label_order=None):
     slider_rows = []
+    setup_annotation_counts = (
+        example_index.groupby(["dataset", "split", "setup_id"])
+        .size()
+        .reset_index(name="annotation_count")
+    )
+    setup_annotation_count_map = {
+        (row["dataset"], row["split"], row["setup_id"]): int(row["annotation_count"])
+        for _, row in setup_annotation_counts.iterrows()
+    }
 
     for _, row in example_index.iterrows():
         sliders = row.get("sliders", [])
@@ -1065,6 +1074,7 @@ def compute_slider_stats(example_index, datasets, slider_label_order=None):
                 "dataset": dataset,
                 "split": split,
                 "setup_id": setup_id,
+                "annotation_count": setup_annotation_count_map.get((dataset, split, setup_id), 0),
                 "slider_labels": labels_sorted,
                 "rows": rows,
             }
