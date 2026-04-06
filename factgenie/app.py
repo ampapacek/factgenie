@@ -177,20 +177,27 @@ def prettify_json(value):
 # Very simple decorator to protect routes
 
 
-def is_view_allowed(path):
-    # if view pages are locked, do not allow any page
-    if app.config["login"].get("lock_view_pages", True):
-        return False
+def is_browse_public():
+    return not app.config["login"].get("lock_view_pages", True)
 
-    # otherwise allow the main page and whichever public view pages are enabled
+
+def is_analyze_public():
+    return app.config["login"].get("show_analyze_without_login", True)
+
+
+def has_public_view_pages():
+    return is_browse_public() or is_analyze_public()
+
+
+def is_view_allowed(path):
     if path == "/":
-        return True
+        return has_public_view_pages()
 
     if path.startswith("/browse"):
-        return True
+        return is_browse_public()
 
-    if path.startswith("/analyze") and app.config["login"].get("show_analyze_without_login", True):
-        return True
+    if path.startswith("/analyze"):
+        return is_analyze_public()
 
     # and lock the rest of pages
     return False
@@ -259,12 +266,17 @@ def _filter_campaigns_for_viewer(campaigns, visible_dataset_ids):
 def index():
     logger.info(f"Main page loaded")
 
-    dim_unaccessible_pages = app.config["login"]["active"] and app.config["login"].get("lock_view_pages") == False
+    login_active = app.config["login"]["active"]
+    browse_public = is_browse_public()
+    analyze_public = is_analyze_public()
+    has_public_pages = has_public_view_pages()
 
     return render_template(
         "pages/index.html",
         host_prefix=app.config["host_prefix"],
-        dim_unaccessible_pages=dim_unaccessible_pages,
+        dim_browse_page=login_active and has_public_pages and not browse_public,
+        dim_analyze_page=login_active and has_public_pages and not analyze_public,
+        dim_manage_pages=login_active and has_public_pages,
     )
 
 

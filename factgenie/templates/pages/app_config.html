@@ -27,9 +27,10 @@
         <div class="form-group mt-3">
           <label for="login_active">Enable password protection</label>
           <div class="mb-2">
-            <small class="form-text text-muted">If enabled, users will have to log in to access most of the app
-              features. Make sure to
-              enable this feature before any public deployment.</small>
+            <small class="form-text text-muted">If enabled, users will have to log in to access protected pages. Use
+              the two toggles below to decide whether Browse and Analyze stay public for regular users. This is the
+              global auth switch for Settings, Manage, and the rest of the protected app. Enable this before any public
+              deployment.</small>
           </div>
           <div class="form-check form-switch">
             <input class="form-check-input" type="checkbox" id="login_active" name="login_active" {% if
@@ -37,21 +38,20 @@
           </div>
         </div>
         <div class="form-group mt-3">
-          <label for="lock_view_pages">Include view pages in password protection</label>
+          <label for="show_browse_without_login">Allow Browse without login</label>
           <div class="mb-2">
-            <small class="form-text text-muted">If disabled, public access to Browse is enabled, and Analyze can be
-              controlled separately below.</small>
+            <small class="form-text text-muted">Turn this on to make Browse public for regular users.</small>
           </div>
           <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" id="lock_view_pages" name="lock_view_pages" {% if
-              app_config.login.lock_view_pages %} checked {% endif %}>
+            <input class="form-check-input" type="checkbox" id="show_browse_without_login"
+              name="show_browse_without_login" {% if not app_config.login.lock_view_pages %} checked {% endif %}>
           </div>
         </div>
         <div class="form-group mt-3">
-          <label for="show_analyze_without_login">Allow Analyze page without login</label>
+          <label for="show_analyze_without_login">Allow Analyze without login</label>
           <div class="mb-2">
-            <small class="form-text text-muted">Only used when view pages are excluded from password protection. Turn
-              this off if Browse should stay public but Analyze should require login.</small>
+            <small class="form-text text-muted">Turn this on to make Analyze public for regular users. Browse and
+              Analyze are configured independently.</small>
           </div>
           <div class="form-check form-switch">
             <input class="form-check-input" type="checkbox" id="show_analyze_without_login"
@@ -59,6 +59,7 @@
               checked {% endif %}>
           </div>
         </div>
+        <div id="public-access-summary" class="alert alert-secondary mt-3 mb-0" role="alert"></div>
         <div class="form-group mt-3">
           <label for="login_username">Username</label>
           <div class="mb-2">

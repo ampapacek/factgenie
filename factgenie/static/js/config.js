@@ -1,4 +1,26 @@
 
+function updateLoginAccessSummary() {
+    const loginActive = $('#login_active').is(':checked');
+    const browsePublic = $('#show_browse_without_login').is(':checked');
+    const analyzePublic = $('#show_analyze_without_login').is(':checked');
+    const summary = $('#public-access-summary');
+
+    let message = '';
+    if (!loginActive) {
+        message = 'Password protection is off. Browse and Analyze are public.';
+    } else if (browsePublic && analyzePublic) {
+        message = 'Password protection is on. Browse and Analyze are both public for regular users.';
+    } else if (browsePublic) {
+        message = 'Password protection is on. Browse is public, but Analyze still requires login.';
+    } else if (analyzePublic) {
+        message = 'Password protection is on. Analyze is public, but Browse still requires login.';
+    } else {
+        message = 'Password protection is on. Browse and Analyze both require login.';
+    }
+
+    summary.text(message);
+}
+
 function updateConfig() {
     const config = {
         logging: {
@@ -8,7 +30,7 @@ function updateConfig() {
         host_prefix: $('#host_prefix').val(),
         login: {
             active: $('#login_active').is(':checked'),
-            lock_view_pages: $('#lock_view_pages').is(':checked'),
+            lock_view_pages: !$('#show_browse_without_login').is(':checked'),
             show_analyze_without_login: $('#show_analyze_without_login').is(':checked'),
             username: $('#login_username').val(),
             password: $('#login_password').val()
@@ -41,6 +63,12 @@ function updateConfig() {
 
 
 $(document).ready(function () {
+    updateLoginAccessSummary();
+
+    $('#login_active, #show_browse_without_login, #show_analyze_without_login').on('change', function () {
+        updateLoginAccessSummary();
+    });
+
     $("#show_hide_password a").on('click', function (event) {
         event.preventDefault();
         if ($('#show_hide_password input').attr("type") == "text") {
