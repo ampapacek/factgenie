@@ -216,14 +216,15 @@ def generate_crowdsourcing_campaign_db(app, campaign_data, config):
 
     # create a column for batch index and assign each example to a batch
     df["batch_idx"] = df.index // examples_per_batch
+    batch_count = int(df["batch_idx"].max()) + 1 if not df.empty else 0
 
     # Create multiple copies of the dataframe for each annotator group
     dfs = []
     for annotator_group in range(annotators_per_example):
         df_copy = df.copy()
         df_copy["annotator_group"] = annotator_group
-        # Adjust batch_idx for subsequent groups by adding offset
-        df_copy["batch_idx"] += annotator_group * (len(df) // examples_per_batch + 1)
+        # Offset by the actual number of batches so new campaigns get contiguous ids.
+        df_copy["batch_idx"] += annotator_group * batch_count
         dfs.append(df_copy)
 
     # Combine all dataframes
