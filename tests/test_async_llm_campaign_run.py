@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from factgenie.app import (
+    llm_campaign_page,
     reconcile_llm_campaign_runtime_state,
     run_llm_campaign_background,
     start_llm_campaign_background,
@@ -96,6 +97,40 @@ class AsyncLlmCampaignRunTests(unittest.TestCase):
         self.assertNotIn("campaign-1", app.db["running_campaigns"])
         self.assertNotIn("campaign-1", app.db["announcers"])
         campaign.update_metadata.assert_not_called()
+
+    @patch("factgenie.app.render_template")
+    @patch("factgenie.app.workflows.load_configs")
+    @patch("factgenie.app.workflows.get_sorted_campaign_list")
+    @patch("factgenie.app.reconcile_llm_campaign_runtime_state")
+    @patch("factgenie.app.utils.get_mode_from_path")
+    def test_overview_reconciles_runtime_status_for_each_campaign(
+        self,
+        get_mode_from_path,
+        reconcile_runtime,
+        get_sorted_campaign_list,
+        load_configs,
+        render_template,
+    ):
+        from factgenie.app import app as flask_app
+
+        get_mode_from_path.return_value = "llm_eval"
+        load_configs.return_value = {}
+        render_template.return_value = "ok"
+
+        campaign_a = MagicMock()
+        campaign_b = MagicMock()
+        campaigns = {"a": campaign_a, "b": campaign_b}
+        get_sorted_campaign_list.return_value = campaigns
+
+        with flask_app.test_request_context("/llm_eval"):
+            flask_app.config["login"] = {"active": False}
+            flask_app.config["host_prefix"] = ""
+            response = llm_campaign_page()
+
+        self.assertEqual(response, "ok")
+        reconcile_runtime.assert_any_call(flask_app, campaign_a)
+        reconcile_runtime.assert_any_call(flask_app, campaign_b)
+        self.assertEqual(reconcile_runtime.call_count, 2)
 
 
 if __name__ == "__main__":
