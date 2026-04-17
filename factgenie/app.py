@@ -3,6 +3,7 @@ import datetime
 import json
 import logging
 import os
+import queue
 import re
 import shutil
 import threading
@@ -1157,10 +1158,22 @@ def listen(campaign_id):
     def stream():
         messages = app.db["announcers"][campaign_id].listen()
         while True:
-            msg = messages.get()
-            yield msg
+            try:
+                msg = messages.get(timeout=10)
+                yield msg
+            except queue.Empty:
+                # Keep the SSE connection active so sync Gunicorn workers are not
+                # treated as hung while waiting for the next campaign event.
+                yield ": keepalive\n\n"
 
-    return Response(stream(), mimetype="text/event-stream")
+    return Response(
+        stream(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.route("/llm_campaign/pause", methods=["POST"])
