@@ -335,19 +335,60 @@ function buildAnnotationInfo(generated_outputs) {
     return annIds;
 }
 
+function getAnnotatorAliasCounts() {
+    const counts = new Map();
+    currentAnnInfo.forEach((annInfo) => {
+        getAnnotatorAliases(annInfo).forEach((alias) => {
+            counts.set(alias, (counts.get(alias) || 0) + 1);
+        });
+    });
+    return counts;
+}
+
+function getAnnotatorQualifier(annId, annInfo) {
+    const campaignId = String(annInfo?.campaign_id || "").trim();
+    if (campaignId) {
+        return campaignId;
+    }
+
+    const names = getAnnotatorNames(annInfo);
+    if (names.length > 0) {
+        return names.join(", ");
+    }
+
+    return String(annId || "").trim();
+}
+
+function getDisplayAnnotatorAliases(annId, annInfo) {
+    const aliases = getAnnotatorAliases(annInfo);
+    if (aliases.length === 0) {
+        return [];
+    }
+
+    const aliasCounts = getAnnotatorAliasCounts();
+    const qualifier = getAnnotatorQualifier(annId, annInfo);
+
+    return aliases.map((alias) => {
+        if ((aliasCounts.get(alias) || 0) <= 1 || !qualifier) {
+            return alias;
+        }
+        return `${alias} [${qualifier}]`;
+    });
+}
+
 function getAnnotatorLabel(annId, annInfo) {
     if (!annInfo) {
         return annId;
     }
-    const names = showAnnotatorNames ? getAnnotatorNames(annInfo) : getAnnotatorAliases(annInfo);
+    const names = showAnnotatorNames ? getAnnotatorNames(annInfo) : getDisplayAnnotatorAliases(annId, annInfo);
     if (names.length === 0) {
         return annId;
     }
     return names.join(", ");
 }
 
-function getAnnotatorDisplayBoth(annInfo) {
-    const aliases = getAnnotatorAliases(annInfo);
+function getAnnotatorDisplayBoth(annId, annInfo) {
+    const aliases = getDisplayAnnotatorAliases(annId, annInfo);
     const names = getAnnotatorNames(annInfo);
 
     if (aliases.length > 0 && names.length > 0) {
@@ -363,7 +404,7 @@ function getAnnotatorDisplayBoth(annInfo) {
 }
 
 function getSkipMessage(annInfo, annotations) {
-    const who = getAnnotatorDisplayBoth(annInfo);
+    const who = getAnnotatorDisplayBoth(annotations?.annotator_id, annInfo);
     const skipFlags = (annotations?.flags || [])
         .filter((flag) => {
             const label = String(flag?.label || "").toLowerCase();
