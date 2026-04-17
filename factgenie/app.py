@@ -648,27 +648,43 @@ def browse():
     workflows.refresh_indexes(app)
     datasets = workflows.get_local_dataset_overview(app)
     datasets = {k: v for k, v in datasets.items() if v["enabled"]}
-    datasets = _filter_datasets_for_viewer(datasets, is_authenticated=is_authenticated)
+    visible_datasets = _filter_datasets_for_viewer(datasets, is_authenticated=is_authenticated)
 
-    if dataset_id and split and example_idx and dataset_id in datasets:
+    browse_access_error = None
+    response_status = 200
+
+    if dataset_id and split and example_idx and dataset_id in visible_datasets:
         display_example = {"dataset": dataset_id, "split": split, "example_idx": int(example_idx)}
         logger.info(f"Serving permalink {dataset_id} / {split} / {example_idx}")
     else:
         display_example = None
+        if dataset_id and split and example_idx:
+            requested_dataset = datasets.get(dataset_id)
+            if requested_dataset and not is_authenticated and requested_dataset.get("hidden_from_regular_users", False):
+                browse_access_error = "The requested dataset is hidden. Please sign in to access it."
+                response_status = 403
+                logger.info(f"Blocked hidden dataset permalink for anonymous viewer: {dataset_id} / {split} / {example_idx}")
+            elif requested_dataset is None:
+                browse_access_error = "The requested dataset does not exist or is not enabled."
+                response_status = 404
 
-    if not datasets:
+    if not visible_datasets:
         return render_template(
             "pages/no_datasets.html",
             host_prefix=app.config["host_prefix"],
         )
-    return render_template(
-        "pages/browse.html",
-        display_example=display_example,
-        highlight_setup_id=setup_id,
-        highlight_ann_campaign=ann_campaign,
-        datasets=datasets,
-        show_annotator_toggle=show_annotator_toggle,
-        host_prefix=app.config["host_prefix"],
+    return (
+        render_template(
+            "pages/browse.html",
+            display_example=display_example,
+            browse_access_error=browse_access_error,
+            highlight_setup_id=setup_id,
+            highlight_ann_campaign=ann_campaign,
+            datasets=visible_datasets,
+            show_annotator_toggle=show_annotator_toggle,
+            host_prefix=app.config["host_prefix"],
+        ),
+        response_status,
     )
 
 

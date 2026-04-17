@@ -104,6 +104,11 @@
 
 
   <div class="large-container container">
+    {% if browse_access_error %}
+    <div class="alert alert-warning mt-3 mb-2" role="alert">
+      {{ browse_access_error }}
+    </div>
+    {% endif %}
     <div class="row">
 
       <div class="split col-12">
@@ -191,6 +196,7 @@
 <script>
   window.url_prefix = "{{ host_prefix }}";
   window.display_example = {{ display_example | tojson | safe }};
+  window.browse_access_error = {{ browse_access_error | tojson | safe }};
   window.datasets = {{ datasets | tojson | safe }};
   window.highlight_setup_id = {{ highlight_setup_id | tojson | safe }};
   window.highlight_ann_campaign = {{ highlight_ann_campaign | tojson | safe }};
