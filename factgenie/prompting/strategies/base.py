@@ -27,7 +27,7 @@ class PromptingStrategy(abc.ABC):
         self.completion_extra_kwargs = {}
 
     @abc.abstractmethod
-    def get_output(self, api: ModelAPI, data, text=None) -> dict:
+    def get_output(self, api: ModelAPI, data, text=None, **extra_fields) -> dict:
         """
         Abstract method that each subclass must implement to get output from the model.
 
@@ -35,6 +35,9 @@ class PromptingStrategy(abc.ABC):
             api: The ModelAPI instance to use for calling the model
             data: The source data to be used in the prompt (if present)
             text: The text to be annotated (annotation tasks only)
+            extra_fields: Additional prompt variables that should be available to the
+                strategy, for example a nested `context` dictionary with per-example
+                auxiliary information.
 
         Returns:
             A dictionary containing:
@@ -48,8 +51,8 @@ class PromptingStrategy(abc.ABC):
         # TODO: Add the description for what the list of annotations looks like (inside """... Returns: ...""").
         pass
 
-    def __call__(self, api: ModelAPI, data, text=None):
-        return self.get_output(api, data, text)
+    def __call__(self, api: ModelAPI, data, text=None, **extra_fields):
+        return self.get_output(api, data, text, **extra_fields)
 
 
 class MissingRequirementException(Exception):
@@ -81,16 +84,29 @@ class SequentialStrategy(PromptingStrategy):
     def is_question_answering(self) -> bool:
         return False
 
+    def get_initial_input_fields(self) -> set[str]:
+        if self.mode == CampaignMode.LLM_GEN:
+            current_keys = {self.DATA}
+        elif self.mode == CampaignMode.LLM_EVAL:
+            current_keys = {self.DATA, self.TEXT}
+        else:
+            raise NotImplementedError(f"{self.mode} is not implemented")
+
+        if self.mode == CampaignMode.LLM_EVAL and self.config.get("additional_context_sources"):
+            current_keys.add("context")
+
+        return current_keys
+
     @abc.abstractmethod
     def get_transform_sequence(self) -> list[t.Transform]:
         pass
 
     def verify_sequence(self):
         if self.mode == CampaignMode.LLM_GEN:
-            current_keys = {self.DATA}
+            current_keys = self.get_initial_input_fields()
             expected_outputs = {self.OUTPUT}
         elif self.mode == CampaignMode.LLM_EVAL:
-            current_keys = {self.DATA, self.TEXT}
+            current_keys = self.get_initial_input_fields()
 
             if self.is_question_answering():
                 expected_outputs = {self.OPTIONS}
@@ -146,10 +162,10 @@ class SequentialStrategy(PromptingStrategy):
 
         logger.info(f"Sequence for '{type(self)}' is valid.")
 
-    def get_output(self, api: ModelAPI, data, text=None):
+    def get_output(self, api: ModelAPI, data, text=None, **extra_fields):
         try:
             # Initial condition
-            current = [{"data": data}]
+            current = [{**extra_fields, "data": data}]
             if text is not None:
                 current[0]["text"] = text
 

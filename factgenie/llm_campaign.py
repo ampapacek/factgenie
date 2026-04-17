@@ -202,7 +202,15 @@ def run_llm_campaign(app, mode, campaign_id, announcer, campaign, datasets, mode
                 generated_output = workflows.get_output_for_setup(
                     dataset_id, split, example_idx, setup_id, app=app, force_reload=False
                 )
-                res = model.generate_output(data=example, text=generated_output["output"])
+                additional_context = load_additional_context_for_example(
+                    app,
+                    dataset_id,
+                    split,
+                    example_idx,
+                    campaign.metadata["config"],
+                )
+                extra_prompt_inputs = {"context": additional_context} if additional_context else {}
+                res = model.generate_output(data=example, text=generated_output["output"], **extra_prompt_inputs)
                 # keep the annotated text in the object
                 res["output"] = generated_output["output"]
             elif mode == CampaignMode.LLM_GEN:
@@ -297,6 +305,57 @@ def suggest_openrouter_models(model_name, model_ids, limit=3):
     return [normalized_to_original[match] for match in lower_matches]
 
 
+def normalize_additional_context_sources(config):
+    raw_sources = config.get("additional_context_sources") or config.get("additionalContextSources") or []
+    normalized_sources = []
+    seen_fields = set()
+
+    for idx, source in enumerate(raw_sources):
+        if not isinstance(source, dict):
+            raise ValueError(f"Additional context source at index {idx} must be an object.")
+
+        field = str(source.get("field", "") or "").strip()
+        setup_id = slugify(str(source.get("setup_id", "") or source.get("setupId", "") or "").strip())
+        description = str(source.get("description", "") or "").strip()
+
+        if not field:
+            raise ValueError(f"Additional context source at index {idx} is missing `field`.")
+        if any(char in field for char in "[]{}"):
+            raise ValueError(
+                f"Additional context field `{field}` contains unsupported characters. Do not use square or curly brackets."
+            )
+        if not setup_id:
+            raise ValueError(f"Additional context source `{field}` is missing `setup_id`.")
+        if field in seen_fields:
+            raise ValueError(f"Additional context field `{field}` is defined more than once.")
+
+        normalized_sources.append(
+            {
+                "field": field,
+                "setup_id": setup_id,
+                "description": description,
+            }
+        )
+        seen_fields.add(field)
+
+    return normalized_sources
+
+
+def load_additional_context_for_example(app, dataset_id, split, example_idx, config):
+    additional_context = {}
+
+    for source in normalize_additional_context_sources(config):
+        output = workflows.get_output_for_setup(dataset_id, split, example_idx, source["setup_id"], app=app, force_reload=False)
+        if output is None:
+            raise ValueError(
+                f"Missing additional context output `{source['setup_id']}` for {dataset_id}/{split}/{example_idx}."
+            )
+
+        additional_context[source["field"]] = output["output"]
+
+    return additional_context
+
+
 def validate_openrouter_model(model_name):
     model_name = (model_name or "").strip()
 
@@ -373,6 +432,7 @@ def parse_llm_eval_config(config):
         "sliders": config.get("sliders"),
         "text_fields": config.get("textFields") or config.get("text_fields"),
         "extra_fields_prompt_template": config.get("extraFieldsPromptTemplate"),
+        "additional_context_sources": normalize_additional_context_sources(config),
     }
     return config
 

@@ -82,6 +82,15 @@ function addTextField() {
     }
 }
 
+function addAdditionalContextSource() {
+    const contextSources = $("#additional-context-sources");
+    const newContextSource = createAdditionalContextSourceElem("", "", "");
+    contextSources.append(newContextSource);
+    if (typeof updateExtraFieldsPromptEditor === "function") {
+        updateExtraFieldsPromptEditor();
+    }
+}
+
 
 function deleteRow(button) {
     $(button).parent().parent().remove();
@@ -159,6 +168,26 @@ function createTextFieldElem(key) {
         </div>
     `);
     return newFlag;
+}
+
+function createAdditionalContextSourceElem(field, setupId, description) {
+    const newContextSource = $(`
+        <div class="row mt-1">
+        <div class="col-4">
+        <input type="text" class="form-control" name="contextField" value="${field}" placeholder="Prompt field, e.g. reference_answer">
+        </div>
+        <div class="col-4">
+        <input type="text" class="form-control" name="contextSetupId" value="${setupId}" placeholder="Source setup id" list="llm-context-setup-id-options">
+        </div>
+        <div class="col-3">
+        <input type="text" class="form-control" name="contextDescription" value="${description}" placeholder="Optional note">
+        </div>
+        <div class="col-1">
+        <button type="button" class="btn btn-danger" onclick="deleteRow(this);">x</button>
+        </div>
+        </div>
+    `);
+    return newContextSource;
 }
 
 function createArgElem(key, value) {
@@ -316,6 +345,19 @@ function getSliders() {
         sliders.push({ label: label, min: min, max: max, step: step });
     });
     return sliders;
+}
+
+function getAdditionalContextSources() {
+    var sources = [];
+
+    $("#additional-context-sources").children().each(function () {
+        const field = $(this).find("input[name='contextField']").val();
+        const setupId = $(this).find("input[name='contextSetupId']").val();
+        const description = $(this).find("input[name='contextDescription']").val();
+
+        sources.push({ field: field, setupId: setupId, description: description });
+    });
+    return sources;
 }
 
 

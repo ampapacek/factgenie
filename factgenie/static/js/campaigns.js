@@ -3,6 +3,90 @@ window.llmCampaignListeners = window.llmCampaignListeners || {};
 let openRouterValidationTimer = null;
 let openRouterValidationRequestId = 0;
 
+function getAvailableSetupIds() {
+    return [...new Set(
+        (available_data || [])
+            .map(item => item.setup_id)
+            .filter(setupId => typeof setupId === "string" && setupId.trim() !== "")
+    )].sort((a, b) => a.localeCompare(b));
+}
+
+function populateAdditionalContextSetupIdOptions() {
+    const datalist = $("#llm-context-setup-id-options");
+    if (datalist.length === 0) {
+        return;
+    }
+
+    datalist.empty();
+    getAvailableSetupIds().forEach(setupId => {
+        datalist.append(`<option value="${setupId}"></option>`);
+    });
+}
+
+function renderAdditionalContextSources(sources) {
+    const container = $("#additional-context-sources");
+    if (container.length === 0) {
+        return;
+    }
+
+    container.empty();
+    (sources || []).forEach(source => {
+        const field = source.field || "";
+        const setupId = source.setup_id || source.setupId || "";
+        const description = source.description || "";
+        container.append(createAdditionalContextSourceElem(field, setupId, description));
+    });
+}
+
+function collectConfiguredAdditionalContextSources() {
+    return getAdditionalContextSources()
+        .map(source => ({
+            field: (source.field || "").trim(),
+            setupId: (source.setupId || "").trim(),
+            description: (source.description || "").trim(),
+        }))
+        .filter(source => source.field || source.setupId || source.description);
+}
+
+function validateAdditionalContextSources(sources, campaignData) {
+    const seenFields = new Set();
+
+    for (const source of sources) {
+        if (!source.field) {
+            return "Each additional context row must have a prompt field name.";
+        }
+        if (!source.setupId) {
+            return `Additional context source '${source.field}' is missing a setup id.`;
+        }
+        if (/[{}\[\]]/.test(source.field)) {
+            return `Additional context field '${source.field}' cannot contain square or curly brackets.`;
+        }
+        if (seenFields.has(source.field)) {
+            return `Additional context field '${source.field}' is defined more than once.`;
+        }
+        seenFields.add(source.field);
+
+        const missingCombinations = campaignData.filter(combination =>
+            !available_data.some(item =>
+                item.dataset === combination.dataset
+                && item.split === combination.split
+                && item.setup_id === source.setupId
+            )
+        );
+
+        if (missingCombinations.length > 0) {
+            const preview = missingCombinations
+                .slice(0, 3)
+                .map(item => `${item.dataset}/${item.split}`)
+                .join(", ");
+            const suffix = missingCombinations.length > 3 ? ", ..." : "";
+            return `Additional context source '${source.field}' uses setup id '${source.setupId}', but that output is not available for: ${preview}${suffix}`;
+        }
+    }
+
+    return null;
+}
+
 function setOpenRouterModelStatus(message, level) {
     const statusElem = $("#openrouter-model-status");
     if (statusElem.length === 0) {
@@ -228,6 +312,14 @@ function createLLMCampaign() {
         return;
     }
 
+    if (mode === "llm_eval") {
+        const additionalContextError = validateAdditionalContextSources(config.additionalContextSources || [], campaignData);
+        if (additionalContextError) {
+            alert(additionalContextError);
+            return;
+        }
+    }
+
     if (config.apiProvider === "openrouter") {
         validateOpenRouterModel(config, {
             showAlerts: true,
@@ -405,6 +497,7 @@ function gatherConfig() {
             config.sliders = getSliders();
             config.textFields = getKeys($("#textFields"));
             config.extraFieldsPromptTemplate = $("#extra-fields-prompt-template").val();
+            config.additionalContextSources = collectConfiguredAdditionalContextSources();
             config.purpose = "metric"
         }
         if (window.mode == "llm_gen") {
@@ -420,6 +513,7 @@ function buildExtraFieldsPromptTemplate() {
     const options = getOptions().filter(option => option.label && option.values && option.values.some(value => value));
     const sliders = getSliders().filter(slider => slider.label);
     const textFields = getKeys($("#textFields")).filter(field => field && field.trim() !== "");
+    const additionalContextSources = collectConfiguredAdditionalContextSources();
 
     const lines = [
         "You are reviewing the same evaluation example described below.",
@@ -430,6 +524,18 @@ function buildExtraFieldsPromptTemplate() {
         "Source data:",
         "{data}",
         "",
+    ];
+
+    if (additionalContextSources.length > 0) {
+        lines.push("Additional context for this example:");
+        additionalContextSources.forEach(source => {
+            const label = source.description || source.field;
+            lines.push(`- ${label}: {context[${source.field}]}`);
+        });
+        lines.push("");
+    }
+
+    lines.push(
         "Span annotations already generated:",
         "{annotations}",
         "",
@@ -449,7 +555,7 @@ function buildExtraFieldsPromptTemplate() {
         "- For options, return one of the listed option values exactly.",
         "- For sliders, return a numeric value inside the allowed range.",
         '- For text fields, return a string. Use an empty string when there is nothing to add.',
-    ];
+    );
 
     if (flags.length > 0) {
         lines.push("", "Flags:");
@@ -1003,6 +1109,7 @@ function updateLLMMetricConfig() {
             $("#options").empty();
             $("#sliders").empty();
             $("#textFields").empty();
+            renderAdditionalContextSources([]);
             $("#extra-fields-prompt-template").val("");
             $("#extra-fields-prompt-template").data("autoGenerated", true);
             updateExtraFieldsPromptEditor(true);
@@ -1077,6 +1184,7 @@ function updateLLMMetricConfig() {
         const options = cfg.options;
         const sliders = cfg.sliders;
         const textFields = cfg.text_fields || cfg.textFields;
+        const additionalContextSources = cfg.additional_context_sources || cfg.additionalContextSources || [];
         $("#annotation-span-categories").empty();
         $("#annotationGranularity").val(annotation_granularity);
 
@@ -1116,6 +1224,8 @@ function updateLLMMetricConfig() {
             });
         }
 
+        renderAdditionalContextSources(additionalContextSources);
+
         if (extra_fields_prompt_template) {
             $("#extra-fields-prompt-template").val(extra_fields_prompt_template);
             $("#extra-fields-prompt-template").data("autoGenerated", false);
@@ -1138,10 +1248,14 @@ $(document).on("input", "#extra-fields-prompt-template", function () {
 
 $(document).on(
     "input change",
-    "#flags input, #options input, #sliders input, #textFields input",
+    "#flags input, #options input, #sliders input, #textFields input, #additional-context-sources input",
     function () {
         updateExtraFieldsPromptEditor();
     }
 );
 $("#api-provider").on("change", scheduleOpenRouterValidation);
 $("#model-name").on("input", scheduleOpenRouterValidation);
+
+$(document).ready(function () {
+    populateAdditionalContextSetupIdOptions();
+});

@@ -105,9 +105,9 @@ class Model:
         self.model_api = model_api
         self.prompt_strat = prompt_strat
 
-    def generate_output(self, data, text=None):
+    def generate_output(self, data, text=None, **extra_inputs):
         """For backward compatibility with existing code."""
-        return self.prompt_strat.get_output(api=self.model_api, data=data, text=text)
+        return self.prompt_strat.get_output(api=self.model_api, data=data, text=text, **extra_inputs)
 
     def get_annotator_id(self):
         return "llm-" + ModelFactory.parse_api_provider(self.config) + "-" + self.config["model"]
