@@ -661,7 +661,10 @@ def browse():
         if dataset_id and split and example_idx:
             requested_dataset = datasets.get(dataset_id)
             if requested_dataset and not is_authenticated and requested_dataset.get("hidden_from_regular_users", False):
-                browse_access_error = "The requested dataset is hidden. Please sign in to access it."
+                browse_access_error = (
+                    "The requested dataset is hidden. Please sign in to access it. "
+                    "Redirected to an available dataset."
+                )
                 response_status = 403
                 logger.info(f"Blocked hidden dataset permalink for anonymous viewer: {dataset_id} / {split} / {example_idx}")
             elif requested_dataset is None:

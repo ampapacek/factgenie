@@ -31,6 +31,6 @@ def test_browse_hidden_dataset_permalink_shows_warning_for_anonymous_user(app_cl
 
     assert response.status_code == 403
     body = response.get_data(as_text=True)
-    assert "The requested dataset is hidden. Please sign in to access it." in body
+    assert "The requested dataset is hidden. Please sign in to access it. Redirected to an available dataset." in body
     assert '"wp1-0-9"' in body
     assert '"wp1-1"' not in body
