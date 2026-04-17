@@ -198,6 +198,36 @@
               </div>
               {% endif %}
 
+              {% if mode == 'llm_eval' %}
+              <div class="row mt-4 mb-3 align-items-center">
+                <div class="col-auto">
+                  <i class="fa fa-files-o"></i>
+                  <span style="margin-left: 5px; margin-right: 10px;">Additional per-example context</span>
+                  <div class="mb-2">
+                    <small class="form-text text-muted">
+                      Pull extra text for the same <code>dataset/split/example</code> from another output
+                      <code>setup_id</code> and expose it in both the main prompt and the follow-up extra-fields prompt
+                      as <code>{context[field_name]}</code>. Typical uses are reference answers, criteria, or other
+                      auxiliary instructions stored as model outputs.
+                    </small>
+                  </div>
+                </div>
+                <div id="additional-context-sources"></div>
+                <div class="col-auto mt-1">
+                  <button type="button" class="btn btn-outline-secondary btn-sm"
+                    onclick="addAdditionalContextSource();">+</button>
+                </div>
+                <div class="col-12">
+                  <small class="form-text text-muted">
+                    Example: field <code>reference_answer</code> with setup id <code>reference-answers</code> can be
+                    used as <code>{context[reference_answer]}</code>, and field <code>criteria</code> with setup id
+                    <code>criteria</code> can be used as <code>{context[criteria]}</code>.
+                  </small>
+                </div>
+                <datalist id="llm-context-setup-id-options"></datalist>
+              </div>
+              {% endif %}
+
               <div class="row g-3 mb-3 align-items-center">
                 <div class="col-auto">
                   <i class="fa fa-align-left"></i>
@@ -207,8 +237,8 @@
                       prompt at <a
                         href="https://github.com/ufal/factgenie/wiki/LLM-Annotations#-configuring-the-prompt">factgenie
                         wiki</a>.
-                      In LLM eval mode, you can also reference configured per-example context with
-                      <code>{context[field_name]}</code>.
+                      In LLM eval mode, you may use <code>{context[field_name]}</code> here as well as in the
+                      follow-up prompt for extra fields.
                     </small>
                   </div>
                 </div>
@@ -341,33 +371,6 @@
               </div>
 
               {% if mode == 'llm_eval' %}
-              <div class="row mt-4 mb-3 align-items-center">
-                <div class="col-auto">
-                  <i class="fa fa-files-o"></i>
-                  <span style="margin-left: 5px; margin-right: 10px;">Additional per-example context</span>
-                  <div class="mb-2">
-                    <small class="form-text text-muted">
-                      Pull extra text for the same <code>dataset/split/example</code> from another output
-                      <code>setup_id</code> and expose it to the judge prompt as
-                      <code>{context[field_name]}</code>. Typical uses are reference answers, criteria, or other
-                      auxiliary instructions stored as model outputs.
-                    </small>
-                  </div>
-                </div>
-                <div id="additional-context-sources"></div>
-                <div class="col-auto mt-1">
-                  <button type="button" class="btn btn-outline-secondary btn-sm"
-                    onclick="addAdditionalContextSource();">+</button>
-                </div>
-                <div class="col-12">
-                  <small class="form-text text-muted">
-                    Example: field <code>reference_answer</code> with setup id <code>reference-answers</code> can then
-                    be used in the prompt as <code>{context[reference_answer]}</code>.
-                  </small>
-                </div>
-                <datalist id="llm-context-setup-id-options"></datalist>
-              </div>
-
               <div class="alert alert-light border small mt-3 mb-3">
                 Extra evaluation fields below are asked in a separate follow-up turn after the span annotations are
                 generated, so they do not need to be described in the annotation JSON schema section above.
@@ -442,7 +445,7 @@
                       This second prompt is only used when at least one flag, option, slider, or text field is configured.
                       It is prefilled automatically and you can edit it. You may use placeholders
                       <code>{text}</code>, <code>{data}</code>, <code>{annotations}</code>, and
-                      <code>{context[field_name]}</code>.
+                      <code>{context[field_name]}</code>. The same per-example context is available in the main prompt too.
                     </small>
                   </div>
                 </div>
