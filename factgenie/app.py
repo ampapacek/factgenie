@@ -1321,12 +1321,23 @@ def upload_dataset():
 def upload_model_outputs():
     logger.info(f"Received model outputs")
     data = request.get_json()
-    dataset_id = data["dataset"]
-    split = data["split"]
+    dataset_id = slugify(data["dataset"])
+    split = slugify(data["split"])
     setup_id = data["setup_id"]
     model_outputs = data["outputs"]
 
-    dataset = app.db["datasets_obj"][dataset_id]
+    dataset = app.db["datasets_obj"].get(dataset_id)
+    if dataset is None:
+        dataset_config = utils.load_dataset_config().get(dataset_id)
+        if dataset_config is None:
+            return utils.error(f"Unknown dataset: {dataset_id}")
+
+        try:
+            dataset = workflows.instantiate_dataset(dataset_id, dataset_config)
+            app.db["datasets_obj"][dataset_id] = dataset
+        except Exception as e:
+            traceback.print_exc()
+            return utils.error(f"Error while loading dataset {dataset_id}: {e}")
 
     try:
         workflows.upload_model_outputs(dataset, split, setup_id, model_outputs)
