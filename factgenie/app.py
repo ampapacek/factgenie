@@ -971,8 +971,13 @@ def llm_campaign_page():
     mode = utils.get_mode_from_path(request.path)
 
     campaigns = workflows.get_sorted_campaign_list(app, modes=[mode])
-    for campaign in campaigns.values():
+    for campaign_id, campaign_info in campaigns.items():
+        campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+        if campaign is None:
+            continue
         reconcile_llm_campaign_runtime_state(app, campaign)
+        campaign_info["metadata"] = campaign.metadata
+        campaign_info["stats"] = campaign.get_stats()
 
     llm_configs = workflows.load_configs(mode=mode)
     crowdsourcing_configs = workflows.load_configs(mode=CampaignMode.CROWDSOURCING)

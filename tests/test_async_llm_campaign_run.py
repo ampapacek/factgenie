@@ -100,6 +100,7 @@ class AsyncLlmCampaignRunTests(unittest.TestCase):
 
     @patch("factgenie.app.render_template")
     @patch("factgenie.app.workflows.load_configs")
+    @patch("factgenie.app.workflows.load_campaign")
     @patch("factgenie.app.workflows.get_sorted_campaign_list")
     @patch("factgenie.app.reconcile_llm_campaign_runtime_state")
     @patch("factgenie.app.utils.get_mode_from_path")
@@ -108,6 +109,7 @@ class AsyncLlmCampaignRunTests(unittest.TestCase):
         get_mode_from_path,
         reconcile_runtime,
         get_sorted_campaign_list,
+        load_campaign,
         load_configs,
         render_template,
     ):
@@ -118,9 +120,19 @@ class AsyncLlmCampaignRunTests(unittest.TestCase):
         render_template.return_value = "ok"
 
         campaign_a = MagicMock()
+        campaign_a.metadata = {"id": "a", "status": "running"}
+        campaign_a.get_stats.return_value = {"finished": 1, "total": 2}
+
         campaign_b = MagicMock()
-        campaigns = {"a": campaign_a, "b": campaign_b}
+        campaign_b.metadata = {"id": "b", "status": "idle"}
+        campaign_b.get_stats.return_value = {"finished": 0, "total": 2}
+
+        campaigns = {
+            "a": {"metadata": {"id": "a", "status": "idle"}, "stats": {"finished": 0, "total": 2}, "data": []},
+            "b": {"metadata": {"id": "b", "status": "idle"}, "stats": {"finished": 0, "total": 2}, "data": []},
+        }
         get_sorted_campaign_list.return_value = campaigns
+        load_campaign.side_effect = [campaign_a, campaign_b]
 
         with flask_app.test_request_context("/llm_eval"):
             flask_app.config["login"] = {"active": False}
@@ -131,6 +143,10 @@ class AsyncLlmCampaignRunTests(unittest.TestCase):
         reconcile_runtime.assert_any_call(flask_app, campaign_a)
         reconcile_runtime.assert_any_call(flask_app, campaign_b)
         self.assertEqual(reconcile_runtime.call_count, 2)
+        self.assertEqual(campaigns["a"]["metadata"], campaign_a.metadata)
+        self.assertEqual(campaigns["a"]["stats"], campaign_a.get_stats.return_value)
+        self.assertEqual(campaigns["b"]["metadata"], campaign_b.metadata)
+        self.assertEqual(campaigns["b"]["stats"], campaign_b.get_stats.return_value)
 
 
 if __name__ == "__main__":
