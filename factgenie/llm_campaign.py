@@ -182,8 +182,10 @@ def run_llm_campaign(app, mode, campaign_id, announcer, campaign, datasets, mode
 
     # generate outputs / annotations for all free examples in the db
     for i, row in db[db.status == ExampleStatus.FREE].iterrows():
-        # campaign was paused
-        if campaign_id not in running_campaigns:
+        # campaign was paused or stopped in another worker/process
+        campaign.load_metadata()
+        if campaign.metadata.get("status") != CampaignStatus.RUNNING:
+            running_campaigns.discard(campaign_id)
             break
 
         dataset_id = row["dataset"]
@@ -253,8 +255,7 @@ def run_llm_campaign(app, mode, campaign_id, announcer, campaign, datasets, mode
         campaign.metadata["status"] = CampaignStatus.FINISHED
         campaign.update_metadata()
 
-        if campaign_id in running_campaigns:
-            running_campaigns.remove(campaign_id)
+        running_campaigns.discard(campaign_id)
 
     return jsonify(success=True, status=campaign.metadata["status"])
 

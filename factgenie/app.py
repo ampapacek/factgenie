@@ -1119,6 +1119,9 @@ def llm_campaign_run():
     if campaign is None:
         return utils.error(f"Unknown campaign: {campaign_id}")
 
+    if campaign.metadata.get("status") == CampaignStatus.RUNNING:
+        return utils.error(f"Campaign {campaign_id} is already running.")
+
     if reconcile_llm_campaign_runtime_state(app, campaign):
         return utils.error(f"Campaign {campaign_id} is already running.")
 
