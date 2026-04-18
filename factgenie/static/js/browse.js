@@ -781,7 +781,13 @@ function getExampleLevelFields(annotations) {
         return null;
     }
     // show `outputs.flags`, `outputs.options`, and `outputs.textFields`
-    var flags = annotations.flags;
+    var flags = (annotations.flags || []).filter((flag) => {
+        const label = normalizeFlagLabel(flag?.label);
+        if ((label.includes("skip") || label.includes("preskoc")) && !isTruthyFlagValue(flag?.value)) {
+            return false;
+        }
+        return true;
+    });
     var options = annotations.options;
     var sliders = annotations.sliders;
     var textFields = annotations.text_fields;
