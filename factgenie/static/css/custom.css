@@ -996,6 +996,35 @@ body.overlay-open {
     border: 1px solid #ddd;
 }
 
+.btn-ann-select-skipped,
+.btn-ann-select-skipped.disabled,
+.btn-ann-select-skipped:disabled {
+    opacity: 0.55;
+    filter: grayscale(0.15);
+    cursor: default;
+}
+
+.annotator-primary-label {
+    font-weight: 600;
+}
+
+.annotator-secondary-label {
+    color: #8a8f98;
+    font-weight: 400;
+    margin-left: 6px;
+}
+
+.output-box-skipped {
+    opacity: 0.58;
+}
+
+.output-box-skipped .card-header,
+.output-box-skipped .card-body,
+.output-box-skipped pre,
+.output-box-skipped .extra-fields {
+    color: #7f8690;
+}
+
 .inline-icon {
     height: 0.9em;
     margin-right: 5px;

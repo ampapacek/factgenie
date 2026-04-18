@@ -643,7 +643,7 @@ def browse():
     setup_id = request.args.get("setup_id")
     ann_campaign = request.args.get("ann_campaign")
     is_authenticated = _is_authenticated_viewer()
-    show_annotator_toggle = is_authenticated
+    show_annotator_toggle = True
 
     workflows.refresh_indexes(app)
     datasets = workflows.get_local_dataset_overview(app)

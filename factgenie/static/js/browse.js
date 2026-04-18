@@ -2,7 +2,7 @@ var current_example_idx = 0;
 var selected_campaigns = [];
 var collapsed_boxes = [];
 var showAnnotatorNames = false;
-var preferredAnnotatorNames = [];
+var preferredAnnotatorIds = [];
 var currentAnnInfo = new Map();
 var annotatorAliases = new Map();
 var annotatorAliasList = [
@@ -46,6 +46,10 @@ function normalizeNewlines(text) {
         .replace(/\\n/g, "\n");
 }
 
+function escapeHtml(text) {
+    return $('<div>').text(String(text ?? "")).html();
+}
+
 function normalizeAnnotatorKey(value) {
     const text = String(value || "").trim().toLowerCase();
     if (!text) {
@@ -79,11 +83,19 @@ function isTruthyFlagValue(value) {
     return !["false", "0", "no", "off"].includes(text);
 }
 
+function normalizeFlagLabel(value) {
+    return String(value || "")
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+}
+
 function isSkipSelected(annotations) {
     const flags = annotations?.flags || [];
     return flags.some((flag) => {
-        const label = String(flag?.label || "").toLowerCase();
-        if (!label.includes("skip")) {
+        const label = normalizeFlagLabel(flag?.label);
+        if (!label.includes("skip") && !label.includes("preskoc")) {
             return false;
         }
         return isTruthyFlagValue(flag?.value);
@@ -212,8 +224,8 @@ function changeExample(dataset, split, example_idx) {
 }
 
 
-function createOutputBox(content, exampleLevelFields, annId, annLabel, setup_id) {
-    var card = $('<div>', { class: `card output-box generated-output-box box-${setup_id} box-${annId} box-${setup_id}-${annId}` });
+function createOutputBox(content, exampleLevelFields, annId, annLabel, setup_id, extraClasses = "") {
+    var card = $('<div>', { class: `card output-box generated-output-box box-${setup_id} box-${annId} box-${setup_id}-${annId} ${extraClasses}`.trim() });
 
     const badgeLabel = annLabel || annId;
     var annotationBadge = (annId !== "original")
@@ -304,26 +316,35 @@ function buildAnnotationInfo(generated_outputs) {
             const campaign_id = annotation.campaign_id;
             const annotator_group = annotation.annotator_group;
             const annotator_id = String(annotation.annotator_id || "").trim();
-            if (isInvalidAnnotatorId(annotator_id)) {
+            const hasAnnotatorId = annotator_id !== "" && !isInvalidAnnotatorId(annotator_id);
+            if (!campaign_id) {
                 return;
             }
-            const ann_id = generateAnnotatorKey(campaign_id, annotator_id) ||
+            const ann_id = (hasAnnotatorId ? generateAnnotatorKey(campaign_id, annotator_id) : null) ||
                 generateAnnotatorShortId(campaign_id, annotator_group);
 
             if (!annIds.has(ann_id)) {
                 annIds.set(ann_id, {
                     campaign_id: campaign_id,
                     annotator_group: annotator_group,
-                    annotator_id: annotator_id || null,
+                    annotator_id: hasAnnotatorId ? annotator_id : null,
                     annotator_ids: new Set(),
                     annotator_aliases: new Set(),
+                    has_non_skipped_annotation: false,
+                    has_skipped_annotation: false,
                 });
             }
-            if (annotator_id) {
+            const isSkipped = isSkipSelected(annotation);
+            if (isSkipped) {
+                annIds.get(ann_id).has_skipped_annotation = true;
+            } else {
+                annIds.get(ann_id).has_non_skipped_annotation = true;
+            }
+            if (hasAnnotatorId) {
                 annIds.get(ann_id).annotator_ids.add(annotator_id);
             }
             let alias = String(annotation.annotator_alias || "").trim();
-            if (!alias && annotator_id) {
+            if (!alias && hasAnnotatorId) {
                 alias = getOrCreateAnnotatorAlias(campaign_id, annotator_id);
             }
             if (alias) {
@@ -376,15 +397,39 @@ function getDisplayAnnotatorAliases(annId, annInfo) {
     });
 }
 
-function getAnnotatorLabel(annId, annInfo) {
+function getAnnotatorPrimaryLabel(annId, annInfo) {
     if (!annInfo) {
-        return annId;
+        return String(annId || "");
     }
-    const names = showAnnotatorNames ? getAnnotatorNames(annInfo) : getDisplayAnnotatorAliases(annId, annInfo);
+    const aliases = getDisplayAnnotatorAliases(annId, annInfo);
+    if (aliases.length > 0) {
+        return aliases.join(", ");
+    }
+    const names = getAnnotatorNames(annInfo);
+    if (names.length > 0) {
+        return names.join(", ");
+    }
+    return String(annId || "");
+}
+
+function getAnnotatorLabel(annId, annInfo) {
+    return getAnnotatorPrimaryLabel(annId, annInfo);
+}
+
+function getAnnotatorLabelHtml(annId, annInfo) {
+    if (!showAnnotatorNames) {
+        const primaryLabel = getAnnotatorPrimaryLabel(annId, annInfo);
+        const primaryHtml = `<span class="annotator-primary-label">${escapeHtml(primaryLabel)}</span>`;
+        return primaryHtml;
+    }
+
+    const names = getAnnotatorNames(annInfo);
     if (names.length === 0) {
-        return annId;
+        const fallbackLabel = getAnnotatorPrimaryLabel(annId, annInfo);
+        return `<span class="annotator-primary-label">${escapeHtml(fallbackLabel)}</span>`;
     }
-    return names.join(", ");
+
+    return `<span class="annotator-primary-label">${escapeHtml(names.join(", "))}</span>`;
 }
 
 function getAnnotatorDisplayBoth(annId, annInfo) {
@@ -407,8 +452,8 @@ function getSkipMessage(annInfo, annotations) {
     const who = getAnnotatorDisplayBoth(annotations?.annotator_id, annInfo);
     const skipFlags = (annotations?.flags || [])
         .filter((flag) => {
-            const label = String(flag?.label || "").toLowerCase();
-            return label.includes("skip") && isTruthyFlagValue(flag?.value);
+            const label = normalizeFlagLabel(flag?.label);
+            return (label.includes("skip") || label.includes("preskoc")) && isTruthyFlagValue(flag?.value);
         })
         .map((flag) => String(flag?.label || "skip").trim())
         .filter((label) => label.length > 0);
@@ -429,6 +474,10 @@ function getAnnotatorNames(annInfo) {
     const names = Array.from(annInfo?.annotator_ids || [])
         .map((name) => String(name || "").trim())
         .filter((name) => name !== "");
+    const primaryName = String(annInfo?.annotator_id || "").trim();
+    if (primaryName) {
+        names.push(primaryName);
+    }
     return Array.from(new Set(names));
 }
 
@@ -449,25 +498,29 @@ function getAnnotatorSortKey(annId, annInfo) {
     return String(annId).toLowerCase();
 }
 
-function refreshPreferredAnnotators() {
-    if (!selected_campaigns || selected_campaigns.length === 0) {
-        return;
-    }
+function savePreferredAnnotatorsFromSelection(selection) {
+    preferredAnnotatorIds = Array.from(new Set((selection || [])
+        .map((annId) => String(annId || "").trim())
+        .filter((annId) => annId !== "")));
+}
 
-    const names = new Set();
-    selected_campaigns.forEach((annId) => {
-        const info = currentAnnInfo.get(annId);
-        getAnnotatorNames(info).forEach((name) => {
-            const normalized = String(name || "").trim().toLowerCase();
-            if (normalized) {
-                names.add(normalized);
-            }
-        });
+function getSelectableAnnotatorIds() {
+    return $(".btn-ann-select").not(".btn-ann-select-skipped").map(function () {
+        return $(this).data('ann');
+    }).get();
+}
+
+function setActiveAnnotatorButtons(annIds) {
+    const selectableSet = new Set(getSelectableAnnotatorIds());
+    const activeSet = new Set((annIds || []).filter((annId) => selectableSet.has(annId)));
+    $(".btn-ann-select").each(function () {
+        const annId = $(this).data('ann');
+        if (activeSet.has(annId)) {
+            $(this).addClass("active");
+        } else {
+            $(this).removeClass("active");
+        }
     });
-
-    if (names.size > 0) {
-        preferredAnnotatorNames = Array.from(names);
-    }
 }
 
 function createOutputBoxes(generated_outputs) {
@@ -497,15 +550,29 @@ function createOutputBoxes(generated_outputs) {
         }
         return aKey.localeCompare(bKey);
     });
+    const selectorAnnIds = sortedAnnIds.filter((annId) => {
+        const info = annIds.get(annId);
+        return showAnnotatorNames || info?.has_non_skipped_annotation;
+    });
 
     // add an option for each campaign id
-    for (const ann_id of sortedAnnIds) {
-        const annLabel = getAnnotatorLabel(ann_id, annIds.get(ann_id));
-        const button = $(`<button type="button" class="btn btn-sm btn-primary btn-ann-select" data-ann="${ann_id}">${annLabel}</button>`);
-        button.on('click', function () {
-            $(this).toggleClass('active');
-            updateDisplayedAnnotations();
-        });
+    for (const ann_id of selectorAnnIds) {
+        const annInfo = annIds.get(ann_id);
+        const annLabel = getAnnotatorLabelHtml(ann_id, annInfo);
+        const isSkippedOnly = !annInfo?.has_non_skipped_annotation && annInfo?.has_skipped_annotation;
+        const extraClasses = isSkippedOnly ? " btn-ann-select-skipped disabled" : "";
+        const disabledAttr = isSkippedOnly ? ' disabled aria-disabled="true"' : "";
+        const button = $(`<button type="button" class="btn btn-sm btn-primary btn-ann-select${extraClasses}" data-ann="${ann_id}"${disabledAttr}>${annLabel}</button>`);
+        if (!isSkippedOnly) {
+            button.on('click', function () {
+                $(this).toggleClass('active');
+                const activeSelection = $('.btn-ann-select.active').map(function () {
+                    return $(this).data('ann');
+                }).get();
+                savePreferredAnnotatorsFromSelection(activeSelection);
+                updateDisplayedAnnotations();
+            });
+        }
         selectBox.append(button);
     }
     if (annIds.size > 0) {
@@ -525,13 +592,14 @@ function createOutputBoxes(generated_outputs) {
 
         for (const annId of sortedAnnIds) {
             const info = annIds.get(annId);
-            let annotations;
+            let annotations = null;
             if (info.annotator_id) {
-                annotations = output.annotations.filter(a => a.campaign_id == info.campaign_id && a.annotator_id == info.annotator_id)[0];
-            } else {
-                annotations = output.annotations.filter(a => a.campaign_id == info.campaign_id && a.annotator_group == info.annotator_group)[0];
+                annotations = output.annotations.find(a => a.campaign_id == info.campaign_id && a.annotator_id == info.annotator_id) || null;
             }
-            if (!annotations || isInvalidAnnotatorId(annotations.annotator_id)) {
+            if (!annotations) {
+                annotations = output.annotations.find(a => a.campaign_id == info.campaign_id && a.annotator_group == info.annotator_group) || null;
+            }
+            if (!annotations) {
                 continue;
             }
 
@@ -549,8 +617,9 @@ function createOutputBoxes(generated_outputs) {
                 exampleLevelFields = getExampleLevelFields(annotations);
             }
 
-            const annLabel = getAnnotatorLabel(annId, annInfo);
-            card = createOutputBox(annotated_output, exampleLevelFields, annId, annLabel, output.setup_id);
+            const annLabel = getAnnotatorLabelHtml(annId, annInfo);
+            const extraClasses = isSkipped ? "output-box-skipped" : "";
+            card = createOutputBox(annotated_output, exampleLevelFields, annId, annLabel, output.setup_id, extraClasses);
             card.appendTo(groupDiv);
             card.hide();
         }
@@ -581,8 +650,9 @@ function highlightSetup() {
         // Make sure the highlighted campaign is visible if not already
         if (!specificBox.is(":visible")) {
             // Add this campaign to selected campaigns if not already there
-            if (!selected_campaigns.includes(window.highlight_ann_campaign)) {
-                $(`.btn-ann-select[data-ann="${window.highlight_ann_campaign}"]`).addClass("active");
+            const highlightButton = $(`.btn-ann-select[data-ann="${window.highlight_ann_campaign}"]`);
+            if (!selected_campaigns.includes(window.highlight_ann_campaign) && !highlightButton.hasClass("btn-ann-select-skipped")) {
+                highlightButton.addClass("active");
                 selected_campaigns.push(window.highlight_ann_campaign);
                 updateDisplayedAnnotations();
             }
@@ -797,58 +867,32 @@ function showRawData(data) {
 
 
 function showSelectedCampaigns() {
-    // if the annotator is still among the values, restore it
-    // prevent resetting to the first annotation when switching examples
-    $(".btn-ann-select").each(function () {
-        if (selected_campaigns.includes($(this).data('ann'))) {
-            $(this).addClass("active").trigger("change");
-        } else {
-            $(this).removeClass("active");
-        }
-    });
+    const availableAnnIds = getSelectableAnnotatorIds();
+    const availableSet = new Set(availableAnnIds);
 
     // if window.highlight_ann_campaign is set, select the corresponding campaign
-    if (window.highlight_ann_campaign) {
-        $(`.btn-ann-select[data-ann="${window.highlight_ann_campaign}"]`).addClass("active").trigger("change");
+    if (window.highlight_ann_campaign && availableSet.has(window.highlight_ann_campaign)) {
+        selected_campaigns = [window.highlight_ann_campaign];
+        setActiveAnnotatorButtons(selected_campaigns);
         return;
     }
 
-    // keep exact previous selections when they exist for this example
-    if ($(".btn-ann-select.active").length > 0) {
-        selected_campaigns = $('.btn-ann-select.active').map(function () {
-            return $(this).data('ann');
-        }).get();
-        refreshPreferredAnnotators();
+    const matchingPreferred = preferredAnnotatorIds.filter((annId) => availableSet.has(annId));
+    if (matchingPreferred.length > 0) {
+        selected_campaigns = matchingPreferred;
+        setActiveAnnotatorButtons(selected_campaigns);
         return;
     }
 
-    if (preferredAnnotatorNames.length > 0) {
-        const preferred = new Set(preferredAnnotatorNames);
-        const matching = [];
-        $(".btn-ann-select").each(function () {
-            const annId = $(this).data('ann');
-            const info = currentAnnInfo.get(annId);
-            const names = getAnnotatorNames(info).map((name) => String(name).toLowerCase());
-            if (names.some((name) => preferred.has(name))) {
-                $(this).addClass("active").trigger("change");
-                matching.push(annId);
-            } else {
-                $(this).removeClass("active");
-            }
-        });
-        if (matching.length > 0) {
-            selected_campaigns = matching;
-            refreshPreferredAnnotators();
-            return;
-        }
-    }
+    setActiveAnnotatorButtons([]);
+
     // if no campaigns were selected (no $(".btn-ann-select") has class `active), select the first one
-    if (!window.highlight_ann_campaign && $(".btn-ann-select").length > 0 && $(".btn-ann-select.active").length == 0) {
-        const first = $(".btn-ann-select").first();
-        first.addClass("active").trigger("change");
-        const annId = first.data("ann");
+    if (!window.highlight_ann_campaign && availableAnnIds.length > 0) {
+        const annId = availableAnnIds[0];
         selected_campaigns = [annId];
-        refreshPreferredAnnotators();
+        setActiveAnnotatorButtons(selected_campaigns);
+    } else {
+        selected_campaigns = [];
     }
 }
 
@@ -866,7 +910,9 @@ function toggleAnnotatorNames() {
 
     if (window.generated_outputs) {
         createOutputBoxes(window.generated_outputs);
-        showSelectedCampaigns();
+        const availableSet = new Set(getSelectableAnnotatorIds());
+        selected_campaigns = selected_campaigns.filter((annId) => availableSet.has(annId));
+        setActiveAnnotatorButtons(selected_campaigns);
         updateDisplayedAnnotations();
         highlightSetup();
     }
@@ -878,7 +924,6 @@ function updateDisplayedAnnotations() {
     selected_campaigns = activeButtons.map(function () {
         return $(this).data('ann');
     }).get();
-    refreshPreferredAnnotators();
     // hide all placeholders
     $(".output-box").hide();
 
