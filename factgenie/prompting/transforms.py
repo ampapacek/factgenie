@@ -7,6 +7,7 @@ import logging
 import re
 import time
 import unittest
+import unicodedata
 from importlib.metadata import version
 from itertools import cycle
 from typing import Any, Literal, Type
@@ -591,9 +592,13 @@ class ParseAnnotations(Transform):
 
     def expand_to_word_boundaries(self, text: str, start_pos: int, end_pos: int) -> tuple[int, int]:
         while start_pos > 0 and not text[start_pos - 1].isspace():
+            if start_pos >= 2 and text[start_pos - 2] == "\\" and text[start_pos - 1] in "nrt":
+                break
             start_pos -= 1
 
         while end_pos < len(text) and not text[end_pos].isspace():
+            if text[end_pos] == "\\" and end_pos + 1 < len(text) and text[end_pos + 1] in "nrt":
+                break
             end_pos += 1
 
         return start_pos, end_pos
@@ -603,16 +608,39 @@ class ParseAnnotations(Transform):
         original_positions = []
         previous_was_space = True
 
-        for idx, char in enumerate(text):
+        idx = 0
+        while idx < len(text):
+            char = text[idx]
+
+            # Some imported outputs still contain escaped whitespace like "\n".
+            # Treat these as separators during fallback matching.
+            if char == "\\" and idx + 1 < len(text) and text[idx + 1] in "nrt":
+                if not previous_was_space:
+                    normalized_chars.append(" ")
+                    original_positions.append(idx)
+                    previous_was_space = True
+                idx += 2
+                continue
+
             if char.isalnum():
-                normalized_chars.append(char.lower())
-                original_positions.append(idx)
-                previous_was_space = False
+                # Fold diacritics so minor spelling variants like "ď" vs "d"
+                # still align in the normalization fallback.
+                decomposed = unicodedata.normalize("NFKD", char)
+                added_char = False
+                for normalized_char in decomposed:
+                    if unicodedata.combining(normalized_char):
+                        continue
+                    if normalized_char.isalnum():
+                        normalized_chars.append(normalized_char.lower())
+                        original_positions.append(idx)
+                        added_char = True
+                previous_was_space = not added_char
             else:
                 if not previous_was_space:
                     normalized_chars.append(" ")
                     original_positions.append(idx)
                     previous_was_space = True
+            idx += 1
 
         if normalized_chars and normalized_chars[-1] == " ":
             normalized_chars.pop()
@@ -654,6 +682,65 @@ class ParseAnnotations(Transform):
             match = matches[0]
 
         return match.start(), match.end()
+
+    def _find_fuzzy_occurrence_in_normalized_text(
+        self, normalized_text: str, normalized_span: str, occurence_index: int | None
+    ) -> tuple[int, int] | None:
+        if not normalized_text or not normalized_span or len(normalized_span) < 12:
+            return None
+
+        max_edits = min(4, max(1, round(len(normalized_span) * 0.08)))
+        min_candidate_len = max(1, len(normalized_span) - max_edits)
+        max_candidate_len = len(normalized_span) + max_edits
+
+        candidates = []
+        best_distance = None
+        second_best_distance = None
+
+        for start in range(len(normalized_text)):
+            if normalized_text[start] == " ":
+                continue
+            if start > 0 and normalized_text[start - 1] != " ":
+                continue
+
+            for candidate_len in range(min_candidate_len, max_candidate_len + 1):
+                end = start + candidate_len
+                if end > len(normalized_text):
+                    break
+                if end < len(normalized_text) and normalized_text[end] != " ":
+                    continue
+
+                candidate_text = normalized_text[start:end]
+                distance = edit_distance(normalized_span, candidate_text)
+                if distance > max_edits:
+                    continue
+
+                candidate = (start, end, distance)
+                candidates.append(candidate)
+
+                if best_distance is None or distance < best_distance:
+                    second_best_distance = best_distance
+                    best_distance = distance
+                elif distance != best_distance and (second_best_distance is None or distance < second_best_distance):
+                    second_best_distance = distance
+
+        if not candidates or best_distance is None:
+            return None
+
+        # Only accept a clearly best typo-level match. If multiple fuzzy matches
+        # look equally plausible, keep the safer "not found" behavior.
+        if second_best_distance is not None and second_best_distance <= best_distance:
+            return None
+
+        best_candidates = sorted((candidate for candidate in candidates if candidate[2] == best_distance))
+        if occurence_index is not None:
+            if 0 <= occurence_index < len(best_candidates):
+                start, end, _ = best_candidates[occurence_index]
+                return start, end
+            return None
+
+        start, end, _ = best_candidates[0]
+        return start, end
 
     def parse_annotations(self, c: dict, api: ModelAPI):
         """
@@ -767,6 +854,17 @@ class ParseAnnotations(Transform):
 
             if start_pos == -1 and normalized_annotated_span:
                 normalized_match = self._find_occurrence_in_normalized_text(
+                    normalized_text,
+                    normalized_annotated_span,
+                    occurence_index,
+                )
+                if normalized_match is not None:
+                    normalized_start, _ = normalized_match
+                    if 0 <= normalized_start < len(normalized_positions):
+                        start_pos = normalized_positions[normalized_start]
+
+            if start_pos == -1 and normalized_annotated_span:
+                normalized_match = self._find_fuzzy_occurrence_in_normalized_text(
                     normalized_text,
                     normalized_annotated_span,
                     occurence_index,
