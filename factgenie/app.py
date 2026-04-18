@@ -111,8 +111,9 @@ def reconcile_llm_campaign_runtime_state(app, campaign):
     campaign_id = campaign.metadata["id"]
     thread = app.db["running_campaign_threads"].get(campaign_id)
     is_running = thread is not None and thread.is_alive()
+    had_local_thread = thread is not None
 
-    if not is_running and campaign_id in app.db["running_campaigns"]:
+    if had_local_thread and not is_running and campaign_id in app.db["running_campaigns"]:
         app.db["running_campaigns"].discard(campaign_id)
         app.db["running_campaign_threads"].pop(campaign_id, None)
         app.db["announcers"].pop(campaign_id, None)
@@ -120,7 +121,7 @@ def reconcile_llm_campaign_runtime_state(app, campaign):
     if is_running and campaign.metadata["status"] != CampaignStatus.RUNNING:
         campaign.metadata["status"] = CampaignStatus.RUNNING
         campaign.update_metadata()
-    elif not is_running and campaign.metadata["status"] == CampaignStatus.RUNNING:
+    elif had_local_thread and not is_running and campaign.metadata["status"] == CampaignStatus.RUNNING:
         campaign.metadata["status"] = CampaignStatus.IDLE
         campaign.update_metadata()
 
