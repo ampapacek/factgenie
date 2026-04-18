@@ -598,6 +598,63 @@ class ParseAnnotations(Transform):
 
         return start_pos, end_pos
 
+    def _build_normalized_match_text(self, text: str) -> tuple[str, list[int]]:
+        normalized_chars = []
+        original_positions = []
+        previous_was_space = True
+
+        for idx, char in enumerate(text):
+            if char.isalnum():
+                normalized_chars.append(char.lower())
+                original_positions.append(idx)
+                previous_was_space = False
+            else:
+                if not previous_was_space:
+                    normalized_chars.append(" ")
+                    original_positions.append(idx)
+                    previous_was_space = True
+
+        if normalized_chars and normalized_chars[-1] == " ":
+            normalized_chars.pop()
+            original_positions.pop()
+
+        return "".join(normalized_chars), original_positions
+
+    def _normalize_span_for_matching(self, text: str) -> str:
+        normalized_text, _ = self._build_normalized_match_text(text.strip())
+        return normalized_text
+
+    def _find_occurrence_in_normalized_text(
+        self, normalized_text: str, normalized_span: str, occurence_index: int | None
+    ) -> tuple[int, int] | None:
+        if not normalized_text or not normalized_span:
+            return None
+
+        start_needs_boundary = normalized_span[0].isalnum()
+        end_needs_boundary = normalized_span[-1].isalnum()
+
+        pattern = ""
+        if start_needs_boundary:
+            pattern += r"\b"
+        pattern += re.escape(normalized_span)
+        if end_needs_boundary:
+            pattern += r"\b"
+
+        matches = list(re.finditer(pattern, normalized_text, re.IGNORECASE))
+        if not matches:
+            return None
+
+        if occurence_index is not None and 0 <= occurence_index < len(matches):
+            match = matches[occurence_index]
+        else:
+            if occurence_index is not None and matches:
+                logger.warning(
+                    f"Invalid occurrence index {occurence_index} for span '{normalized_span}'. Using first occurrence."
+                )
+            match = matches[0]
+
+        return match.start(), match.end()
+
     def parse_annotations(self, c: dict, api: ModelAPI):
         """
         Parse annotations from JSON and validate them.
@@ -632,8 +689,11 @@ class ParseAnnotations(Transform):
 
         logger.info(f"Response contains {len(annotations)} annotations.")
 
+        normalized_text, normalized_positions = self._build_normalized_match_text(text)
+
         for i, annotation in enumerate(annotations):
             annotated_span = annotation.text.lower().strip()
+            normalized_annotated_span = self._normalize_span_for_matching(annotation.text)
 
             if len(text) == 0:
                 logger.warning(f"❌ Span EMPTY.")
@@ -705,8 +765,19 @@ class ParseAnnotations(Transform):
                     # Original behavior: find first occurrence
                     start_pos = text.lower().find(annotated_span)
 
+            if start_pos == -1 and normalized_annotated_span:
+                normalized_match = self._find_occurrence_in_normalized_text(
+                    normalized_text,
+                    normalized_annotated_span,
+                    occurence_index,
+                )
+                if normalized_match is not None:
+                    normalized_start, _ = normalized_match
+                    if 0 <= normalized_start < len(normalized_positions):
+                        start_pos = normalized_positions[normalized_start]
+
             if not self.annotation_overlap_allowed and start_pos != -1:
-                annotation_end = start_pos + len(annotated_span)
+                annotation_end = start_pos + len(annotation.text)
                 if self.annotation_granularity == "words":
                     start_pos, annotation_end = self.expand_to_word_boundaries(text, start_pos, annotation_end)
 
@@ -2177,6 +2248,35 @@ class TransformTests(unittest.TestCase):
         result = transform(current, self.api)
 
         self.assertListEqual(expected, result)
+
+    def test_parse_annotations_ignores_markdown_formatting_noise(self):
+        current = [
+            {
+                "text": "1. **Stanovte cíle**: Před plánováním návštěvy si určete, co chcete, aby studenti z návštěvy získali.",
+                "ann_raw": '{ "annotations": [{ "text": "stanovte cíle: před plánováním návštěvy si určete, co chcete, aby studenti z návštěvy získali.", "reason": "main point", "annotation_type": 0 }]}',
+            }
+        ]
+
+        annotation_span_categories = [
+            {"name": "correct", "color": "rgb(0, 255, 0)", "description": "is correct"},
+        ]
+        transform = ParseAnnotations(
+            "ann_raw",
+            "ann",
+            annotation_span_categories,
+            True,
+            AnnotationModelFactory.get_output_model(with_reason=True),
+            "words",
+        )
+
+        result = transform(current, self.api)
+
+        self.assertEqual(len(result[0]["ann"]), 1)
+        self.assertEqual(result[0]["ann"][0]["start"], 3)
+        self.assertEqual(
+            result[0]["ann"][0]["text"],
+            "**Stanovte cíle**: Před plánováním návštěvy si určete, co chcete, aby studenti z návštěvy získali.",
+        )
 
     def test_extract_tag(self):
         # join_occurances=True
