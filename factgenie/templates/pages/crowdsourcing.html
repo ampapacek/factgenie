@@ -52,7 +52,7 @@
               <th scope="col" data-sortable="true">Service</th>
               <th scope="col" data-sortable="true">Created</th>
               <th scope="col" data-width="200">Progress</th>
-              <th scope="col" data-align="right" data-width="200">Actions</th>
+              <th scope="col" data-align="right" data-width="240">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -72,6 +72,10 @@
                 <a href="{{ host_prefix }}/annotate/{{ campaign.metadata.id }}" class="btn btn-outline-secondary"
                   data-bs-toggle="tooltip" title="Preview the crowdsourcing page">
                   <i class="fa fa-eye"></i>
+                </a>
+                <a href="{{ host_prefix }}/export_campaign_outputs/{{ campaign_id }}" class="btn btn-outline-secondary"
+                  data-bs-toggle="tooltip" title="Download all annotations">
+                  <i class="fa fa-download"></i>
                 </a>
                 <a type="button" class="btn btn-outline-secondary" data-bs-toggle="modal"
                   data-bs-target="#actions-modal-{{ campaign.metadata.id }}">

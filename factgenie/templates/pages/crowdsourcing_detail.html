@@ -57,8 +57,7 @@
             <i class="fa fa-eye"></i> Preview page
           </a>
           <a href="{{ host_prefix }}/export_campaign_outputs/{{ campaign_id }}" class="btn btn-outline-secondary"
-            data-bs-toggle="tooltip" id="download-button-{{ metadata.id }}" title="Export annotations" {% if
-            metadata.status=='idle' %} style="display: none;" {% endif %}>
+            data-bs-toggle="tooltip" id="download-button-{{ metadata.id }}" title="Export annotations">
             <i class="fa fa-download"></i> Download annotations
           </a>
           <a onclick="clearCampaign('{{campaign_id }}', '{{ mode }}')" class="btn btn-outline-secondary"
