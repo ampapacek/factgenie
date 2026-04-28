@@ -6,6 +6,8 @@ login:
   lock_view_pages: true
   # if set to `true`, Analyze is public without login
   show_analyze_without_login: true
+  # if set to `true`, the "Show annotator names" button is visible to logged-out Browse users
+  show_annotator_names_toggle_without_login: false
   # !!! change the default values !!!
   username: admin
   password: factgenie

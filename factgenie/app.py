@@ -187,6 +187,10 @@ def is_analyze_public():
     return app.config["login"].get("show_analyze_without_login", True)
 
 
+def is_annotator_name_toggle_public():
+    return app.config["login"].get("show_annotator_names_toggle_without_login", False)
+
+
 def has_public_view_pages():
     return is_browse_public() or is_analyze_public()
 
@@ -644,7 +648,7 @@ def browse():
     setup_id = request.args.get("setup_id")
     ann_campaign = request.args.get("ann_campaign")
     is_authenticated = _is_authenticated_viewer()
-    show_annotator_toggle = True
+    show_annotator_toggle = is_authenticated or is_annotator_name_toggle_public()
 
     workflows.refresh_indexes(app)
     datasets = workflows.get_local_dataset_overview(app)

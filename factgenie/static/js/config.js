@@ -3,19 +3,20 @@ function updateLoginAccessSummary() {
     const loginActive = $('#login_active').is(':checked');
     const browsePublic = $('#show_browse_without_login').is(':checked');
     const analyzePublic = $('#show_analyze_without_login').is(':checked');
+    const annotatorTogglePublic = $('#show_annotator_names_toggle_without_login').is(':checked');
     const summary = $('#public-access-summary');
 
     let message = '';
     if (!loginActive) {
-        message = 'Password protection is off. Browse and Analyze are public.';
+        message = `Password protection is off. Browse and Analyze are public. Annotator-name toggle is ${annotatorTogglePublic ? 'public' : 'hidden for logged-out users'}.`;
     } else if (browsePublic && analyzePublic) {
-        message = 'Password protection is on. Browse and Analyze are both public for regular users.';
+        message = `Password protection is on. Browse and Analyze are both public for regular users. Annotator-name toggle is ${annotatorTogglePublic ? 'public' : 'hidden for logged-out users'}.`;
     } else if (browsePublic) {
-        message = 'Password protection is on. Browse is public, but Analyze still requires login.';
+        message = `Password protection is on. Browse is public, but Analyze still requires login. Annotator-name toggle is ${annotatorTogglePublic ? 'public' : 'hidden for logged-out users'}.`;
     } else if (analyzePublic) {
-        message = 'Password protection is on. Analyze is public, but Browse still requires login.';
+        message = `Password protection is on. Analyze is public, but Browse still requires login. Annotator-name toggle is ${annotatorTogglePublic ? 'public' : 'hidden for logged-out users'}.`;
     } else {
-        message = 'Password protection is on. Browse and Analyze both require login.';
+        message = `Password protection is on. Browse and Analyze both require login. Annotator-name toggle is ${annotatorTogglePublic ? 'public' : 'hidden for logged-out users'}.`;
     }
 
     summary.text(message);
@@ -32,6 +33,7 @@ function updateConfig() {
             active: $('#login_active').is(':checked'),
             lock_view_pages: !$('#show_browse_without_login').is(':checked'),
             show_analyze_without_login: $('#show_analyze_without_login').is(':checked'),
+            show_annotator_names_toggle_without_login: $('#show_annotator_names_toggle_without_login').is(':checked'),
             username: $('#login_username').val(),
             password: $('#login_password').val()
         },
@@ -65,7 +67,7 @@ function updateConfig() {
 $(document).ready(function () {
     updateLoginAccessSummary();
 
-    $('#login_active, #show_browse_without_login, #show_analyze_without_login').on('change', function () {
+    $('#login_active, #show_browse_without_login, #show_analyze_without_login, #show_annotator_names_toggle_without_login').on('change', function () {
         updateLoginAccessSummary();
     });
 

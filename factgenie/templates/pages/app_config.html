@@ -59,6 +59,18 @@
               checked {% endif %}>
           </div>
         </div>
+        <div class="form-group mt-3">
+          <label for="show_annotator_names_toggle_without_login">Allow annotator-name toggle without login</label>
+          <div class="mb-2">
+            <small class="form-text text-muted">Turn this on to show the "Show annotator names" button to logged-out
+              users on Browse. By default, this control is only visible after signing in.</small>
+          </div>
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="show_annotator_names_toggle_without_login"
+              name="show_annotator_names_toggle_without_login" {% if
+              app_config.login.get('show_annotator_names_toggle_without_login', False) %} checked {% endif %}>
+          </div>
+        </div>
         <div id="public-access-summary" class="alert alert-secondary mt-3 mb-0" role="alert"></div>
         <div class="form-group mt-3">
           <label for="login_username">Username</label>
