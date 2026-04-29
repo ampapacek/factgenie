@@ -36,6 +36,14 @@
           href="{{ host_prefix }}/{{ campaign.metadata.mode }}/detail/{{ campaign.metadata.id }}"><b>Statistics:
             {{
             campaign.metadata.id }}</b></a></h3>
+      {% if is_authenticated %}
+        <div class="mt-3">
+          <a href="{{ host_prefix }}/export_campaign_outputs/{{ campaign.metadata.id }}" class="btn btn-outline-secondary"
+            data-bs-toggle="tooltip" title="Download all annotations">
+            <i class="fa fa-download"></i> Download annotations
+          </a>
+        </div>
+      {% endif %}
 
       <div id="metadata-block" class="mt-3">
         <hr>

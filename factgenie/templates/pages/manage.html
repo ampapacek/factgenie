@@ -248,6 +248,10 @@
                 {% endif %}
               </td>
               <td>
+                <a href="{{ host_prefix }}/export_campaign_outputs/{{ campaign.metadata.id }}"
+                  class="btn btn-outline-secondary" data-bs-toggle="tooltip" title="Download all annotations">
+                  <i class="fa fa-download"></i>
+                </a>
                 <a onclick="deleteCampaign('{{ campaign.metadata.id }}', '{{ campaign.metadata.mode }}')"
                   class="btn btn-outline-danger" data-bs-toggle="tooltip" title="Delete the campaign">
                   <i class="fa fa-trash"></i>

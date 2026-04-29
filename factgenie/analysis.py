@@ -17,6 +17,19 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 logger = logging.getLogger("factgenie")
 
+ANNOTATOR_PSEUDONYM_CITIES = [
+    "Tokyo",
+    "Paris",
+    "London",
+    "New York",
+    "Sydney",
+    "Berlin",
+    "Rome",
+    "Cairo",
+    "Mumbai",
+    "Mexico City",
+]
+
 
 def generate_example_index(app, campaign):
     logger.info(f"Preparing example index for campaign {campaign.campaign_id}")
@@ -272,12 +285,19 @@ def _is_skip_selected(flags):
     return False
 
 
-def compute_annotator_stats(example_index, slider_label_order=None):
+def compute_annotator_stats(
+    example_index,
+    slider_label_order=None,
+    annotator_aliases=None,
+    show_real_annotator_names=True,
+):
     if example_index.empty:
         return None
 
+    annotator_aliases = annotator_aliases or {}
     df = example_index.copy()
     df["annotator_id"] = df["annotator_id"].fillna("unknown")
+    annotator_display_names = _build_annotator_public_name_map(df["annotator_id"].unique(), annotator_aliases)
 
     def count_spans(anns):
         return len(anns) if isinstance(anns, list) else 0
@@ -349,8 +369,9 @@ def compute_annotator_stats(example_index, slider_label_order=None):
     rows = []
     for _, row in base.iterrows():
         annotator_id = row["annotator_id"]
+        display_name = annotator_id if show_real_annotator_names else annotator_display_names.get(annotator_id, annotator_id)
         entry = {
-            "annotator_id": annotator_id,
+            "annotator_id": display_name,
             "example_count": int(row["example_count"]),
             "avg_spans": row["avg_spans"],
             "text_questions_count": int(row["text_questions_count"]),
@@ -549,6 +570,41 @@ def _load_campaign_annotator_alias_map(campaign):
         return {}
 
 
+def _city_alias_from_index(index):
+    if index < 0:
+        index = 0
+    base_index = index % len(ANNOTATOR_PSEUDONYM_CITIES)
+    suffix_index = (index // len(ANNOTATOR_PSEUDONYM_CITIES)) + 1
+    alias = ANNOTATOR_PSEUDONYM_CITIES[base_index]
+    if suffix_index > 1:
+        alias = f"{alias} {suffix_index}"
+    return alias
+
+
+def _next_available_city_alias(used_aliases):
+    index = 0
+    while True:
+        alias = _city_alias_from_index(index)
+        if alias not in used_aliases:
+            return alias
+        index += 1
+
+
+def _build_annotator_public_name_map(annotator_ids, alias_map):
+    public_names = {}
+    used_aliases = set()
+    normalized_ids = sorted({str(value or "").strip() for value in annotator_ids if str(value or "").strip()})
+
+    for annotator_id in normalized_ids:
+        alias = str(alias_map.get(annotator_id.lower(), "")).strip()
+        if not alias or alias in used_aliases:
+            alias = _next_available_city_alias(used_aliases)
+        public_names[annotator_id] = alias
+        used_aliases.add(alias)
+
+    return public_names
+
+
 def _extract_question_from_font_mono(raw_text):
     if not raw_text:
         return ""
@@ -574,7 +630,7 @@ def _make_question_preview(example):
     return _extract_question_from_font_mono(raw_text)
 
 
-def compute_question_coverage_stats(app, campaign, example_index):
+def compute_question_coverage_stats(app, campaign, example_index, show_real_annotator_names=True):
     key_cols = ["dataset", "split", "setup_id", "example_idx"]
     assignment_cols = key_cols + ["annotator_group_key"]
 
@@ -844,6 +900,7 @@ def compute_question_coverage_stats(app, campaign, example_index):
                 }
 
     annotator_values = sorted(annotator_value_set, key=lambda value: value.lower())
+    annotator_public_names = _build_annotator_public_name_map(annotator_values, alias_map)
 
     # Question preview text for last column
     question_preview_map = {}
@@ -895,10 +952,11 @@ def compute_question_coverage_stats(app, campaign, example_index):
         row_cell_details = {}
         row_done_count = 0
         for annotator_id in annotator_values:
+            public_key = annotator_id if show_real_annotator_names else annotator_public_names.get(annotator_id, annotator_id)
             cell = matrix_cells.get((output_key, annotator_id), {"state": "todo", "start": None, "end": None})
             status = cell["state"]
-            row_statuses[annotator_id] = status
-            row_cell_details[annotator_id] = cell
+            row_statuses[public_key] = status
+            row_cell_details[public_key] = cell
             if status == "done":
                 row_done_count += 1
 
@@ -918,14 +976,20 @@ def compute_question_coverage_stats(app, campaign, example_index):
 
     annotator_columns = []
     for annotator_id in annotator_values:
-        done_count = sum(1 for row in matrix_rows if row["statuses"].get(annotator_id) == "done")
+        public_key = annotator_id if show_real_annotator_names else annotator_public_names.get(annotator_id, annotator_id)
+        done_count = sum(1 for row in matrix_rows if row["statuses"].get(public_key) == "done")
         alias = alias_map.get(annotator_id.lower(), "") if annotator_id else ""
+        annotator_name = annotator_id
+        annotator_alias = alias
+        if not show_real_annotator_names:
+            annotator_name = annotator_public_names.get(annotator_id, annotator_id)
+            annotator_alias = ""
         annotator_columns.append(
             {
-                "annotator_key": annotator_id,
-                "annotator_group_key": annotator_id,
-                "annotator_name": annotator_id,
-                "annotator_alias": alias,
+                "annotator_key": public_key,
+                "annotator_group_key": public_key,
+                "annotator_name": annotator_name,
+                "annotator_alias": annotator_alias,
                 "done_count": int(done_count),
             }
         )
@@ -1086,12 +1150,18 @@ def compute_slider_stats(example_index, datasets, slider_label_order=None):
     }
 
 
-def compute_statistics(app, campaign):
+def compute_statistics(app, campaign, show_real_annotator_names=True):
     statistics = {}
 
     span_index = generate_span_index(app, campaign)
     example_index = generate_example_index(app, campaign)
-    coverage_stats = compute_question_coverage_stats(app, campaign, example_index)
+    annotator_aliases = _load_campaign_annotator_alias_map(campaign)
+    coverage_stats = compute_question_coverage_stats(
+        app,
+        campaign,
+        example_index,
+        show_real_annotator_names=show_real_annotator_names,
+    )
     if coverage_stats:
         statistics["coverage_stats"] = coverage_stats
 
@@ -1125,7 +1195,12 @@ def compute_statistics(app, campaign):
         slider_stats = compute_slider_stats(filtered_example_index, app.db["datasets_obj"], slider_label_order)
         if slider_stats:
             statistics["slider_stats"] = slider_stats
-        annotator_stats = compute_annotator_stats(filtered_example_index, slider_label_order)
+        annotator_stats = compute_annotator_stats(
+            filtered_example_index,
+            slider_label_order,
+            annotator_aliases=annotator_aliases,
+            show_real_annotator_names=show_real_annotator_names,
+        )
         if annotator_stats:
             statistics["annotator_stats"] = annotator_stats
 

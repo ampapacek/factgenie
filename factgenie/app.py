@@ -303,6 +303,7 @@ def analyze():
     return render_template(
         "pages/analyze.html",
         campaigns=campaigns,
+        is_authenticated=is_authenticated,
         host_prefix=app.config["host_prefix"],
     )
 
@@ -325,12 +326,13 @@ def analyze_detail(campaign_id):
         if campaign_dataset_ids and not campaign_dataset_ids.issubset(visible_dataset_ids):
             return redirect(app.config["host_prefix"] + "/analyze")
 
-    statistics = analysis.compute_statistics(app, campaign)
+    statistics = analysis.compute_statistics(app, campaign, show_real_annotator_names=is_authenticated)
 
     return render_template(
         "pages/analyze_detail.html",
         statistics=statistics,
         campaign=campaign,
+        is_authenticated=is_authenticated,
         host_prefix=app.config["host_prefix"],
     )
 
