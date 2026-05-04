@@ -2,13 +2,20 @@ const datasets = window.datasets;
 const url_prefix = window.url_prefix;
 const mode = window.mode;
 
-function addAnnotationSpanCategory(name, description, customColor) {
+function addAnnotationSpanCategory(name, description, customColor, extraConfig) {
     const annotationSpanCategories = $("#annotation-span-categories");
 
     name = name || "";
     description = description || "";
 
     const newCategory = createAnnotationSpanCategoryElem(name, description);
+    if (extraConfig && typeof extraConfig === "object") {
+        const preservedConfig = { ...extraConfig };
+        delete preservedConfig.name;
+        delete preservedConfig.description;
+        delete preservedConfig.color;
+        newCategory.data("extraConfig", preservedConfig);
+    }
     annotationSpanCategories.append(newCategory);
 
     const colors = [
@@ -298,7 +305,8 @@ function getAnnotationSpanCategories() {
         const name = $(this).find("input[name='annotationSpanCategoryName']").val();
         const color = $(this).find("a[name='annotationSpanCategoryColor']").css('background-color');
         const description = $(this).find("input[name='annotationSpanCategoryDescription']").val();
-        annotationSpanCategories.push({ name: name, color: color, description: description });
+        const extraConfig = $(this).data("extraConfig") || {};
+        annotationSpanCategories.push({ ...extraConfig, name: name, color: color, description: description });
     });
     return annotationSpanCategories;
 }

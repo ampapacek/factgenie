@@ -532,9 +532,7 @@ class SpanAnnotator {
             skipBtn.disabled = !!this.pendingAnnotation?.isEdit;
         }
 
-        const presets = Array.isArray(this.annotationTypes?.[annotation.type]?.reason_presets)
-            ? this.annotationTypes[annotation.type].reason_presets
-            : [];
+        const presets = this._normalizeReasonPresets(this.annotationTypes?.[annotation.type]?.reason_presets);
         let initialReason = "";
         if (this.pendingAnnotation?.isEdit) {
             initialReason = String(annotation.reason || annotation.note || "").trim();
@@ -546,7 +544,7 @@ class SpanAnnotator {
         const presetContainer = $('#annotation-reason-presets');
         if (presetContainer.length && presets.length > 0) {
             presets.forEach((preset) => {
-                const label = String(preset || "").trim();
+                const label = preset.label;
                 if (!label) {
                     return;
                 }
@@ -557,23 +555,26 @@ class SpanAnnotator {
                     if (!presetSet) {
                         return;
                     }
-                    const oppositeLabel = label.startsWith("NotIn")
-                        ? `In${label.slice(5)}`
-                        : (label.startsWith("In") ? `NotIn${label.slice(2)}` : null);
+                    const oppositeLabels = Array.isArray(preset.oppositeLabels)
+                        ? preset.oppositeLabels
+                        : [];
                     const isActive = presetSet.has(label);
                     if (isActive) {
                         presetSet.delete(label);
                     } else {
                         presetSet.add(label);
-                        if (oppositeLabel && presetSet.has(oppositeLabel)) {
-                            presetSet.delete(oppositeLabel);
-                        }
+                        oppositeLabels.forEach((oppositeLabel) => {
+                            if (oppositeLabel && presetSet.has(oppositeLabel)) {
+                                presetSet.delete(oppositeLabel);
+                            }
+                        });
                     }
                     $(this).toggleClass("active", !isActive);
-                    if (oppositeLabel) {
+                    if (oppositeLabels.length > 0) {
                         $('#annotation-reason-presets button').each(function () {
-                            if ($(this).text().trim() === oppositeLabel) {
-                                $(this).toggleClass("active", presetSet.has(oppositeLabel));
+                            const buttonLabel = $(this).text().trim();
+                            if (oppositeLabels.includes(buttonLabel)) {
+                                $(this).toggleClass("active", presetSet.has(buttonLabel));
                             }
                         });
                     }
@@ -623,7 +624,7 @@ class SpanAnnotator {
         const { objectId, annotation, isEdit } = this.pendingAnnotation;
         const doc = this.documents.get(objectId);
         const presetSet = this.pendingAnnotation.selectedPresets || new Set();
-        const presetText = Array.from(presetSet).join(" ").trim();
+        const presetText = Array.from(presetSet).map((label) => `[[${label}]]`).join(" ").trim();
 
         // Add reason to annotation if provided
         const reasonText = String(reason || "").trim();
@@ -670,18 +671,81 @@ class SpanAnnotator {
     }
 
     _splitReasonPresets(reason, presets) {
-        const tokens = String(reason || "").split(/\s+/).filter((token) => token.length > 0);
+        let remainingReason = String(reason || "");
         const presetSet = new Set();
-        const presetList = Array.isArray(presets) ? presets.map((p) => String(p || "").trim()) : [];
+        const presetList = Array.isArray(presets) ? presets : [];
+        const presetLabels = presetList.map((preset) => preset.label);
+
+        remainingReason = remainingReason.replace(/\[\[([^[\]]+)\]\]/g, (_, rawLabel) => {
+            const label = String(rawLabel || "").trim();
+            if (presetLabels.includes(label)) {
+                presetSet.add(label);
+                return " ";
+            }
+            return _;
+        });
+
+        const tokens = remainingReason.split(/\s+/).filter((token) => token.length > 0);
         const remaining = [];
         tokens.forEach((token) => {
-            if (presetList.includes(token)) {
+            if (presetLabels.includes(token)) {
                 presetSet.add(token);
             } else {
                 remaining.push(token);
             }
         });
+
         return { presetSet, remainingText: remaining.join(" ") };
+    }
+
+    _normalizeReasonPresets(presets) {
+        if (!Array.isArray(presets)) {
+            return [];
+        }
+
+        return presets
+            .map((preset) => {
+                if (typeof preset === "string") {
+                    const label = preset.trim();
+                    if (!label) {
+                        return null;
+                    }
+                    const oppositeLabel = label.startsWith("NotIn")
+                        ? `In${label.slice(5)}`
+                        : (label.startsWith("In") ? `NotIn${label.slice(2)}` : null);
+                    return { label, oppositeLabels: oppositeLabel ? [oppositeLabel] : [] };
+                }
+
+                if (!preset || typeof preset !== "object") {
+                    return null;
+                }
+
+                const label = String(preset.label || "").trim();
+                if (!label) {
+                    return null;
+                }
+
+                const oppositeLabels = [];
+                const oppositeLabel = String(
+                    preset.opposite_label ?? preset.oppositeLabel ?? ""
+                ).trim();
+                if (oppositeLabel) {
+                    oppositeLabels.push(oppositeLabel);
+                }
+
+                const rawOppositeLabels = preset.opposite_labels ?? preset.oppositeLabels;
+                if (Array.isArray(rawOppositeLabels)) {
+                    rawOppositeLabels.forEach((item) => {
+                        const normalized = String(item || "").trim();
+                        if (normalized && !oppositeLabels.includes(normalized)) {
+                            oppositeLabels.push(normalized);
+                        }
+                    });
+                }
+
+                return { label, oppositeLabels };
+            })
+            .filter((preset) => preset && preset.label);
     }
 
     _restoreBodyScroll() {

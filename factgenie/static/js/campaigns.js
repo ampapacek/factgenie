@@ -975,7 +975,12 @@ function updateCrowdsourcingConfig() {
     $("#annotation-span-categories").empty();
 
     annotationSpanCategories.forEach((annotationSpanCategory) => {
-        addAnnotationSpanCategory(annotationSpanCategory.name, annotationSpanCategory.description, annotationSpanCategory.color);
+        addAnnotationSpanCategory(
+            annotationSpanCategory.name,
+            annotationSpanCategory.description,
+            annotationSpanCategory.color,
+            annotationSpanCategory
+        );
     });
     $("#flags").empty();
 
@@ -1045,7 +1050,12 @@ function importCrowdsourcingConfigToLLM() {
     $("#system-message").val(annotatorInstructions);
 
     annotationSpanCategories.forEach((annotationSpanCategory) => {
-        addAnnotationSpanCategory(annotationSpanCategory.name, annotationSpanCategory.description, annotationSpanCategory.color);
+        addAnnotationSpanCategory(
+            annotationSpanCategory.name,
+            annotationSpanCategory.description,
+            annotationSpanCategory.color,
+            annotationSpanCategory
+        );
     });
 
     $("#flags").empty();
@@ -1189,7 +1199,12 @@ function updateLLMMetricConfig() {
         $("#annotationGranularity").val(annotation_granularity);
 
         annotationSpanCategories.forEach((annotationSpanCategory) => {
-            addAnnotationSpanCategory(annotationSpanCategory.name, annotationSpanCategory.description, annotationSpanCategory.color);
+            addAnnotationSpanCategory(
+                annotationSpanCategory.name,
+                annotationSpanCategory.description,
+                annotationSpanCategory.color,
+                annotationSpanCategory
+            );
         });
 
         $("#flags").empty();
