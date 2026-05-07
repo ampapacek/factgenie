@@ -93,7 +93,21 @@
       </div>
 
       <div id="redo-admin" class="mb-5">
-        <h4>Redo annotations</h4>
+        <div class="d-flex align-items-center justify-content-between">
+          <h4 class="mb-0">Redo annotations</h4>
+          <button
+            id="redo-admin-toggle"
+            class="btn btn-sm btn-outline-secondary"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#redo-admin-body"
+            aria-expanded="true"
+            aria-controls="redo-admin-body"
+          >
+            <i class="fa fa-chevron-up"></i> Collapse
+          </button>
+        </div>
+        <div class="collapse show mt-3" id="redo-admin-body">
         <div class="d-flex flex-wrap gap-2 mb-3">
           <a href="{{ host_prefix }}/redo/{{ campaign_id }}/queue.json" class="btn btn-sm btn-outline-secondary">
             <i class="fa fa-download"></i> Queue JSON
@@ -194,6 +208,7 @@
             {% endfor %}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div id="campaign-status" class="mb-5">
@@ -393,6 +408,23 @@
   function selectedAnnotatorId() {
     return $("#redo-annotator-select").val();
   }
+
+  function setRedoAdminCollapseButton(expanded) {
+    const button = $("#redo-admin-toggle");
+    const icon = button.find("i");
+    button.contents().filter(function () {
+      return this.nodeType === Node.TEXT_NODE;
+    }).remove();
+    button.append(expanded ? " Collapse" : " Expand");
+    icon.attr("class", expanded ? "fa fa-chevron-up" : "fa fa-chevron-down");
+  }
+
+  $("#redo-admin-body").on("shown.bs.collapse", function () {
+    setRedoAdminCollapseButton(true);
+  });
+  $("#redo-admin-body").on("hidden.bs.collapse", function () {
+    setRedoAdminCollapseButton(false);
+  });
 
   function filterRedoRows() {
     const annotatorId = selectedAnnotatorId();
