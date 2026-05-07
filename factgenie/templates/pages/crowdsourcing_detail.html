@@ -92,6 +92,110 @@
         <hr>
       </div>
 
+      <div id="redo-admin" class="mb-5">
+        <h4>Redo annotations</h4>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          <a href="{{ host_prefix }}/redo/{{ campaign_id }}/queue.json" class="btn btn-sm btn-outline-secondary">
+            <i class="fa fa-download"></i> Queue JSON
+          </a>
+          <a href="{{ host_prefix }}/redo/{{ campaign_id }}/queue.csv" class="btn btn-sm btn-outline-secondary">
+            <i class="fa fa-download"></i> Queue CSV
+          </a>
+          <a href="{{ host_prefix }}/redo/{{ campaign_id }}/revisions.json" class="btn btn-sm btn-outline-secondary">
+            <i class="fa fa-download"></i> Revisions JSON
+          </a>
+          <a href="{{ host_prefix }}/redo/{{ campaign_id }}/revisions.csv" class="btn btn-sm btn-outline-secondary">
+            <i class="fa fa-download"></i> Revisions CSV
+          </a>
+        </div>
+
+        <div class="row g-2 align-items-end mb-3">
+          <div class="col-md-4">
+            <label class="form-label" for="redo-annotator-select">Annotator</label>
+            <select class="form-select" id="redo-annotator-select">
+              <option value="">Select annotator...</option>
+              {% for annotator in redo_admin.annotators %}
+              <option value="{{ annotator.id }}">
+                {{ annotator.id }}{% if annotator.alias %} ({{ annotator.alias }}){% endif %}
+                - pending {{ annotator.counts.pending }}, saved {{ annotator.counts.completed }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" for="redo-shared-instruction">Shared instruction</label>
+            <input class="form-control" id="redo-shared-instruction" placeholder="Optional">
+          </div>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+          <button type="button" class="btn btn-sm btn-primary" onclick="createRedoItems('example')">Add selected examples</button>
+          <button type="button" class="btn btn-sm btn-outline-primary" onclick="createRedoItems('batch')">Add selected batches</button>
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="cancelSelectedRedoItems()">Cancel selected pending items</button>
+          <button type="button" class="btn btn-sm btn-outline-warning" onclick="restoreSelectedOriginalRedoItems()">Restore original annotation</button>
+          <div class="form-check ms-2">
+            <input class="form-check-input" type="checkbox" id="redo-include-skipped">
+            <label class="form-check-label" for="redo-include-skipped">Include skipped</label>
+          </div>
+          <div class="form-check ms-2">
+            <input class="form-check-input" type="checkbox" id="redo-include-completed">
+            <label class="form-check-label" for="redo-include-completed">Include completed</label>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectVisibleRedoRows(true)">Select visible</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectVisibleRedoRows(false)">Clear visible</button>
+        </div>
+
+        <table class="table table-sm table-striped" id="redo-items-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Annotator</th>
+              <th>Alias</th>
+              <th>Batch</th>
+              <th>Dataset</th>
+              <th>Split</th>
+              <th>Setup</th>
+              <th>Example</th>
+              <th>Skipped</th>
+              <th>Redo</th>
+              <th>Preview</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in redo_admin.examples %}
+            <tr class="redo-row" data-annotator-id="{{ item.annotator_id }}">
+              <td>
+                <input type="checkbox" class="form-check-input redo-row-checkbox"
+                  data-annotator-id="{{ item.annotator_id }}"
+                  data-annotator-group="{{ item.annotator_group }}"
+                  data-batch-idx="{{ item.batch_idx }}"
+                  data-dataset="{{ item.dataset }}"
+                  data-split="{{ item.split }}"
+                  data-setup-id="{{ item.setup_id }}"
+                  data-example-idx="{{ item.example_idx }}"
+                  data-skipped="{{ 'true' if item.skipped else 'false' }}"
+                  data-redo-status="{{ item.redo_status }}"
+                  data-redo-id="{{ item.redo_id }}">
+              </td>
+              <td>{{ item.annotator_id }}</td>
+              <td>{{ item.annotator_alias }}</td>
+              <td>{{ item.batch_idx }}</td>
+              <td>{{ item.dataset }}</td>
+              <td>{{ item.split }}</td>
+              <td>{{ item.setup_id }}</td>
+              <td>{{ item.example_idx }}</td>
+              <td>{% if item.skipped %}<span class="badge bg-warning text-dark">skipped</span>{% endif %}</td>
+              <td>{% if item.redo_status %}<span class="badge bg-info text-dark">{{ item.redo_status }}</span>{% endif %}</td>
+              <td>
+                <a href="{{ host_prefix }}/browse?dataset={{ item.dataset }}&split={{ item.split }}&example_idx={{ item.example_idx }}&setup_id={{ item.setup_id }}"
+                  class="blue-link" target="_blank"><i class="fa fa-external-link"></i></a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
       <div id="campaign-status" class="mb-5">
         <h4>Batches</h4>
         <table data-toggle="table" data-pagination="true" data-page-size="100" data-pagination-parts="['pageList']"
@@ -179,21 +283,100 @@
   {% include 'include/import_annotations_modal.html' %}
 
   <div class="modal fade" id="campaign-help-modal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title" id="campaign-help-modal-label">How to manage the campaign</h5>
+          <h5 class="modal-title" id="campaign-help-modal-label">How to manage the campaign and redo workflow</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
           <div class="tab-pane sidepanel-panel" role="tabpanel" tabindex="0">
-            <p>Use the <b>Page link</b> to share the URL with your annotators, e.g. through the crowdsourcing platform.
+            <p>
+              Use the <b>Page link</b> to share the annotation URL with annotators, for example through your
+              crowdsourcing platform.
             </p>
-            <p>Use the <b>Download annotations</b> button to download the annotations
-              collected so far.</p>
-            <p>See the <a class="blue-link"
-                href="https://github.com/ufal/factgenie/wiki/Crowdsourcing-Annotations">crowsourcing
-                annotation tutorial</a> on the project wiiki for more information.</p>
+            <p>
+              Use the <b>Download annotations</b> button to export the campaign outputs collected so far.
+            </p>
+            <p>
+              For the full crowdsourcing basics, see the
+              <a class="blue-link" href="https://github.com/ufal/factgenie/wiki/Crowdsourcing-Annotations">
+                crowdsourcing annotation tutorial
+              </a>.
+            </p>
+
+            <hr>
+
+            <h6 class="fw-bold">Redo annotations in this version</h6>
+            <p>
+              Redo is a per-annotator queue. There is no separate on/off toggle in the UI: as soon as an annotator
+              has pending redo items, the normal annotation link serves those redo items first.
+            </p>
+            <p>
+              Redo saves do not delete the original submission. Each save archives the old active JSONL record and
+              writes the corrected version as the new active annotation.
+            </p>
+
+            <h6 class="fw-bold">How to set up redo for an annotator</h6>
+            <ol class="mb-3">
+              <li>Find the campaign you want to correct and open this help panel from the campaign detail page.</li>
+              <li>Scroll to the <b>Redo annotations</b> section.</li>
+              <li>Select the annotator in the dropdown so the table only shows that annotator's examples.</li>
+              <li>Select the rows you want to send back for correction.</li>
+              <li>
+                Use <b>Add selected examples</b> for a few individual items, or <b>Add selected batches</b> when you
+                want the whole batch to go back to the same annotator.
+              </li>
+              <li>
+                Add an optional shared instruction if you want the annotator to see a short note while reviewing the
+                redo item.
+              </li>
+              <li>
+                Click the add button. The selected items are written to the redo queue immediately.
+              </li>
+            </ol>
+
+            <h6 class="fw-bold">What the admin controls mean</h6>
+            <ul class="mb-3">
+              <li>
+                <b>Include skipped</b> lets you add examples that were skipped in the original annotation round.
+                Leave it off if you only want real completed annotations.
+              </li>
+              <li>
+                <b>Include completed</b> shows redo items that have already been saved once. This is useful for review
+                or another correction pass.
+              </li>
+              <li>
+                <b>Select visible</b> and <b>Clear visible</b> work only on the rows currently shown after filtering by
+                annotator.
+              </li>
+              <li>
+                <b>Cancel selected pending items</b> removes only pending redo items from the queue. It does not touch
+                saved redo items or archived revisions.
+              </li>
+              <li>
+                <b>Restore original annotation</b> takes a completed redo item, archives the current active redo save,
+                and restores the first archived original annotation as the active one again.
+              </li>
+            </ul>
+
+            <h6 class="fw-bold">What the annotator sees</h6>
+            <ul class="mb-3">
+              <li>The annotator opens the usual campaign link or login flow. No special redo URL is needed.</li>
+              <li>If the annotator has pending redo items, those items appear before normal free work.</li>
+              <li>The redo page uses <b>Save current item</b> so each corrected annotation is saved one item at a time.</li>
+              <li>
+                Completed redo items are hidden by default, but they can be shown again for review when needed.
+              </li>
+            </ul>
+
+            <h6 class="fw-bold">Good habits for admins</h6>
+            <ul class="mb-0">
+              <li>Use redo for targeted fixes, not as a replacement for normal campaign assignment.</li>
+              <li>Keep instructions short and specific, for example what should be corrected and why.</li>
+              <li>Check the redo queue and revision downloads if you need an audit trail for changes.</li>
+              <li>Remember that the original submission stays available in the revision log, so analysis keeps using the latest active version only.</li>
+            </ul>
           </div>
         </div>
       </div>
@@ -204,6 +387,219 @@
   window.url_prefix = "{{ host_prefix }}";
   window.campaigns = "{{ campaigns }}";
   window.mode = "crowdsourcing";
+  window.campaign_id = "{{ campaign_id }}";
+</script>
+<script>
+  function selectedAnnotatorId() {
+    return $("#redo-annotator-select").val();
+  }
+
+  function filterRedoRows() {
+    const annotatorId = selectedAnnotatorId();
+    $(".redo-row").each(function () {
+      const show = !annotatorId || $(this).data("annotator-id") === annotatorId;
+      $(this).toggle(show);
+    });
+  }
+
+  $("#redo-annotator-select").on("change", filterRedoRows);
+  filterRedoRows();
+
+  function selectVisibleRedoRows(checked) {
+    $(".redo-row:visible .redo-row-checkbox").each(function () {
+      const checkbox = $(this);
+      if (checked && !shouldUseRedoCheckbox(checkbox)) {
+        checkbox.prop("checked", false);
+        return;
+      }
+      checkbox.prop("checked", checked);
+    });
+  }
+
+  function shouldUseRedoCheckbox(checkbox) {
+    const skippedAllowed = $("#redo-include-skipped").prop("checked") || checkbox.data("skipped") !== true;
+    const completedAllowed = $("#redo-include-completed").prop("checked") || checkbox.data("redo-status") !== "completed";
+    return skippedAllowed && completedAllowed;
+  }
+
+  function selectedRedoExclusionMessage() {
+    let skippedCount = 0;
+    let completedCount = 0;
+    $(".redo-row-checkbox:checked").each(function () {
+      const checkbox = $(this);
+      if (!$("#redo-include-skipped").prop("checked") && checkbox.data("skipped") === true) {
+        skippedCount += 1;
+      }
+      if (!$("#redo-include-completed").prop("checked") && checkbox.data("redo-status") === "completed") {
+        completedCount += 1;
+      }
+    });
+    const messages = [];
+    if (skippedCount > 0) {
+      messages.push(`${skippedCount} selected skipped example(s) are ignored because Include skipped is off.`);
+    }
+    if (completedCount > 0) {
+      messages.push(`${completedCount} selected completed redo item(s) are ignored because Include completed is off.`);
+    }
+    if (messages.length > 0) {
+      messages.push("Turn on the matching checkbox to add them to the redo queue.");
+      return messages.join("\n");
+    }
+    return "Select at least one example.";
+  }
+
+  function gatherSelectedRedoRows(selector) {
+    const rows = [];
+    const seen = new Set();
+    $(".redo-row-checkbox:checked").each(function () {
+      const checkbox = $(this);
+      if (!shouldUseRedoCheckbox(checkbox)) {
+        return;
+      }
+      const batchKey = `${checkbox.data("annotator-id")}|${checkbox.data("batch-idx")}`;
+      if (selector === "batch" && seen.has(batchKey)) {
+        return;
+      }
+      seen.add(batchKey);
+      rows.push({
+        annotator_id: checkbox.data("annotator-id"),
+        annotator_group: checkbox.data("annotator-group"),
+        batch_idx: checkbox.data("batch-idx"),
+        dataset: checkbox.data("dataset"),
+        split: checkbox.data("split"),
+        setup_id: checkbox.data("setup-id"),
+        example_idx: checkbox.data("example-idx"),
+      });
+    });
+    if (selector !== "batch") {
+      return rows;
+    }
+    const selectedBatches = new Set(rows.map(row => `${row.annotator_id}|${row.batch_idx}`));
+    const batchRows = [];
+    $(".redo-row-checkbox").each(function () {
+      const checkbox = $(this);
+      if (!shouldUseRedoCheckbox(checkbox)) {
+        return;
+      }
+      const batchKey = `${checkbox.data("annotator-id")}|${checkbox.data("batch-idx")}`;
+      if (!selectedBatches.has(batchKey)) {
+        return;
+      }
+      batchRows.push({
+        annotator_id: checkbox.data("annotator-id"),
+        annotator_group: checkbox.data("annotator-group"),
+        batch_idx: checkbox.data("batch-idx"),
+        dataset: checkbox.data("dataset"),
+        split: checkbox.data("split"),
+        setup_id: checkbox.data("setup-id"),
+        example_idx: checkbox.data("example-idx"),
+      });
+    });
+    return batchRows;
+  }
+
+  function createRedoItems(selector) {
+    const items = gatherSelectedRedoRows(selector);
+    if (items.length === 0) {
+      alert(selectedRedoExclusionMessage());
+      return;
+    }
+    $.post({
+      url: `${url_prefix}/redo/${window.campaign_id}/items`,
+      contentType: "application/json",
+      data: JSON.stringify({
+        items: items,
+        selector: selector,
+        includeSkipped: $("#redo-include-skipped").prop("checked"),
+        instruction: $("#redo-shared-instruction").val(),
+      }),
+      success: function (response) {
+        if (response.success !== true) {
+          alert(response.error || "Could not create redo items.");
+          return;
+        }
+        window.location.reload();
+      },
+    });
+  }
+
+  function cancelSelectedRedoItems() {
+    const selected = $(".redo-row-checkbox:checked");
+    const nonPendingCount = selected.filter(function () {
+      return $(this).data("redo-status") && $(this).data("redo-status") !== "pending";
+    }).length;
+    const redoIds = selected.filter(function () {
+      return $(this).data("redo-status") === "pending";
+    }).map(function () {
+      return $(this).data("redo-id");
+    }).get().filter(Boolean);
+    if (redoIds.length === 0) {
+      alert("Select at least one pending redo item. Saved/completed redo items cannot be cancelled.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Cancel ${redoIds.length} selected pending redo item(s)?\n\n` +
+      "This removes the selected items from the annotator redo queue. " +
+      "It does not delete active annotations or archived revisions, and it does not reset the original batch assignment. " +
+      "Cancelled items will no longer appear for the annotator unless you add them to the redo queue again." +
+      (nonPendingCount > 0 ? `\n\n${nonPendingCount} selected saved/cancelled item(s) will be ignored.` : "")
+    );
+    if (!confirmed) {
+      return;
+    }
+    $.post({
+      url: `${url_prefix}/redo/${window.campaign_id}/items/cancel`,
+      contentType: "application/json",
+      data: JSON.stringify({ redo_ids: redoIds }),
+      success: function (response) {
+        if (response.success !== true) {
+          alert(response.error || "Could not cancel redo items.");
+          return;
+        }
+        window.location.reload();
+      },
+    });
+  }
+
+  function restoreSelectedOriginalRedoItems() {
+    const selected = $(".redo-row-checkbox:checked");
+    const nonCompletedCount = selected.filter(function () {
+      return $(this).data("redo-status") !== "completed";
+    }).length;
+    const redoIds = selected.filter(function () {
+      return $(this).data("redo-status") === "completed";
+    }).map(function () {
+      return $(this).data("redo-id");
+    }).get().filter(Boolean);
+    if (redoIds.length === 0) {
+      alert("Select at least one saved/completed redo item to restore.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Restore the original annotation for ${redoIds.length} selected saved redo item(s)?\n\n` +
+      "This archives the current active annotation and makes the original archived annotation active again. " +
+      "The revision history is preserved." +
+      (nonCompletedCount > 0 ? `\n\n${nonCompletedCount} selected pending/cancelled item(s) will be ignored.` : "")
+    );
+    if (!confirmed) {
+      return;
+    }
+    $.post({
+      url: `${url_prefix}/redo/${window.campaign_id}/items/restore_original`,
+      contentType: "application/json",
+      data: JSON.stringify({ redo_ids: redoIds }),
+      success: function (response) {
+        if (response.success !== true) {
+          alert(response.error || "Could not restore original annotations.");
+          return;
+        }
+        if (response.errors && response.errors.length > 0) {
+          alert(`Restored ${response.restored || 0} item(s). Some selected items could not be restored.`);
+        }
+        window.location.reload();
+      },
+    });
+  }
 </script>
 <script src="{{ host_prefix }}/static/js/utils.js"></script>
 <script src="{{ host_prefix }}/static/js/campaigns.js"></script>

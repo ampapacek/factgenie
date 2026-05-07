@@ -12,6 +12,7 @@ from collections import defaultdict
 import pandas as pd
 
 import factgenie.workflows as workflows
+import factgenie.redo as redo
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -560,7 +561,7 @@ def _load_campaign_annotator_alias_map(campaign):
             for record in records:
                 if not isinstance(record, dict):
                     continue
-                annotator_id = str(record.get("id", "")).strip()
+                annotator_id = _normalize_annotator_id(record.get("id", ""))
                 alias = str(record.get("alias", "")).strip()
                 if annotator_id and alias:
                     alias_map[annotator_id.lower()] = alias
@@ -568,6 +569,20 @@ def _load_campaign_annotator_alias_map(campaign):
     except Exception:
         logger.warning(f"Failed to load annotator aliases for campaign {campaign.campaign_id}")
         return {}
+
+
+def _normalize_annotator_id(value):
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "<na>"}:
+        return ""
+    return text
 
 
 def _city_alias_from_index(index):
@@ -593,7 +608,7 @@ def _next_available_city_alias(used_aliases):
 def _build_annotator_public_name_map(annotator_ids, alias_map):
     public_names = {}
     used_aliases = set()
-    normalized_ids = sorted({str(value or "").strip() for value in annotator_ids if str(value or "").strip()})
+    normalized_ids = sorted({_normalize_annotator_id(value) for value in annotator_ids if _normalize_annotator_id(value)})
 
     for annotator_id in normalized_ids:
         alias = str(alias_map.get(annotator_id.lower(), "")).strip()
@@ -833,7 +848,7 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
 
     if not assignment_details.empty:
         for _, assignment_row in assignment_details.iterrows():
-            annotator_id = str(assignment_row.get("annotator_id", "")).strip()
+            annotator_id = _normalize_annotator_id(assignment_row.get("annotator_id", ""))
             if not annotator_id:
                 continue
 
@@ -856,7 +871,7 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
         and set(key_cols).issubset(example_index.columns)
     ):
         ann_df = example_index[key_cols + ["annotator_id", "annotations", "flags"]].copy()
-        ann_df["annotator_id"] = ann_df["annotator_id"].fillna("").astype(str).str.strip()
+        ann_df["annotator_id"] = ann_df["annotator_id"].apply(_normalize_annotator_id)
         ann_df = ann_df[ann_df["annotator_id"] != ""]
 
         if not ann_df.empty:
@@ -898,6 +913,59 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
                     "start": existing_cell.get("start"),
                     "end": existing_cell.get("end"),
                 }
+
+    if show_real_annotator_names:
+        redo_queue = redo.load_queue(campaign.campaign_id)
+        for redo_item in redo_queue.get("items", []):
+            annotator_id = _normalize_annotator_id(redo_item.get("annotator_id", ""))
+            if not annotator_id:
+                continue
+            output_key = (
+                redo_item["dataset"],
+                redo_item["split"],
+                redo_item["setup_id"],
+                int(redo_item["example_idx"]),
+            )
+            annotator_value_set.add(annotator_id)
+            cell_key = (output_key, annotator_id)
+            existing_cell = matrix_cells.get(cell_key, {"state": "todo", "start": None, "end": None})
+            existing_cell["redo_status"] = redo_item.get("status", redo.STATUS_PENDING)
+            matrix_cells[cell_key] = existing_cell
+
+        revision_summary = {}
+        for revision in redo.load_revision_log(campaign.campaign_id):
+            annotator_id = _normalize_annotator_id(revision.get("annotator_id", ""))
+            if not annotator_id:
+                continue
+            try:
+                output_key = (
+                    revision["dataset"],
+                    revision["split"],
+                    revision["setup_id"],
+                    int(revision["example_idx"]),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+            cell_key = (output_key, annotator_id)
+            summary = revision_summary.setdefault(
+                cell_key,
+                {
+                    "revision_count": 0,
+                    "latest_revision_at": "",
+                    "latest_revision_by": "",
+                },
+            )
+            summary["revision_count"] += 1
+            archived_at = str(revision.get("archived_at") or "")
+            if archived_at >= str(summary.get("latest_revision_at") or ""):
+                summary["latest_revision_at"] = archived_at
+                summary["latest_revision_by"] = str(revision.get("archived_by") or "")
+
+        for cell_key, revision_info in revision_summary.items():
+            annotator_value_set.add(cell_key[1])
+            existing_cell = matrix_cells.get(cell_key, {"state": "todo", "start": None, "end": None})
+            existing_cell.update(revision_info)
+            matrix_cells[cell_key] = existing_cell
 
     annotator_values = sorted(annotator_value_set, key=lambda value: value.lower())
     annotator_public_names = _build_annotator_public_name_map(annotator_values, alias_map)
@@ -949,6 +1017,7 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
         group_parity = group_idx % 2
 
         row_statuses = {}
+        row_redo_statuses = {}
         row_cell_details = {}
         row_done_count = 0
         for annotator_id in annotator_values:
@@ -956,6 +1025,14 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
             cell = matrix_cells.get((output_key, annotator_id), {"state": "todo", "start": None, "end": None})
             status = cell["state"]
             row_statuses[public_key] = status
+            if show_real_annotator_names and cell.get("redo_status"):
+                row_redo_statuses[public_key] = cell.get("redo_status")
+            if not show_real_annotator_names:
+                cell = {
+                    key: value
+                    for key, value in cell.items()
+                    if key not in {"redo_status", "revision_count", "latest_revision_at", "latest_revision_by"}
+                }
             row_cell_details[public_key] = cell
             if status == "done":
                 row_done_count += 1
@@ -970,6 +1047,7 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
                 "group_parity": int(group_parity),
                 "question_preview": question_preview_map.get(question_key, ""),
                 "statuses": row_statuses,
+                "redo_statuses": row_redo_statuses,
                 "cell_details": row_cell_details,
             }
         )
