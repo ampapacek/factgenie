@@ -142,52 +142,23 @@
           </div>
         </div>
 
-        <div class="border rounded p-2 mb-3">
-          <div class="row g-2 align-items-end">
-            <div class="col-md-4">
-              <label class="form-label" for="redo-filter-category">Span category</label>
-              <select class="form-select form-select-sm" id="redo-filter-category">
-                <option value="">Any category</option>
-                {% for category in redo_admin.filter_options.categories %}
-                <option value="{{ category }}">{{ category }}</option>
-                {% endfor %}
+        <div class="border rounded p-2 mb-3" id="redo-filter-builder">
+          <div class="row g-2 align-items-end mb-2">
+            <div class="col-md-3">
+              <label class="form-label" for="redo-filter-match-mode">Conditions</label>
+              <select class="form-select form-select-sm" id="redo-filter-match-mode">
+                <option value="all">Match all</option>
+                <option value="any">Match any</option>
               </select>
             </div>
-            <div class="col-md-3">
-              <label class="form-label" for="redo-filter-reason-op">Reason</label>
-              <select class="form-select form-select-sm" id="redo-filter-reason-op">
-                <option value="">Any reason</option>
-                <option value="contains">Contains</option>
-                <option value="not_contains">Does not contain</option>
-                <option value="missing">Is missing</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label" for="redo-filter-reason-text">Reason text</label>
-              <input class="form-control form-control-sm" id="redo-filter-reason-text" type="search">
-            </div>
-            <div class="col-md-2">
-              <button type="button" class="btn btn-sm btn-outline-secondary w-100" onclick="resetRedoFilters()">Reset filters</button>
+            <div class="col-md-9 d-flex flex-wrap gap-2 align-items-end">
+              <button type="button" class="btn btn-sm btn-outline-primary" onclick="addRedoFilterCondition()">Add condition</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="resetRedoFilters()">Reset filters</button>
+              <span class="text-muted small" id="redo-filter-count"></span>
+              <span class="text-danger small" id="redo-filter-error"></span>
             </div>
           </div>
-          <div class="d-flex flex-wrap gap-3 align-items-center mt-2">
-            <div class="form-check">
-              <input class="form-check-input redo-filter-preset" type="checkbox" id="redo-filter-has-chybi"
-                data-preset="has_chybi">
-              <label class="form-check-label" for="redo-filter-has-chybi">Has Chybí span</label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input redo-filter-preset" type="checkbox" id="redo-filter-missing-reason"
-                data-preset="has_missing_reason">
-              <label class="form-check-label" for="redo-filter-missing-reason">Any span missing reason</label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input redo-filter-preset" type="checkbox" id="redo-filter-chybi-without-top10"
-                data-preset="has_chybi_without_top10">
-              <label class="form-check-label" for="redo-filter-chybi-without-top10">Chybí span without top10 in reason</label>
-            </div>
-            <span class="text-muted small" id="redo-filter-count"></span>
-          </div>
+          <div class="d-flex flex-column gap-2" id="redo-filter-conditions"></div>
         </div>
 
         <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
@@ -226,10 +197,7 @@
           <tbody>
             {% for item in redo_admin.examples %}
             <tr class="redo-row" data-annotator-id="{{ item.annotator_id }}"
-              data-filter-spans='{{ item.filter_data.spans | tojson }}'
-              data-has-chybi="{{ 'true' if item.filter_data.has_chybi else 'false' }}"
-              data-has-missing-reason="{{ 'true' if item.filter_data.has_missing_reason else 'false' }}"
-              data-has-chybi-without-top10="{{ 'true' if item.filter_data.has_chybi_without_top10 else 'false' }}">
+              data-filter-data='{{ item.filter_data | tojson }}'>
               <td>
                 <input type="checkbox" class="form-check-input redo-row-checkbox"
                   data-annotator-id="{{ item.annotator_id }}"
@@ -350,7 +318,7 @@
   {% include 'include/import_annotations_modal.html' %}
 
   <div class="modal fade" id="campaign-help-modal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl">
       <div class="modal-content">
         <div class="modal-header">
           <h5 class="modal-title" id="campaign-help-modal-label">How to manage the campaign and redo workflow</h5>
@@ -390,8 +358,8 @@
               <li>Scroll to the <b>Redo annotations</b> section.</li>
               <li>Select the annotator in the dropdown so the table only shows that annotator's examples.</li>
               <li>
-                Use the span filters if you want to target examples by annotation content, such as <b>Chybí</b>
-                spans, missing span reasons, or reasons that do not mention <b>top10</b>.
+                Use the condition builder if you want to target examples by annotation content, question/output text,
+                free-text fields, or slider values.
               </li>
               <li>Select the rows you want to send back for correction.</li>
               <li>
@@ -410,13 +378,25 @@
             <h6 class="fw-bold">What the admin controls mean</h6>
             <ul class="mb-3">
               <li>
-                <b>Span category</b> and <b>Reason</b> filter the table by saved annotation spans. Multiple active
-                filters are combined, so a row must match all selected filters to stay visible.
+                <b>Add condition</b> adds a filter row. Use <b>Match all</b> for AND behavior or <b>Match any</b> for
+                OR behavior.
               </li>
               <li>
-                The preset filters cover common redo cases: examples with a <b>Chybí</b> span, any span with a missing
-                reason, and <b>Chybí</b> spans whose reason does not contain <b>top10</b>. Blank reasons count as not
-                containing <b>top10</b>.
+                Span conditions are matched against the same saved span when <b>Match all</b> is selected. For example,
+                <b>Span category is Chybí</b> plus <b>Span reason does not contain top10</b> keeps rows with a
+                <b>Chybí</b> span whose own reason lacks <b>top10</b>.
+              </li>
+              <li>
+                The same applies to regex filters: <b>Span category is Chybí</b> plus
+                <b>Span reason matches regex top10</b> means keep rows where there is a <b>Chybí</b> span whose own
+                reason matches the regex.
+              </li>
+              <li>
+                Text filters can search the question, output, span reason, span text, or all saved text/reason fields.
+                Regex filters use JavaScript regular expressions without wrapping slashes.
+              </li>
+              <li>
+                Slider filters match saved slider labels and numeric values.
               </li>
               <li>
                 <b>Include skipped</b> lets you add examples that were skipped in the original annotation round.
@@ -494,97 +474,360 @@
   function filterRedoRows() {
     const annotatorId = selectedAnnotatorId();
     let visibleCount = 0;
+    const regexErrors = [];
     $(".redo-row").each(function () {
       const row = $(this);
-      const show = (!annotatorId || row.data("annotator-id") === annotatorId) && rowMatchesRedoFilters(row);
+      const show = (!annotatorId || row.data("annotator-id") === annotatorId) && rowMatchesRedoFilters(row, regexErrors);
       $(this).toggle(show);
       if (show) {
         visibleCount += 1;
       }
     });
     $("#redo-filter-count").text(`${visibleCount} visible item(s)`);
+    $("#redo-filter-error").text(regexErrors.length ? "Invalid regex in one or more conditions." : "");
   }
 
   function normalizeRedoFilterText(value) {
     return String(value || "").trim().toLocaleLowerCase();
   }
 
-  function redoRowSpans(row) {
-    const raw = row.attr("data-filter-spans") || "[]";
+  const redoFilterOptions = {{ redo_admin.filter_options | tojson }};
+
+  function redoFilterData(row) {
+    const raw = row.attr("data-filter-data") || "{}";
     try {
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      return parsed && typeof parsed === "object" ? parsed : {};
     } catch (error) {
-      return [];
+      return {};
     }
   }
 
-  function rowMatchesRedoPreset(row, preset) {
-    if (preset === "has_chybi") {
-      return row.attr("data-has-chybi") === "true";
+  function redoFilterTextOperators(field) {
+    if (field === "slider") {
+      return [
+        ["eq", "Equals"],
+        ["neq", "Does not equal"],
+        ["gt", "Greater than"],
+        ["gte", "Greater than or equal"],
+        ["lt", "Less than"],
+        ["lte", "Less than or equal"],
+        ["missing", "Is missing"],
+        ["not_missing", "Is not missing"],
+      ];
     }
-    if (preset === "has_missing_reason") {
-      return row.attr("data-has-missing-reason") === "true";
+    if (field === "span_category") {
+      return [
+        ["eq", "Is"],
+        ["neq", "Is not"],
+        ["contains", "Contains"],
+        ["not_contains", "Does not contain"],
+        ["missing", "Is missing"],
+        ["not_missing", "Is not missing"],
+        ["regex", "Matches regex"],
+        ["not_regex", "Does not match regex"],
+      ];
     }
-    if (preset === "has_chybi_without_top10") {
-      return row.attr("data-has-chybi-without-top10") === "true";
+    return [
+      ["contains", "Contains"],
+      ["not_contains", "Does not contain"],
+      ["eq", "Is"],
+      ["neq", "Is not"],
+      ["missing", "Is missing"],
+      ["not_missing", "Is not missing"],
+      ["regex", "Matches regex"],
+      ["not_regex", "Does not match regex"],
+    ];
+  }
+
+  function redoFilterConditionValues(row) {
+    return {
+      field: row.find(".redo-condition-field").val(),
+      op: row.find(".redo-condition-op").val(),
+      value: row.find(".redo-condition-value").val(),
+      sliderLabel: row.find(".redo-condition-slider-label").val(),
+    };
+  }
+
+  function redoActiveConditions() {
+    const conditions = [];
+    $(".redo-filter-condition").each(function () {
+      const condition = redoFilterConditionValues($(this));
+      const valueRequired = !["missing", "not_missing"].includes(condition.op);
+      const hasValue = condition.field === "slider" ? condition.value !== "" : String(condition.value || "").trim() !== "";
+      const hasSliderLabel = condition.field !== "slider" || condition.sliderLabel;
+      if (condition.field && condition.op && (!valueRequired || hasValue) && hasSliderLabel) {
+        conditions.push(condition);
+      }
+    });
+    return conditions;
+  }
+
+  function escapeRedoOption(value) {
+    return $("<option>").attr("value", value).text(value);
+  }
+
+  function addRedoFilterCondition(condition) {
+    const row = $(`
+      <div class="row g-2 align-items-end redo-filter-condition">
+        <div class="col-md-3">
+          <label class="form-label small mb-1">Field</label>
+          <select class="form-select form-select-sm redo-condition-field">
+            <option value="span_category">Span category</option>
+            <option value="span_reason">Span reason</option>
+            <option value="span_text">Span text</option>
+            <option value="question">Question</option>
+            <option value="output">Output</option>
+            <option value="any_text">Any text</option>
+            <option value="slider">Slider</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small mb-1">Operator</label>
+          <select class="form-select form-select-sm redo-condition-op"></select>
+        </div>
+        <div class="col-md-5 redo-condition-value-wrap"></div>
+        <div class="col-md-1">
+          <button type="button" class="btn btn-sm btn-outline-secondary w-100 redo-remove-condition" title="Remove condition">
+            <i class="fa fa-times"></i>
+          </button>
+        </div>
+      </div>
+    `);
+    $("#redo-filter-conditions").append(row);
+    row.find(".redo-condition-field").val(condition?.field || "span_category");
+    renderRedoConditionControls(row, condition || {});
+    filterRedoRows();
+  }
+
+  function renderRedoConditionControls(row, condition) {
+    const field = row.find(".redo-condition-field").val();
+    const opSelect = row.find(".redo-condition-op");
+    const previousOp = condition.op || opSelect.val();
+    opSelect.empty();
+    redoFilterTextOperators(field).forEach(function ([value, label]) {
+      opSelect.append(escapeRedoOption(value).text(label));
+    });
+    if (previousOp && opSelect.find(`option[value="${previousOp}"]`).length) {
+      opSelect.val(previousOp);
+    }
+
+    const wrap = row.find(".redo-condition-value-wrap");
+    wrap.empty();
+    if (field === "span_category") {
+      const select = $('<select class="form-select form-select-sm redo-condition-value"></select>');
+      select.append(escapeRedoOption("").text("Select category..."));
+      (redoFilterOptions.categories || []).forEach(function (category) {
+        select.append(escapeRedoOption(category));
+      });
+      wrap.append('<label class="form-label small mb-1">Value</label>');
+      wrap.append(select);
+      select.val(condition.value || "");
+    } else if (field === "slider") {
+      const controls = $(`
+        <div class="row g-2">
+          <div class="col-md-6">
+            <label class="form-label small mb-1">Slider</label>
+            <select class="form-select form-select-sm redo-condition-slider-label"></select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small mb-1">Value</label>
+            <input class="form-control form-control-sm redo-condition-value" type="number" step="any">
+          </div>
+        </div>
+      `);
+      const labelSelect = controls.find(".redo-condition-slider-label");
+      labelSelect.append(escapeRedoOption("").text("Select slider..."));
+      (redoFilterOptions.sliders || []).forEach(function (label) {
+        labelSelect.append(escapeRedoOption(label));
+      });
+      wrap.append(controls);
+      labelSelect.val(condition.sliderLabel || "");
+      controls.find(".redo-condition-value").val(condition.value || "");
+    } else {
+      wrap.append('<label class="form-label small mb-1">Value</label>');
+      wrap.append('<input class="form-control form-control-sm redo-condition-value" type="search">');
+      wrap.find(".redo-condition-value").val(condition.value || "");
+    }
+    row.find(".redo-condition-value").prop("disabled", ["missing", "not_missing"].includes(opSelect.val()));
+  }
+
+  function redoTextMatches(values, op, query, regexErrors) {
+    const texts = (Array.isArray(values) ? values : [values]).map(function (value) {
+      return String(value || "");
+    });
+    const presentTexts = texts.filter(function (value) {
+      return value.trim() !== "";
+    });
+    if (op === "missing") {
+      return presentTexts.length === 0;
+    }
+    if (op === "not_missing") {
+      return presentTexts.length > 0;
+    }
+
+    const normalizedQuery = normalizeRedoFilterText(query);
+    if (!normalizedQuery && !["regex", "not_regex"].includes(op)) {
+      return true;
+    }
+    if (op === "regex" || op === "not_regex") {
+      let regex;
+      try {
+        regex = new RegExp(String(query || ""), "i");
+      } catch (error) {
+        regexErrors.push(error);
+        return false;
+      }
+      const hasMatch = presentTexts.some(function (text) {
+        return regex.test(text);
+      });
+      return op === "regex" ? hasMatch : !hasMatch;
+    }
+
+    const normalizedTexts = texts.map(normalizeRedoFilterText);
+    if (op === "contains") {
+      return normalizedTexts.some(function (text) {
+        return text.includes(normalizedQuery);
+      });
+    }
+    if (op === "not_contains") {
+      return normalizedTexts.every(function (text) {
+        return !text.includes(normalizedQuery);
+      });
+    }
+    if (op === "eq") {
+      return normalizedTexts.some(function (text) {
+        return text === normalizedQuery;
+      });
+    }
+    if (op === "neq") {
+      return normalizedTexts.every(function (text) {
+        return text !== normalizedQuery;
+      });
     }
     return true;
   }
 
-  function rowMatchesRedoBuilder(row) {
-    const category = normalizeRedoFilterText($("#redo-filter-category").val());
-    const reasonOp = $("#redo-filter-reason-op").val();
-    const reasonText = normalizeRedoFilterText($("#redo-filter-reason-text").val());
-    if (!category && !reasonOp) {
+  function redoSliderMatches(sliders, condition) {
+    const matchingSliders = (sliders || []).filter(function (slider) {
+      return slider.label === condition.sliderLabel;
+    });
+    if (condition.op === "missing") {
+      return matchingSliders.length === 0 || matchingSliders.some(function (slider) {
+        return slider.missing === true;
+      });
+    }
+    if (condition.op === "not_missing") {
+      return matchingSliders.some(function (slider) {
+        return slider.missing !== true;
+      });
+    }
+    const query = Number(condition.value);
+    if (Number.isNaN(query)) {
       return true;
     }
-    if (!category && (reasonOp === "contains" || reasonOp === "not_contains") && !reasonText) {
-      return true;
-    }
-
-    return redoRowSpans(row).some(function (span) {
-      const spanCategory = normalizeRedoFilterText(span.category);
-      const reason = normalizeRedoFilterText(span.reason);
-      const reasonMissing = span.reason_missing === true || reason === "";
-      if (category && spanCategory !== category) {
+    return matchingSliders.some(function (slider) {
+      const value = Number(slider.numeric_value);
+      if (Number.isNaN(value)) {
         return false;
       }
-      if ((reasonOp === "contains" || reasonOp === "not_contains") && !reasonText) {
-        return true;
-      }
-      if (reasonOp === "contains") {
-        return reason.includes(reasonText);
-      }
-      if (reasonOp === "not_contains") {
-        return !reason.includes(reasonText);
-      }
-      if (reasonOp === "missing") {
-        return reasonMissing;
-      }
+      if (condition.op === "eq") return value === query;
+      if (condition.op === "neq") return value !== query;
+      if (condition.op === "gt") return value > query;
+      if (condition.op === "gte") return value >= query;
+      if (condition.op === "lt") return value < query;
+      if (condition.op === "lte") return value <= query;
       return true;
     });
   }
 
-  function rowMatchesRedoFilters(row) {
-    let matches = true;
-    $(".redo-filter-preset:checked").each(function () {
-      matches = matches && rowMatchesRedoPreset(row, $(this).data("preset"));
+  function redoSpanConditionMatches(span, condition, regexErrors) {
+    if (condition.field === "span_category") {
+      return redoTextMatches(span.category, condition.op, condition.value, regexErrors);
+    }
+    if (condition.field === "span_reason") {
+      return redoTextMatches(span.reason, condition.op, condition.value, regexErrors);
+    }
+    if (condition.field === "span_text") {
+      return redoTextMatches(span.text, condition.op, condition.value, regexErrors);
+    }
+    return true;
+  }
+
+  function redoRowConditionMatches(data, condition, regexErrors) {
+    if (condition.field === "question") {
+      return redoTextMatches(data.question_texts || [], condition.op, condition.value, regexErrors);
+    }
+    if (condition.field === "output") {
+      return redoTextMatches(data.output_texts || [], condition.op, condition.value, regexErrors);
+    }
+    if (condition.field === "any_text") {
+      return redoTextMatches(data.any_texts || [], condition.op, condition.value, regexErrors);
+    }
+    if (condition.field === "slider") {
+      return redoSliderMatches(data.sliders || [], condition);
+    }
+    return true;
+  }
+
+  function rowMatchesRedoFilters(row, regexErrors) {
+    const conditions = redoActiveConditions();
+    if (!conditions.length) {
+      return true;
+    }
+    const data = redoFilterData(row);
+    const mode = $("#redo-filter-match-mode").val();
+    const spanConditions = conditions.filter(function (condition) {
+      return ["span_category", "span_reason", "span_text"].includes(condition.field);
     });
-    return matches && rowMatchesRedoBuilder(row);
+    const rowConditions = conditions.filter(function (condition) {
+      return !["span_category", "span_reason", "span_text"].includes(condition.field);
+    });
+
+    if (mode === "any") {
+      return conditions.some(function (condition) {
+        if (["span_category", "span_reason", "span_text"].includes(condition.field)) {
+          return (data.spans || []).some(function (span) {
+            return redoSpanConditionMatches(span, condition, regexErrors);
+          });
+        }
+        return redoRowConditionMatches(data, condition, regexErrors);
+      });
+    }
+
+    const spanMatches = !spanConditions.length || (data.spans || []).some(function (span) {
+      return spanConditions.every(function (condition) {
+        return redoSpanConditionMatches(span, condition, regexErrors);
+      });
+    });
+    return spanMatches && rowConditions.every(function (condition) {
+      return redoRowConditionMatches(data, condition, regexErrors);
+    });
   }
 
   function resetRedoFilters() {
-    $("#redo-filter-category").val("");
-    $("#redo-filter-reason-op").val("");
-    $("#redo-filter-reason-text").val("");
-    $(".redo-filter-preset").prop("checked", false);
+    $("#redo-filter-match-mode").val("all");
+    $("#redo-filter-conditions").empty();
+    addRedoFilterCondition();
     filterRedoRows();
   }
 
-  $("#redo-annotator-select, #redo-filter-category, #redo-filter-reason-op").on("change", filterRedoRows);
-  $("#redo-filter-reason-text").on("input", filterRedoRows);
-  $(".redo-filter-preset").on("change", filterRedoRows);
+  $("#redo-annotator-select, #redo-filter-match-mode").on("change", filterRedoRows);
+  $("#redo-filter-conditions").on("change", ".redo-condition-field", function () {
+    renderRedoConditionControls($(this).closest(".redo-filter-condition"), redoFilterConditionValues($(this).closest(".redo-filter-condition")));
+    filterRedoRows();
+  });
+  $("#redo-filter-conditions").on("change", ".redo-condition-op", function () {
+    const row = $(this).closest(".redo-filter-condition");
+    row.find(".redo-condition-value").prop("disabled", ["missing", "not_missing"].includes($(this).val()));
+    filterRedoRows();
+  });
+  $("#redo-filter-conditions").on("input change", ".redo-condition-value, .redo-condition-slider-label", filterRedoRows);
+  $("#redo-filter-conditions").on("click", ".redo-remove-condition", function () {
+    $(this).closest(".redo-filter-condition").remove();
+    filterRedoRows();
+  });
+  addRedoFilterCondition();
   filterRedoRows();
 
   function selectVisibleRedoRows(checked) {

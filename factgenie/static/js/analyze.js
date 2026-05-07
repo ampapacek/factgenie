@@ -988,15 +988,11 @@ function renderCoverageMatrix(coverageStats) {
             const tooltip = buildCoverageTooltip(cell);
             const cellBrowseUrl = buildCoverageCellBrowseUrl(row, groupKey, status);
             const redoBadge = cell.redo_status ? `<div><span class="badge bg-info text-dark">redo ${escapeHtml(cell.redo_status)}</span></div>` : '';
-            const revisionBadge = Number(cell.revision_count || 0) > 0
-                ? `<div><span class="badge bg-secondary">revisions ${escapeHtml(cell.revision_count)}</span></div>`
-                : '';
             html += `
                 <td class="text-center">
                   <a href="${cellBrowseUrl}" target="_blank" data-bs-toggle="tooltip" data-bs-html="true" title="${tooltip}">
                     ${statusBadge(status)}
                     ${redoBadge}
-                    ${revisionBadge}
                   </a>
                 </td>
             `;

@@ -228,6 +228,9 @@ def login_required(f):
 
 
 def _is_authenticated_viewer():
+    if not app.config["login"].get("active", False):
+        return True
+
     auth = request.cookies.get("auth")
     if not auth:
         return False

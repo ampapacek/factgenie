@@ -153,7 +153,34 @@ def test_admin_overview_exposes_span_filter_data_for_category_and_reasons(monkey
     assert filter_data["has_chybi"] is True
     assert filter_data["has_missing_reason"] is True
     assert filter_data["has_chybi_without_top10"] is True
-    assert {"category": "Chybí", "reason": "", "reason_missing": True} in filter_data["spans"]
+    assert {"category": "Chybí", "text": "①", "reason": "", "reason_missing": True} in filter_data["spans"]
+
+
+def test_admin_overview_exposes_text_and_slider_filter_data(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    record = write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-20.jsonl",
+        [{"type": 0, "text": "span text", "start": 0, "reason": "span reason"}],
+    )
+    record["question"] = "Which claim is supported?"
+    record["data"] = {"question": "Nested dataset question"}
+    record["output"] = "Generated answer"
+    record["text_fields"] = [{"label": "Admin note", "value": "free text note"}]
+    record["sliders"] = [{"label": "Tone", "value": "4"}]
+    path = Path(redo.CAMPAIGN_DIR) / "redo-test" / "files" / "0-0-ann-a-20.jsonl"
+    path.write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    overview = redo.build_admin_overview(campaign)
+    filter_data = overview["examples"][0]["filter_data"]
+
+    assert "Tone" in overview["filter_options"]["sliders"]
+    assert "Which claim is supported?" in filter_data["question_texts"]
+    assert "Nested dataset question" in filter_data["question_texts"]
+    assert "Generated answer" in filter_data["output_texts"]
+    assert "free text note" in filter_data["any_texts"]
+    assert {"label": "Tone", "value": "4", "numeric_value": 4.0, "missing": False} in filter_data["sliders"]
 
 
 def test_admin_overview_treats_top10_reasons_as_present_for_chybi_filter(monkeypatch, tmp_path):
@@ -674,9 +701,16 @@ def test_full_campaign_export_excludes_redo_artifacts(monkeypatch, tmp_path):
     assert "files/revisions/revision_log.jsonl" not in names
 
 
-def test_question_coverage_admin_displays_revision_status_and_public_hides_it(monkeypatch, tmp_path):
+def test_question_coverage_admin_displays_redo_revision_status_and_public_hides_it(monkeypatch, tmp_path):
     configure_campaign_dir(monkeypatch, tmp_path)
     campaign = make_campaign(tmp_path)
+    setup_b_row = campaign.db.iloc[0].copy()
+    setup_b_row["setup_id"] = "setup-b"
+    setup_b_row["status"] = ExampleStatus.ASSIGNED
+    campaign.db = pd.concat([campaign.db, pd.DataFrame([setup_b_row])], ignore_index=True)
+    completed_item = redo.add_items("redo-test", [queue_row()])["added"][0]
+    pending_row = queue_row() | {"setup_id": "setup-b"}
+    redo.add_items("redo-test", [pending_row])
     example_index = pd.DataFrame(
         [
             {
@@ -692,6 +726,7 @@ def test_question_coverage_admin_displays_revision_status_and_public_hides_it(mo
             }
         ]
     )
+    redo.mark_completed("redo-test", completed_item["redo_id"], "ann-a")
     log_path = redo.revision_log_path("redo-test")
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text(
@@ -721,10 +756,17 @@ def test_question_coverage_admin_displays_revision_status_and_public_hides_it(mo
         example_index,
         show_real_annotator_names=True,
     )
-    admin_cell = admin_stats["matrix"]["rows"][0]["cell_details"]["ann-a"]
+    admin_rows = {row["setup_id"]: row for row in admin_stats["matrix"]["rows"]}
+    completed_cell = admin_rows["setup-a"]["cell_details"]["ann-a"]
+    pending_cell = admin_rows["setup-b"]["cell_details"]["ann-a"]
 
-    assert admin_cell["revision_count"] == 1
-    assert admin_cell["latest_revision_at"] == "2026-05-07T10:00:00Z"
+    assert admin_stats["matrix"]["annotators"][0]["annotator_name"] == "ann-a"
+    assert completed_cell["redo_status"] == redo.STATUS_COMPLETED
+    assert admin_rows["setup-a"]["redo_statuses"]["ann-a"] == redo.STATUS_COMPLETED
+    assert completed_cell["revision_count"] == 1
+    assert completed_cell["latest_revision_at"] == "2026-05-07T10:00:00Z"
+    assert pending_cell["redo_status"] == redo.STATUS_PENDING
+    assert admin_rows["setup-b"]["redo_statuses"]["ann-a"] == redo.STATUS_PENDING
 
     public_stats = analysis.compute_question_coverage_stats(
         app,
@@ -734,4 +776,13 @@ def test_question_coverage_admin_displays_revision_status_and_public_hides_it(mo
     )
     public_cell = next(iter(public_stats["matrix"]["rows"][0]["cell_details"].values()))
 
+    assert public_stats["matrix"]["annotators"][0]["annotator_name"] != "ann-a"
+    assert "redo_status" not in public_cell
     assert "revision_count" not in public_cell
+
+
+def test_login_disabled_counts_as_authenticated_view_for_analyze(monkeypatch):
+    monkeypatch.setitem(app_mod.app.config["login"], "active", False)
+
+    with app_mod.app.test_request_context("/analyze/detail/redo-test"):
+        assert app_mod._is_authenticated_viewer() is True

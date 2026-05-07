@@ -478,6 +478,36 @@ def category_lookup(campaign):
     }
 
 
+def slider_labels_from_config(campaign):
+    sliders = campaign.metadata.get("config", {}).get("sliders", [])
+    return [
+        str(slider["label"])
+        for slider in sliders
+        if isinstance(slider, dict) and slider.get("label") is not None
+    ]
+
+
+def text_values_for_keys(value, keys):
+    texts = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if str(key).casefold() in keys and child is not None:
+                texts.append(str(child))
+            texts.extend(text_values_for_keys(child, keys))
+    elif isinstance(value, list):
+        for child in value:
+            texts.extend(text_values_for_keys(child, keys))
+    return texts
+
+
+def text_field_values(record):
+    values = []
+    for field in record.get("text_fields", []) if record else []:
+        if isinstance(field, dict) and field.get("value") is not None:
+            values.append(str(field["value"]))
+    return values
+
+
 def span_filter_data(record, categories):
     spans = []
     annotations = record.get("annotations", []) if record else []
@@ -493,11 +523,36 @@ def span_filter_data(record, categories):
         spans.append(
             {
                 "category": category,
+                "text": str(annotation.get("text") or ""),
                 "reason": reason,
                 "reason_missing": reason == "",
             }
         )
 
+    sliders = []
+    for slider in record.get("sliders", []) if record else []:
+        if not isinstance(slider, dict) or slider.get("label") is None:
+            continue
+        raw_value = slider.get("value")
+        try:
+            numeric_value = float(raw_value)
+        except (TypeError, ValueError):
+            numeric_value = None
+        sliders.append(
+            {
+                "label": str(slider["label"]),
+                "value": raw_value,
+                "numeric_value": numeric_value,
+                "missing": raw_value in (None, ""),
+            }
+        )
+
+    question_texts = text_values_for_keys(record or {}, {"question"})
+    output_texts = text_values_for_keys(record or {}, {"output"})
+    any_texts = (
+        text_values_for_keys(record or {}, {"question", "output", "text", "reason"})
+        + text_field_values(record or {})
+    )
     has_chybi = any(span["category"].casefold() == "chybí".casefold() for span in spans)
     has_missing_reason = any(span["reason_missing"] for span in spans)
     has_chybi_without_top10 = any(
@@ -506,6 +561,10 @@ def span_filter_data(record, categories):
     )
     return {
         "spans": spans,
+        "sliders": sliders,
+        "question_texts": question_texts,
+        "output_texts": output_texts,
+        "any_texts": any_texts,
         "span_categories": sorted({span["category"] for span in spans}, key=lambda value: value.casefold()),
         "span_reasons": [span["reason"] for span in spans if span["reason"]],
         "has_chybi": has_chybi,
@@ -524,8 +583,14 @@ def build_admin_overview(campaign, alias_map=None):
     examples = []
     annotator_ids = set()
     db = campaign.db.copy() if hasattr(campaign, "db") else pd.DataFrame()
+    slider_labels = set(slider_labels_from_config(campaign))
     if db.empty:
-        return {"annotators": [], "examples": [], "queue": queue, "filter_options": {"categories": []}}
+        return {
+            "annotators": [],
+            "examples": [],
+            "queue": queue,
+            "filter_options": {"categories": [], "sliders": sorted(slider_labels, key=lambda value: value.casefold())},
+        }
 
     for _, row in db.iterrows():
         annotator_id = normalize_annotator_id(row.get("annotator_id"))
@@ -537,6 +602,7 @@ def build_admin_overview(campaign, alias_map=None):
         active_record = latest_active_record(campaign.campaign_id, item)
         flags = active_record.get("flags", []) if active_record else []
         filter_data = span_filter_data(active_record, categories)
+        slider_labels.update(slider["label"] for slider in filter_data["sliders"])
         example = {
             "annotator_id": annotator_id,
             "annotator_alias": alias_map.get(annotator_id.lower(), ""),
@@ -572,5 +638,8 @@ def build_admin_overview(campaign, alias_map=None):
         "annotators": annotators,
         "examples": examples,
         "queue": queue,
-        "filter_options": {"categories": [categories[index] for index in sorted(categories)]},
+        "filter_options": {
+            "categories": [categories[index] for index in sorted(categories)],
+            "sliders": sorted(slider_labels, key=lambda value: value.casefold()),
+        },
     }
