@@ -34,7 +34,15 @@ def make_campaign(tmp_path, campaign_id="redo-test"):
         "mode": CampaignMode.CROWDSOURCING,
         "created": "2026-05-07 12:00:00",
         "config": {
-            "annotation_span_categories": [{"name": "Issue", "color": "#ff0000"}],
+            "annotation_span_categories": [
+                {"name": "Issue", "color": "#ff0000"},
+                {"name": "Jádro", "color": "#00ff00"},
+                {"name": "Nadbytečné", "color": "#0000ff"},
+                {"name": "Zavádějící", "color": "#000088"},
+                {"name": "Nesrozumitelné", "color": "#888800"},
+                {"name": "Nepravda", "color": "#880000"},
+                {"name": "Chybí", "color": "#0088ff"},
+            ],
             "annotation_granularity": "word",
             "annotation_overlap_allowed": False,
             "annotator_instructions": "Annotate.",
@@ -87,6 +95,14 @@ def write_active_record(campaign_id, filename, annotation_text="old", end_timest
     return record
 
 
+def write_active_record_with_annotations(campaign_id, filename, annotations, end_timestamp=20):
+    record = write_active_record(campaign_id, filename, end_timestamp=end_timestamp)
+    record["annotations"] = annotations
+    path = Path(redo.CAMPAIGN_DIR) / campaign_id / "files" / filename
+    path.write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+    return record
+
+
 def queue_row():
     return {
         "campaign_id": "redo-test",
@@ -115,6 +131,66 @@ def test_queue_duplicate_reuse_and_pending_mode(monkeypatch, tmp_path):
 
     assert redo.is_redo_mode("redo-test", "ann-a")
     assert redo.counts_by_annotator("redo-test")["ann-a"][redo.STATUS_PENDING] == 1
+
+
+def test_admin_overview_exposes_span_filter_data_for_category_and_reasons(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-20.jsonl",
+        [
+            {"type": 6, "text": "①", "start": 0, "reason": ""},
+            {"type": 0, "text": "typo", "start": 5, "reason": "Není čeština"},
+        ],
+    )
+
+    overview = redo.build_admin_overview(campaign)
+    filter_data = overview["examples"][0]["filter_data"]
+
+    assert "Chybí" in overview["filter_options"]["categories"]
+    assert "Chybí" in filter_data["span_categories"]
+    assert filter_data["has_chybi"] is True
+    assert filter_data["has_missing_reason"] is True
+    assert filter_data["has_chybi_without_top10"] is True
+    assert {"category": "Chybí", "reason": "", "reason_missing": True} in filter_data["spans"]
+
+
+def test_admin_overview_treats_top10_reasons_as_present_for_chybi_filter(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+
+    write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-20.jsonl",
+        [{"type": 6, "text": "①", "start": 0, "reason": "InTop10 InSeafile"}],
+        end_timestamp=20,
+    )
+    assert redo.build_admin_overview(campaign)["examples"][0]["filter_data"]["has_chybi_without_top10"] is False
+
+    write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-30.jsonl",
+        [{"type": 6, "text": "①", "start": 0, "reason": "NotInTop10 InSeafile"}],
+        end_timestamp=30,
+    )
+    assert redo.build_admin_overview(campaign)["examples"][0]["filter_data"]["has_chybi_without_top10"] is False
+
+
+def test_admin_overview_marks_chybi_without_top10_when_reason_lacks_token(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-20.jsonl",
+        [{"type": 6, "text": "①", "start": 0, "reason": "InSeafile missing example"}],
+    )
+
+    filter_data = redo.build_admin_overview(campaign)["examples"][0]["filter_data"]
+
+    assert filter_data["has_chybi"] is True
+    assert filter_data["has_missing_reason"] is False
+    assert filter_data["has_chybi_without_top10"] is True
 
 
 def test_readding_completed_redo_item_reopens_it(monkeypatch, tmp_path):

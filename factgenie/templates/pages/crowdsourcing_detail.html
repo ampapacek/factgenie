@@ -142,6 +142,54 @@
           </div>
         </div>
 
+        <div class="border rounded p-2 mb-3">
+          <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+              <label class="form-label" for="redo-filter-category">Span category</label>
+              <select class="form-select form-select-sm" id="redo-filter-category">
+                <option value="">Any category</option>
+                {% for category in redo_admin.filter_options.categories %}
+                <option value="{{ category }}">{{ category }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="redo-filter-reason-op">Reason</label>
+              <select class="form-select form-select-sm" id="redo-filter-reason-op">
+                <option value="">Any reason</option>
+                <option value="contains">Contains</option>
+                <option value="not_contains">Does not contain</option>
+                <option value="missing">Is missing</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="redo-filter-reason-text">Reason text</label>
+              <input class="form-control form-control-sm" id="redo-filter-reason-text" type="search">
+            </div>
+            <div class="col-md-2">
+              <button type="button" class="btn btn-sm btn-outline-secondary w-100" onclick="resetRedoFilters()">Reset filters</button>
+            </div>
+          </div>
+          <div class="d-flex flex-wrap gap-3 align-items-center mt-2">
+            <div class="form-check">
+              <input class="form-check-input redo-filter-preset" type="checkbox" id="redo-filter-has-chybi"
+                data-preset="has_chybi">
+              <label class="form-check-label" for="redo-filter-has-chybi">Has Chybí span</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input redo-filter-preset" type="checkbox" id="redo-filter-missing-reason"
+                data-preset="has_missing_reason">
+              <label class="form-check-label" for="redo-filter-missing-reason">Any span missing reason</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input redo-filter-preset" type="checkbox" id="redo-filter-chybi-without-top10"
+                data-preset="has_chybi_without_top10">
+              <label class="form-check-label" for="redo-filter-chybi-without-top10">Chybí span without top10 in reason</label>
+            </div>
+            <span class="text-muted small" id="redo-filter-count"></span>
+          </div>
+        </div>
+
         <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
           <button type="button" class="btn btn-sm btn-primary" onclick="createRedoItems('example')">Add selected examples</button>
           <button type="button" class="btn btn-sm btn-outline-primary" onclick="createRedoItems('batch')">Add selected batches</button>
@@ -177,7 +225,11 @@
           </thead>
           <tbody>
             {% for item in redo_admin.examples %}
-            <tr class="redo-row" data-annotator-id="{{ item.annotator_id }}">
+            <tr class="redo-row" data-annotator-id="{{ item.annotator_id }}"
+              data-filter-spans='{{ item.filter_data.spans | tojson }}'
+              data-has-chybi="{{ 'true' if item.filter_data.has_chybi else 'false' }}"
+              data-has-missing-reason="{{ 'true' if item.filter_data.has_missing_reason else 'false' }}"
+              data-has-chybi-without-top10="{{ 'true' if item.filter_data.has_chybi_without_top10 else 'false' }}">
               <td>
                 <input type="checkbox" class="form-check-input redo-row-checkbox"
                   data-annotator-id="{{ item.annotator_id }}"
@@ -337,6 +389,10 @@
               <li>Find the campaign you want to correct and open this help panel from the campaign detail page.</li>
               <li>Scroll to the <b>Redo annotations</b> section.</li>
               <li>Select the annotator in the dropdown so the table only shows that annotator's examples.</li>
+              <li>
+                Use the span filters if you want to target examples by annotation content, such as <b>Chybí</b>
+                spans, missing span reasons, or reasons that do not mention <b>top10</b>.
+              </li>
               <li>Select the rows you want to send back for correction.</li>
               <li>
                 Use <b>Add selected examples</b> for a few individual items, or <b>Add selected batches</b> when you
@@ -354,6 +410,15 @@
             <h6 class="fw-bold">What the admin controls mean</h6>
             <ul class="mb-3">
               <li>
+                <b>Span category</b> and <b>Reason</b> filter the table by saved annotation spans. Multiple active
+                filters are combined, so a row must match all selected filters to stay visible.
+              </li>
+              <li>
+                The preset filters cover common redo cases: examples with a <b>Chybí</b> span, any span with a missing
+                reason, and <b>Chybí</b> spans whose reason does not contain <b>top10</b>. Blank reasons count as not
+                containing <b>top10</b>.
+              </li>
+              <li>
                 <b>Include skipped</b> lets you add examples that were skipped in the original annotation round.
                 Leave it off if you only want real completed annotations.
               </li>
@@ -363,7 +428,7 @@
               </li>
               <li>
                 <b>Select visible</b> and <b>Clear visible</b> work only on the rows currently shown after filtering by
-                annotator.
+                annotator and span content.
               </li>
               <li>
                 <b>Cancel selected pending items</b> removes only pending redo items from the queue. It does not touch
@@ -428,13 +493,98 @@
 
   function filterRedoRows() {
     const annotatorId = selectedAnnotatorId();
+    let visibleCount = 0;
     $(".redo-row").each(function () {
-      const show = !annotatorId || $(this).data("annotator-id") === annotatorId;
+      const row = $(this);
+      const show = (!annotatorId || row.data("annotator-id") === annotatorId) && rowMatchesRedoFilters(row);
       $(this).toggle(show);
+      if (show) {
+        visibleCount += 1;
+      }
+    });
+    $("#redo-filter-count").text(`${visibleCount} visible item(s)`);
+  }
+
+  function normalizeRedoFilterText(value) {
+    return String(value || "").trim().toLocaleLowerCase();
+  }
+
+  function redoRowSpans(row) {
+    const raw = row.attr("data-filter-spans") || "[]";
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function rowMatchesRedoPreset(row, preset) {
+    if (preset === "has_chybi") {
+      return row.attr("data-has-chybi") === "true";
+    }
+    if (preset === "has_missing_reason") {
+      return row.attr("data-has-missing-reason") === "true";
+    }
+    if (preset === "has_chybi_without_top10") {
+      return row.attr("data-has-chybi-without-top10") === "true";
+    }
+    return true;
+  }
+
+  function rowMatchesRedoBuilder(row) {
+    const category = normalizeRedoFilterText($("#redo-filter-category").val());
+    const reasonOp = $("#redo-filter-reason-op").val();
+    const reasonText = normalizeRedoFilterText($("#redo-filter-reason-text").val());
+    if (!category && !reasonOp) {
+      return true;
+    }
+    if (!category && (reasonOp === "contains" || reasonOp === "not_contains") && !reasonText) {
+      return true;
+    }
+
+    return redoRowSpans(row).some(function (span) {
+      const spanCategory = normalizeRedoFilterText(span.category);
+      const reason = normalizeRedoFilterText(span.reason);
+      const reasonMissing = span.reason_missing === true || reason === "";
+      if (category && spanCategory !== category) {
+        return false;
+      }
+      if ((reasonOp === "contains" || reasonOp === "not_contains") && !reasonText) {
+        return true;
+      }
+      if (reasonOp === "contains") {
+        return reason.includes(reasonText);
+      }
+      if (reasonOp === "not_contains") {
+        return !reason.includes(reasonText);
+      }
+      if (reasonOp === "missing") {
+        return reasonMissing;
+      }
+      return true;
     });
   }
 
-  $("#redo-annotator-select").on("change", filterRedoRows);
+  function rowMatchesRedoFilters(row) {
+    let matches = true;
+    $(".redo-filter-preset:checked").each(function () {
+      matches = matches && rowMatchesRedoPreset(row, $(this).data("preset"));
+    });
+    return matches && rowMatchesRedoBuilder(row);
+  }
+
+  function resetRedoFilters() {
+    $("#redo-filter-category").val("");
+    $("#redo-filter-reason-op").val("");
+    $("#redo-filter-reason-text").val("");
+    $(".redo-filter-preset").prop("checked", false);
+    filterRedoRows();
+  }
+
+  $("#redo-annotator-select, #redo-filter-category, #redo-filter-reason-op").on("change", filterRedoRows);
+  $("#redo-filter-reason-text").on("input", filterRedoRows);
+  $(".redo-filter-preset").on("change", filterRedoRows);
   filterRedoRows();
 
   function selectVisibleRedoRows(checked) {

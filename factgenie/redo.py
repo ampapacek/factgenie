@@ -470,17 +470,62 @@ def rows_to_csv(rows):
     return output.getvalue()
 
 
+def category_lookup(campaign):
+    categories = campaign.metadata.get("config", {}).get("annotation_span_categories", [])
+    return {
+        index: category.get("name", str(index)) if isinstance(category, dict) else str(category)
+        for index, category in enumerate(categories)
+    }
+
+
+def span_filter_data(record, categories):
+    spans = []
+    annotations = record.get("annotations", []) if record else []
+    for annotation in annotations:
+        if not isinstance(annotation, dict) or not annotation.get("text"):
+            continue
+        try:
+            annotation_type = int(annotation.get("type", annotation.get("annotation_type")))
+        except (TypeError, ValueError):
+            annotation_type = None
+        category = categories.get(annotation_type, str(annotation_type))
+        reason = str(annotation.get("reason") or "").strip()
+        spans.append(
+            {
+                "category": category,
+                "reason": reason,
+                "reason_missing": reason == "",
+            }
+        )
+
+    has_chybi = any(span["category"].casefold() == "chybí".casefold() for span in spans)
+    has_missing_reason = any(span["reason_missing"] for span in spans)
+    has_chybi_without_top10 = any(
+        span["category"].casefold() == "chybí".casefold() and "top10" not in span["reason"].casefold()
+        for span in spans
+    )
+    return {
+        "spans": spans,
+        "span_categories": sorted({span["category"] for span in spans}, key=lambda value: value.casefold()),
+        "span_reasons": [span["reason"] for span in spans if span["reason"]],
+        "has_chybi": has_chybi,
+        "has_missing_reason": has_missing_reason,
+        "has_chybi_without_top10": has_chybi_without_top10,
+    }
+
+
 def build_admin_overview(campaign, alias_map=None):
     alias_map = alias_map or {}
     queue = load_queue(campaign.campaign_id)
     counts = counts_by_annotator(campaign.campaign_id)
     queue_by_key = {item_key(item): item for item in queue.get("items", []) if item.get("status") != STATUS_CANCELLED}
+    categories = category_lookup(campaign)
 
     examples = []
     annotator_ids = set()
     db = campaign.db.copy() if hasattr(campaign, "db") else pd.DataFrame()
     if db.empty:
-        return {"annotators": [], "examples": [], "queue": queue}
+        return {"annotators": [], "examples": [], "queue": queue, "filter_options": {"categories": []}}
 
     for _, row in db.iterrows():
         annotator_id = normalize_annotator_id(row.get("annotator_id"))
@@ -491,6 +536,7 @@ def build_admin_overview(campaign, alias_map=None):
         existing = queue_by_key.get(item_key(item))
         active_record = latest_active_record(campaign.campaign_id, item)
         flags = active_record.get("flags", []) if active_record else []
+        filter_data = span_filter_data(active_record, categories)
         example = {
             "annotator_id": annotator_id,
             "annotator_alias": alias_map.get(annotator_id.lower(), ""),
@@ -504,6 +550,7 @@ def build_admin_overview(campaign, alias_map=None):
             "skipped": is_skip_selected(flags),
             "redo_id": existing.get("redo_id") if existing else "",
             "redo_status": existing.get("status") if existing else "",
+            "filter_data": filter_data,
         }
         examples.append(example)
 
@@ -521,4 +568,9 @@ def build_admin_overview(campaign, alias_map=None):
         )
 
     examples.sort(key=lambda row: (row["annotator_id"].lower(), row["batch_idx"], row["example_idx"], row["setup_id"]))
-    return {"annotators": annotators, "examples": examples, "queue": queue}
+    return {
+        "annotators": annotators,
+        "examples": examples,
+        "queue": queue,
+        "filter_options": {"categories": [categories[index] for index in sorted(categories)]},
+    }
