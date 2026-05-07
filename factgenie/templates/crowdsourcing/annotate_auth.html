@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Annotator access</title>
+  <link rel="stylesheet" media="screen" href="{{ host_prefix }}/static/css/bootstrap.min.css">
+  <link rel="stylesheet" type="text/css" href="{{ host_prefix }}/static/css/custom.css">
+  <link rel="shortcut icon" href="{{ host_prefix }}/static/img/favicon.ico">
+  <link rel="stylesheet" href="{{ host_prefix }}/static/css/font-awesome.css">
+  <meta name="viewport" content="width=1024">
+  <script src="{{ host_prefix }}/static/js/lib/jquery.min.js"></script>
+  <script src="{{ host_prefix }}/static/js/lib/popper.min.js"></script>
+  <script src="{{ host_prefix }}/static/js/lib/bootstrap.min.js"></script>
+</head>
+
+<body class="body auth-page">
+  <div class="auth-page-shell">
+    <div class="auth-page-card">
+      <div class="auth-page-copy">
+        <div class="auth-page-kicker">Direct campaign access</div>
+        <h1 class="auth-page-title">Welcome to {{ campaign_id }}</h1>
+        <p class="auth-page-lead">
+          Please identify yourself before the annotation page opens.
+          Use the same name every time for this campaign.
+        </p>
+        <ul class="auth-page-notes">
+          <li>Login if you already registered for this campaign.</li>
+          <li>Register if this is your first time here.</li>
+          <li>After you continue, we will send you to the normal annotation page.</li>
+        </ul>
+      </div>
+
+      <div class="auth-page-form">
+        <div class="btn-group w-100 auth-mode-toggle" role="group" aria-label="Login or register">
+          <button type="button" class="btn btn-outline-primary active" id="annotator-auth-login-btn">Login</button>
+          <button type="button" class="btn btn-outline-primary" id="annotator-auth-register-btn">Register</button>
+        </div>
+
+        <div class="mt-3">
+          <label for="annotator-name-input" class="form-label">Name</label>
+          <input type="text" class="form-control form-control-lg" id="annotator-name-input" autocomplete="name"
+            placeholder="Enter your name">
+          <div id="annotator-auth-error" class="text-danger small mt-2" style="display: none;"></div>
+        </div>
+
+        <div class="d-grid mt-4">
+          <button type="button" class="btn btn-primary btn-lg" id="annotator-auth-submit-btn">
+            Continue to annotations
+          </button>
+        </div>
+
+        <div class="auth-page-hint mt-3 text-muted">
+          You will land on the regular annotation screen immediately after continuing.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    window.url_prefix = {{ host_prefix | tojson | safe }};
+    window.campaign_id = {{ campaign_id | tojson | safe }};
+    window.auth_redirect_template = {{ auth_redirect_template | tojson | safe }};
+
+    const authMode = { value: "login" };
+
+    function normalizeAnnotatorId(value) {
+      if (value === null || value === undefined) return "";
+      return String(value).trim().replace(/\s+/g, "_").replace(/[\\/]/g, "_");
+    }
+
+    function setAuthMode(mode) {
+      authMode.value = mode;
+      $("#annotator-auth-login-btn").toggleClass("active", mode === "login");
+      $("#annotator-auth-register-btn").toggleClass("active", mode === "register");
+      $("#annotator-auth-error").hide().text("");
+      $("#annotator-name-input").focus();
+    }
+
+    function redirectToAnnotation(annotatorId) {
+      const url = window.auth_redirect_template.replace("__ANNOTATOR__", encodeURIComponent(annotatorId));
+      window.location.href = url;
+    }
+
+    function checkAnnotatorExists(annotatorId) {
+      return $.get(`${window.url_prefix}/annotator/exists`, {
+        campaign_id: window.campaign_id,
+        annotator_id: annotatorId,
+      });
+    }
+
+    function postAuth(endpoint, annotatorId) {
+      $("#annotator-auth-submit-btn").prop("disabled", true);
+      $.post({
+        url: `${window.url_prefix}/annotator/${endpoint}`,
+        contentType: "application/json",
+        data: JSON.stringify({
+          campaign_id: window.campaign_id,
+          annotator_id: annotatorId,
+        }),
+        success: function (response) {
+          if (response.success !== true) {
+            $("#annotator-auth-error").text(response.error || "Authentication failed.").show();
+            $("#annotator-auth-submit-btn").prop("disabled", false);
+            return;
+          }
+          redirectToAnnotation(response.annotator_id);
+        },
+        error: function (xhr) {
+          $("#annotator-auth-error").text(xhr.responseJSON?.error || "Authentication failed.").show();
+          $("#annotator-auth-submit-btn").prop("disabled", false);
+        }
+      });
+    }
+
+    function submitAuth() {
+      const annotatorId = normalizeAnnotatorId($("#annotator-name-input").val());
+      if (!annotatorId) {
+        $("#annotator-auth-error").text("Please enter your name.").show();
+        return;
+      }
+
+      $("#annotator-auth-error").hide().text("");
+
+      if (authMode.value === "register") {
+        checkAnnotatorExists(annotatorId)
+          .done((response) => {
+            if (response.exists) {
+              setAuthMode("login");
+              $("#annotator-auth-error").text("This annotator name already exists. Please use Login instead.").show();
+              $("#annotator-auth-submit-btn").prop("disabled", false);
+              return;
+            }
+            postAuth("register", annotatorId);
+          })
+          .fail(() => {
+            $("#annotator-auth-error").text("Could not verify annotator. Please try again.").show();
+            $("#annotator-auth-submit-btn").prop("disabled", false);
+          });
+        return;
+      }
+
+      postAuth("login", annotatorId);
+    }
+
+    $(document).ready(function () {
+      setAuthMode("login");
+      $("#annotator-auth-login-btn").on("click", function () {
+        setAuthMode("login");
+      });
+      $("#annotator-auth-register-btn").on("click", function () {
+        setAuthMode("register");
+      });
+      $("#annotator-auth-submit-btn").on("click", function () {
+        submitAuth();
+      });
+      $("#annotator-name-input").on("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          submitAuth();
+        }
+      });
+      $("#annotator-name-input").focus();
+    });
+  </script>
+</body>
+
+</html>

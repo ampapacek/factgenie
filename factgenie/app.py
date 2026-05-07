@@ -27,6 +27,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import factgenie.analysis as analysis
 import factgenie.crowdsourcing as crowdsourcing
 import factgenie.llm_campaign as llm_campaign
+import factgenie.redo as redo
 import factgenie.utils as utils
 import factgenie.workflows as workflows
 from factgenie import CAMPAIGN_DIR, INPUT_DIR, PACKAGE_DIR, PREVIEW_STUDY_ID, STATIC_DIR, TEMPLATES_DIR
@@ -349,13 +350,17 @@ def annotate(campaign_id):
     raw_annotator_id = request.args.get("annotatorId")
     service_ids = crowdsourcing.get_service_ids(service, request.args)
     template_annotator_id = service_ids["annotator_id"]
+    needs_annotator_auth = False
 
     if service == "local":
-        if raw_annotator_id is None:
-            template_annotator_id = PREVIEW_STUDY_ID
-        elif raw_annotator_id.strip() in ["", "FILL_YOUR_NAME_HERE"]:
-            service_ids["annotator_id"] = PREVIEW_STUDY_ID
-            template_annotator_id = raw_annotator_id.strip()
+        if not raw_annotator_id or raw_annotator_id.strip() == "" or raw_annotator_id.strip() == "FILL_YOUR_NAME_HERE":
+            # Keep the annotator ID empty so the auth modal can prompt for
+            # registration/login on direct links without an explicit id.
+            # We intentionally avoid loading a batch here so the page behind
+            # the modal stays on instructions until the user identifies themself.
+            service_ids["annotator_id"] = ""
+            template_annotator_id = ""
+            needs_annotator_auth = True
 
     metadata = campaign.metadata
     annotator_preferences = {"hide_instructions_next_time": False}
@@ -364,14 +369,44 @@ def annotate(campaign_id):
         existing = _find_existing_annotator(_load_annotator_registry(campaign_id), normalized_annotator_id)
         if existing:
             annotator_preferences["hide_instructions_next_time"] = existing.get("hide_instructions_next_time", False)
-    annotation_set = crowdsourcing.get_annotator_batch(app, campaign, service_ids, batch_idx=batch_idx)
+    if needs_annotator_auth:
+        annotation_set = []
+        redo_context = {
+            "mode": "normal",
+            "is_redo": False,
+            "empty_redo_fallback": False,
+            "show_completed": False,
+            "needs_auth": True,
+        }
+    else:
+        show_completed_redo = request.args.get("show_completed_redo") == "1" or request.args.get("redo_review") == "1"
+        annotation_set, redo_context = crowdsourcing.get_annotator_batch(
+            app,
+            campaign,
+            service_ids,
+            batch_idx=batch_idx,
+            include_completed_redo=show_completed_redo,
+            return_context=True,
+        )
+
+    if needs_annotator_auth:
+        return render_template(
+            "crowdsourcing/annotate_auth.html",
+            host_prefix=app.config["host_prefix"],
+            campaign=campaign,
+            campaign_id=campaign.campaign_id,
+            auth_redirect_template=_build_auth_redirect_template(app.config["host_prefix"], campaign.campaign_id),
+        )
 
     if not annotation_set:
         # no more available examples
         return render_template(
             "crowdsourcing/closed.html",
             host_prefix=app.config["host_prefix"],
+            redo_context=redo_context,
         )
+
+    crowdsourcing.ensure_crowdsourcing_page_current(campaign.campaign_id, metadata["config"])
 
     return utils.render_from_folder(
         f"annotate.html",
@@ -381,6 +416,7 @@ def annotate(campaign_id):
         annotator_id=template_annotator_id,
         annotator_preferences=annotator_preferences,
         metadata=metadata,
+        redo_context=redo_context,
     )
 
 
@@ -391,8 +427,13 @@ def _annotator_registry_path(campaign_id):
 def _normalize_annotator_id(value):
     if value is None:
         return ""
+    try:
+        if isnan(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
     text = str(value).strip()
-    if not text:
+    if not text or text.lower() in {"nan", "<na>"}:
         return ""
     text = re.sub(r"\s+", "_", text)
     text = text.replace("/", "_").replace("\\", "_")
@@ -457,6 +498,10 @@ def _normalize_annotator_records(records):
         used_aliases.add(alias)
 
     return normalized
+
+
+def _build_auth_redirect_template(host_prefix, campaign_id):
+    return f"{host_prefix}/annotate/{campaign_id}?annotatorId=__ANNOTATOR__"
 
 
 def _load_annotator_registry(campaign_id):
@@ -559,13 +604,7 @@ def annotator_register():
     annotators = _load_annotator_registry(campaign_id)
     existing = _find_existing_annotator(annotators, annotator_id)
     if existing:
-        return jsonify(
-            success=True,
-            annotator_id=existing["id"],
-            annotator_alias=existing["alias"],
-            exists=True,
-            hide_instructions_next_time=existing.get("hide_instructions_next_time", False),
-        )
+        return utils.error("This annotator name already exists. Please use Login instead.")
 
     used_aliases = {record["alias"] for record in annotators}
     alias = _next_available_alias(used_aliases)
@@ -746,6 +785,7 @@ def crowdsourcing_detail(campaign_id):
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
     overview = campaign.get_overview()
     stats = campaign.get_stats()
+    redo_admin = redo.build_admin_overview(campaign, _annotator_alias_map(campaign_id))
 
     return render_template(
         "pages/crowdsourcing_detail.html",
@@ -754,7 +794,138 @@ def crowdsourcing_detail(campaign_id):
         overview=overview,
         stats=stats,
         metadata=campaign.metadata,
+        redo_admin=redo_admin,
         host_prefix=app.config["host_prefix"],
+    )
+
+
+def _download_json(payload, filename):
+    response = make_response(json.dumps(payload, indent=2, ensure_ascii=False))
+    response.headers["Content-Type"] = "application/json; charset=utf-8"
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    return response
+
+
+def _download_csv(rows, filename):
+    response = make_response(redo.rows_to_csv(rows))
+    response.headers["Content-Type"] = "text/csv; charset=utf-8"
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    return response
+
+
+@app.route("/redo/<campaign_id>/queue.json", methods=["GET"])
+@login_required
+def redo_queue_json(campaign_id):
+    return _download_json(redo.load_queue(campaign_id), f"{campaign_id}-redo-queue.json")
+
+
+@app.route("/redo/<campaign_id>/queue.csv", methods=["GET"])
+@login_required
+def redo_queue_csv(campaign_id):
+    return _download_csv(redo.load_queue(campaign_id).get("items", []), f"{campaign_id}-redo-queue.csv")
+
+
+@app.route("/redo/<campaign_id>/revisions.json", methods=["GET"])
+@login_required
+def redo_revisions_json(campaign_id):
+    return _download_json(redo.load_revision_log(campaign_id), f"{campaign_id}-redo-revisions.json")
+
+
+@app.route("/redo/<campaign_id>/revisions.csv", methods=["GET"])
+@login_required
+def redo_revisions_csv(campaign_id):
+    return _download_csv(redo.load_revision_log(campaign_id), f"{campaign_id}-redo-revisions.csv")
+
+
+@app.route("/redo/<campaign_id>/items", methods=["POST"])
+@login_required
+def redo_add_items(campaign_id):
+    data = request.get_json() or {}
+    include_skipped = bool(data.get("includeSkipped", False))
+    instruction = data.get("instruction") or None
+    rows = data.get("items", [])
+
+    selected_rows = []
+    for row in rows:
+        item = redo.row_to_item(campaign_id, row, annotator_id=row.get("annotator_id"))
+        active_record = redo.latest_active_record(campaign_id, item)
+        if not include_skipped and active_record and redo.is_skip_selected(active_record.get("flags", [])):
+            continue
+        selected_rows.append(row)
+
+    result = redo.add_items(
+        campaign_id,
+        selected_rows,
+        created_by="admin",
+        instruction=instruction,
+        source={"type": "manual", "selector": data.get("selector", "example")},
+    )
+    return jsonify(
+        success=True,
+        added=len(result["added"]),
+        reused=len(result["reused"]),
+    )
+
+
+@app.route("/redo/<campaign_id>/items/cancel", methods=["POST"])
+@login_required
+def redo_cancel_items(campaign_id):
+    data = request.get_json() or {}
+    cancelled = redo.cancel_items(campaign_id, data.get("redo_ids", []))
+    return jsonify(success=True, cancelled=len(cancelled))
+
+
+@app.route("/redo/<campaign_id>/items/restore_original", methods=["POST"])
+@login_required
+def redo_restore_original_items(campaign_id):
+    data = request.get_json() or {}
+    result = redo.restore_original_annotations(campaign_id, data.get("redo_ids", []), restored_by="admin")
+    if result["restored"]:
+        campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+        campaign.load_db()
+        db = campaign.db
+        for item in result["restored"]:
+            original_revision = redo.find_original_revision(campaign_id, item.get("redo_id"))
+            record = original_revision.get("record", {}) if original_revision else {}
+            metadata = record.get("metadata", {})
+            mask = (
+                (db["dataset"].astype(str) == str(item["dataset"]))
+                & (db["split"].astype(str) == str(item["split"]))
+                & (db["setup_id"].astype(str) == str(item["setup_id"]))
+                & (db["example_idx"].astype(int) == int(item["example_idx"]))
+                & (db["annotator_group"].astype(int) == int(item.get("annotator_group", 0)))
+                & (db["annotator_id"].fillna("").astype(str) == str(item.get("annotator_id")))
+            )
+            if mask.sum() == 1:
+                db.loc[mask, "status"] = ExampleStatus.FINISHED
+                restored_end = metadata.get("end_timestamp")
+                if restored_end:
+                    db.loc[mask, "end"] = restored_end
+        campaign.update_db(db)
+        workflows.refresh_indexes(app)
+    return jsonify(success=True, restored=len(result["restored"]), errors=result["errors"])
+
+
+@app.route("/redo/save_item", methods=["POST"])
+def redo_save_item():
+    data = request.get_json() or {}
+    return crowdsourcing.save_redo_annotation(
+        app,
+        data.get("campaign_id"),
+        data.get("redo_id"),
+        data.get("annotation"),
+        data.get("annotator_id"),
+    )
+
+
+@app.route("/redo/keep_item", methods=["POST"])
+def redo_keep_item():
+    data = request.get_json() or {}
+    return crowdsourcing.keep_redo_annotation(
+        app,
+        data.get("campaign_id"),
+        data.get("redo_id"),
+        data.get("annotator_id"),
     )
 
 
@@ -1293,6 +1464,8 @@ def submit_annotations():
     annotator_id = data["annotator_id"]
 
     logger.info(f"Received annotations for {campaign_id} by {annotator_id}")
+    if any(annotation.get("redo_id") for annotation in annotation_set):
+        return utils.error("Redo annotations must be saved with Save current item.")
 
     return crowdsourcing.save_annotations(app, campaign_id, annotation_set, annotator_id)
 
