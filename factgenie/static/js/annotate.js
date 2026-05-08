@@ -450,15 +450,50 @@ function fetchAnnotation(dataset, split, setup_id, example_idx, annotation_idx) 
             }
             data.generated_outputs = generatedOutput;
             examples_cached[annotation_idx] = data;
-            resolve();
-        }).fail(function () {
-            reject();
+            resolve({ annotation_idx });
+        }).fail(function (xhr, textStatus, errorThrown) {
+            reject({
+                annotation_idx,
+                dataset,
+                split,
+                setup_id,
+                example_idx,
+                status: xhr?.status,
+                textStatus: textStatus || "",
+                errorThrown: errorThrown || "",
+                responseError: xhr?.responseJSON?.error || "",
+                responseText: xhr?.responseText || "",
+            });
         });
     });
 }
 
+function getLoadedExampleIndexes() {
+    return Object.keys(examples_cached)
+        .map((idx) => parseInt(idx, 10))
+        .filter((idx) => !Number.isNaN(idx))
+        .sort((a, b) => a - b);
+}
+
+function findNextLoadedIndex(targetPage, direction = 1) {
+    if (total_examples <= 0) {
+        return null;
+    }
+    const step = direction >= 0 ? 1 : -1;
+    let candidate = targetPage;
+    for (let checked = 0; checked < total_examples; checked += 1) {
+        const normalized = mod(candidate, total_examples);
+        if (examples_cached[normalized]) {
+            return normalized;
+        }
+        candidate += step;
+    }
+    return null;
+}
+
 
 function goToAnnotation(example_idx) {
+    current_example_idx = example_idx;
     $(".page-link").removeClass("bg-active");
     $(`#page-link-${example_idx}`).addClass("bg-active");
 
@@ -466,6 +501,10 @@ function goToAnnotation(example_idx) {
     $(`#out-text-${example_idx}`).show();
 
     const data = examples_cached[example_idx];
+    if (!data) {
+        console.warn(`Missing cached example data for annotation index ${example_idx}.`);
+        return;
+    }
     $("#examplearea").html(data.html);
 
     const flags = annotation_set[example_idx].flags;
@@ -541,9 +580,13 @@ function goToAnnotation(example_idx) {
 
 function goToPage(page) {
     const example_idx = current_example_idx;
-
-    current_example_idx = page;
-    current_example_idx = mod(current_example_idx, total_examples);
+    const direction = page >= current_example_idx ? 1 : -1;
+    const resolvedPage = findNextLoadedIndex(page, direction);
+    if (resolvedPage === null) {
+        console.warn("No loaded annotation examples are available.");
+        return;
+    }
+    current_example_idx = resolvedPage;
 
     saveCurrentAnnotations(example_idx);
     goToAnnotation(current_example_idx);
@@ -587,14 +630,33 @@ function loadAnnotations() {
         const promise = fetchAnnotation(dataset, split, setup_id, example_idx, annotation_idx);
         promises.push(promise);
     }
-    Promise.all(promises)
-        .then(() => {
+    Promise.allSettled(promises)
+        .then((results) => {
+            const loadedIndexes = getLoadedExampleIndexes();
+            const failed = results
+                .filter((result) => result.status === "rejected")
+                .map((result) => result.reason || {});
+
+            if (loadedIndexes.length === 0) {
+                console.error("No annotation examples could be loaded.", failed);
+                $("#hideOverlayBtn")
+                    .attr("disabled", false)
+                    .removeClass("btn-primary")
+                    .addClass("btn-danger")
+                    .text("Failed to load examples");
+                $("#redo-instruction-box")
+                    .text("No annotation examples could be loaded. Please refresh the page. If the problem continues, contact the campaign administrator.")
+                    .show();
+                return;
+            }
+
             // take from metadata if defined, else false
             const annotationOverlapAllowed = metadata.config.annotation_overlap_allowed || false;
             const annotateReason = metadata.config.annotate_reason || false;
             spanAnnotator.init(metadata.config.annotation_granularity, annotationOverlapAllowed, annotation_span_categories, annotateReason);
 
-            for (const [annotation_idx, data] of Object.entries(examples_cached)) {
+            for (const annotation_idx of loadedIndexes) {
+                const data = examples_cached[annotation_idx];
                 const normalizedOutput = normalizeNewlines(data.generated_outputs.output);
                 const p = $('<p>', { id: `out-text-${annotation_idx}-par`, class: 'annotatable-paragraph' });
                 $(`#out-text-${annotation_idx}`).append(p);
@@ -606,25 +668,38 @@ function loadAnnotations() {
                 addPageLink(annotation_idx);
             }
 
-            goToAnnotation(0);
+            const firstLoadedIndex = loadedIndexes[0];
+            current_example_idx = firstLoadedIndex;
+            goToAnnotation(firstLoadedIndex);
 
             $("#hideOverlayBtn").attr("disabled", false);
             $("#hideOverlayBtn").html("View the annotation page");
-        })
-        .catch((e) => {
-            // Handle errors if any request fails
-            console.error("One or more requests failed.");
-            // Log the error
-            console.error(e);
-            $("#hideOverlayBtn")
-                .attr("disabled", false)
-                .removeClass("btn-primary")
-                .addClass("btn-danger")
-                .text("Failed to load examples");
-            $("#redo-instruction-box")
-                .text("Some annotation examples could not be loaded. Please refresh the page. If the problem continues, contact the campaign administrator.")
-                .show();
-
+            if (failed.length > 0) {
+                console.warn("Some annotation examples failed to load.", failed);
+                failed.forEach((failure) => {
+                    const summary = [
+                        `annotation_idx=${failure.annotation_idx}`,
+                        `dataset=${failure.dataset}`,
+                        `split=${failure.split}`,
+                        `setup_id=${failure.setup_id}`,
+                        `example_idx=${failure.example_idx}`,
+                        `status=${failure.status ?? "unknown"}`,
+                    ].join(", ");
+                    console.error(`[FactGenie redo] Failed to load example: ${summary}`);
+                    if (failure.responseError) {
+                        console.error(`[FactGenie redo] Server error: ${failure.responseError}`);
+                    } else if (failure.responseText) {
+                        console.error(`[FactGenie redo] Server response: ${failure.responseText}`);
+                    } else if (failure.textStatus || failure.errorThrown) {
+                        console.error(
+                            `[FactGenie redo] Request failure: ${failure.textStatus || "error"} ${failure.errorThrown || ""}`.trim()
+                        );
+                    }
+                });
+                $("#redo-instruction-box")
+                    .text(`Loaded ${loadedIndexes.length} annotation example(s), but ${failed.length} item(s) could not be loaded. You can continue with the loaded items. Check the browser console for details if needed.`)
+                    .show();
+            }
         })
         .finally(() => {
             // This block will be executed regardless of success or failure
