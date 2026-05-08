@@ -549,6 +549,32 @@ def test_blank_or_placeholder_annotator_id_keeps_auth_page_before_batch_load(mon
     assert "instructions" not in captured["kwargs"]
 
 
+def test_preview_batch_link_bypasses_local_auth_page(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    campaign.metadata["config"]["service"] = "local"
+    app_mod.app.config.update(login={"active": False}, host_prefix="")
+
+    monkeypatch.setattr(workflows, "load_campaign", lambda app, campaign_id: campaign)
+    monkeypatch.setattr(workflows, "refresh_indexes", lambda app: None)
+    monkeypatch.setattr(crowdsourcing, "ensure_crowdsourcing_page_current", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        crowdsourcing,
+        "get_annotator_batch",
+        lambda *args, **kwargs: (
+            [{"dataset": "dataset-a", "split": "test", "setup_id": "setup-a", "example_idx": 0, "batch_idx": 0}],
+            {"mode": "normal", "is_redo": False, "empty_redo_fallback": False, "show_completed": False},
+        ),
+    )
+    monkeypatch.setattr(app_mod.utils, "render_from_folder", lambda *args, **kwargs: "preview-shell")
+
+    client = app_mod.app.test_client()
+    response = client.get("/annotate/redo-test?batch_idx=0")
+
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "preview-shell"
+
+
 def test_build_auth_redirect_template_points_to_annotation_route():
     assert app_mod._build_auth_redirect_template("", "redo-test") == "/annotate/redo-test?annotatorId=__ANNOTATOR__"
 

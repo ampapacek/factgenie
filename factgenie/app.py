@@ -418,7 +418,10 @@ def annotate(campaign_id):
     needs_annotator_auth = False
 
     if service == "local":
-        if not raw_annotator_id or raw_annotator_id.strip() == "" or raw_annotator_id.strip() == "FILL_YOUR_NAME_HERE":
+        missing_local_annotator = (
+            not raw_annotator_id or raw_annotator_id.strip() == "" or raw_annotator_id.strip() == "FILL_YOUR_NAME_HERE"
+        )
+        if missing_local_annotator and (batch_idx is None or batch_idx == ""):
             # Keep the annotator ID empty so the auth modal can prompt for
             # registration/login on direct links without an explicit id.
             # We intentionally avoid loading a batch here so the page behind
