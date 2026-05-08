@@ -1,6 +1,7 @@
 import json
 import threading
 import zipfile
+import logging
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -1050,6 +1051,34 @@ def test_get_annotator_batch_can_review_completed_redo_items(monkeypatch, tmp_pa
     assert annotation_set[0]["output"] == "old output"
     assert annotation_set[0]["redo_status"] == redo.STATUS_COMPLETED
     assert annotation_set[0]["annotations"][0]["text"] == "saved"
+
+
+def test_get_annotator_batch_logs_and_filters_invalid_redo_annotation_types(monkeypatch, tmp_path, caplog):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-20.jsonl",
+        [
+            {"type": 0, "text": "valid", "start": 0},
+            {"type": 99, "text": "invalid", "start": 6},
+        ],
+    )
+    redo.add_items("redo-test", [queue_row()])
+    app = SimpleNamespace(db={"lock": threading.Lock()})
+
+    with caplog.at_level(logging.WARNING, logger="factgenie"):
+        annotation_set, context = crowdsourcing.get_annotator_batch(
+            app,
+            campaign,
+            {"annotator_id": "ann-a"},
+            return_context=True,
+        )
+
+    assert context["is_redo"] is True
+    assert annotation_set[0]["annotations"] == [{"type": 0, "text": "valid", "start": 0}]
+    assert "Skipping redo annotation with unknown type" in caplog.text
+    assert "redo_id" in caplog.text
 
 
 def test_get_example_data_with_missing_setup_output_returns_placeholder(monkeypatch):
