@@ -378,7 +378,19 @@ def analyze_detail(campaign_id):
             return redirect(app.config["host_prefix"] + "/analyze")
 
     show_real_annotator_names = _can_reveal_campaign_annotator_ids(campaign_id, is_authenticated)
-    statistics = analysis.compute_statistics(app, campaign, show_real_annotator_names=show_real_annotator_names)
+    rag_mistake_setup_id = request.args.get("summary_setup_id")
+    rag_mistake_span_category = request.args.get("summary_span_category")
+    active_stats_tab = request.args.get("tab")
+    if active_stats_tab not in {"spans", "summaries", "sliders", "annotators", "coverage"}:
+        active_stats_tab = "summaries" if (rag_mistake_setup_id or rag_mistake_span_category) else "spans"
+
+    statistics = analysis.compute_statistics(
+        app,
+        campaign,
+        show_real_annotator_names=show_real_annotator_names,
+        rag_mistake_setup_id=rag_mistake_setup_id,
+        rag_mistake_span_category=rag_mistake_span_category,
+    )
 
     return render_template(
         "pages/analyze_detail.html",
@@ -386,6 +398,7 @@ def analyze_detail(campaign_id):
         campaign=campaign,
         is_authenticated=is_authenticated,
         show_real_annotator_names=show_real_annotator_names,
+        active_stats_tab=active_stats_tab,
         host_prefix=app.config["host_prefix"],
     )
 

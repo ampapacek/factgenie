@@ -8,6 +8,7 @@ import re
 import sys
 import traceback
 from collections import defaultdict
+from urllib.parse import urlencode
 
 import pandas as pd
 
@@ -270,6 +271,215 @@ def compute_extra_fields_stats(example_index):
         traceback.print_exc()
 
     return extra_fields_stats
+
+
+RAG_MISTAKE_TOKEN_PATTERNS = {
+    "InSeafile": re.compile(r"(?<!\w)InSeafile(?!\w)"),
+    "NotInSeafile": re.compile(r"(?<!\w)NotInSeafile(?!\w)"),
+    "InTop10": re.compile(r"(?<!\w)InTop10(?!\w)"),
+    "NotInTop10": re.compile(r"(?<!\w)NotInTop10(?!\w)"),
+}
+
+
+def _normalize_rag_summary_choice(value):
+    return str(value or "").strip()
+
+
+def _get_rag_summary_defaults(span_index, campaign):
+    setup_ids = []
+    if span_index is not None and not span_index.empty and "setup_id" in span_index.columns:
+        setup_ids = sorted(
+            {
+                str(setup_id).strip()
+                for setup_id in span_index["setup_id"].dropna().tolist()
+                if str(setup_id).strip()
+            }
+        )
+
+    span_categories = []
+    for category in campaign.metadata["config"].get("annotation_span_categories", []):
+        category_name = str(category.get("name", "")).strip()
+        if category_name:
+            span_categories.append(category_name)
+
+    default_setup_id = next((setup_id for setup_id in setup_ids if "rag" in setup_id.lower()), setup_ids[0] if setup_ids else "")
+    default_span_category = "Chybí" if "Chybí" in span_categories else (span_categories[0] if span_categories else "")
+
+    return {
+        "setup_ids": setup_ids,
+        "span_categories": span_categories,
+        "default_setup_id": default_setup_id,
+        "default_span_category": default_span_category,
+    }
+
+
+def _resolve_rag_summary_selection(defaults, selected_setup_id=None, selected_span_category=None):
+    resolved_setup_id = _normalize_rag_summary_choice(selected_setup_id)
+    if resolved_setup_id and resolved_setup_id != "all" and resolved_setup_id not in defaults["setup_ids"]:
+        resolved_setup_id = defaults["default_setup_id"]
+    if not resolved_setup_id:
+        resolved_setup_id = defaults["default_setup_id"] or "all"
+
+    resolved_span_category = _normalize_rag_summary_choice(selected_span_category)
+    if resolved_span_category and resolved_span_category != "all" and resolved_span_category not in defaults["span_categories"]:
+        resolved_span_category = defaults["default_span_category"]
+    if not resolved_span_category:
+        resolved_span_category = defaults["default_span_category"] or "all"
+
+    return resolved_setup_id, resolved_span_category
+
+
+def classify_rag_mistake_reason(reason):
+    text = str(reason or "")
+    tokens = {name for name, pattern in RAG_MISTAKE_TOKEN_PATTERNS.items() if pattern.search(text)}
+
+    if "NotInSeafile" in tokens and "NotInTop10" in tokens:
+        return "collection"
+    if "InSeafile" in tokens and "NotInTop10" in tokens:
+        return "search"
+    if "InTop10" in tokens or "InSeafile" in tokens:
+        return "generation"
+    return None
+
+
+def compute_rag_mistake_stats(
+    app,
+    campaign,
+    selected_setup_id=None,
+    selected_span_category=None,
+    show_real_annotator_names=True,
+    span_index=None,
+):
+    """Summarize the three common RAG mistake buckets for the selected setup and span category."""
+    if span_index is None:
+        span_index = generate_span_index(app, campaign)
+    if span_index.empty:
+        return []
+
+    defaults = _get_rag_summary_defaults(span_index, campaign)
+    selected_setup_id, selected_span_category = _resolve_rag_summary_selection(
+        defaults,
+        selected_setup_id=selected_setup_id,
+        selected_span_category=selected_span_category,
+    )
+
+    span_category_to_idx = {
+        str(category.get("name", "")).strip(): idx
+        for idx, category in enumerate(campaign.metadata["config"].get("annotation_span_categories", []))
+        if str(category.get("name", "")).strip()
+    }
+    if selected_span_category == "all":
+        selected_type_indices = list(span_category_to_idx.values())
+    else:
+        missing_type = span_category_to_idx.get(selected_span_category)
+        if missing_type is None:
+            return []
+        selected_type_indices = [missing_type]
+
+    missing_spans = span_index[span_index["annotation_type"].isin(selected_type_indices)].copy()
+    if selected_setup_id != "all":
+        missing_spans = missing_spans[missing_spans["setup_id"].astype(str) == selected_setup_id]
+    if missing_spans.empty:
+        return []
+
+    annotator_aliases = _load_campaign_annotator_alias_map(campaign)
+    annotator_ids = missing_spans["annotator_id"].fillna("unknown").tolist()
+    annotator_display_names = _build_annotator_public_name_map(annotator_ids, annotator_aliases)
+
+    mistake_definitions = {
+        "collection": {
+            "label": "Chyba kolekce dokumentů",
+            "short_label": "Seafile",
+            "description": (
+                "V kolekci dokumentů v Seafile něco chybí nebo přebývá, takže problém vzniká ještě před vyhledáváním."
+            ),
+            "lead": "Něco chybí v kolekci dokumentů uložené v Seafile (případně přebývá).",
+        },
+        "search": {
+            "label": "Chyba vyhledávání",
+            "short_label": "mSearch",
+            "description": (
+                "V Seafile je vše v pořádku, ale vyhledání do Top10 něco vynechá nebo přidá navíc."
+            ),
+            "lead": "V Seafile je vše OK, ale něco chybí v Top10 (případně přebývá).",
+        },
+        "generation": {
+            "label": "Chyba generování odpovědi",
+            "short_label": "Generation",
+            "description": (
+                "Informace je dostupná ve zdrojích, ale nedostane se do odpovědi nebo je v odpovědi zkreslená."
+            ),
+            "lead": "V Top10 je vše OK, ale informace se nedostala do odpovědi nebo se změnila.",
+        },
+    }
+
+    grouped_examples = {}
+    for _, row in missing_spans.iterrows():
+        mistake_key = classify_rag_mistake_reason(row.get("annotation_reason", ""))
+        if mistake_key is None:
+            continue
+
+        annotator_id = _normalize_annotator_id(row.get("annotator_id")) or "unknown"
+        display_name = annotator_id if show_real_annotator_names else annotator_display_names.get(annotator_id, annotator_id)
+        example_key = (
+            mistake_key,
+            str(row.get("dataset", "")),
+            str(row.get("split", "")),
+            str(row.get("setup_id", "")),
+            int(row.get("example_idx", 0)),
+            annotator_id,
+        )
+
+        example = grouped_examples.setdefault(
+            example_key,
+            {
+                "dataset": str(row.get("dataset", "")),
+                "split": str(row.get("split", "")),
+                "setup_id": str(row.get("setup_id", "")),
+                "example_idx": int(row.get("example_idx", 0)),
+                "annotator_id": display_name,
+                "browse_url": None,
+                "spans": [],
+            },
+        )
+        example["spans"].append(
+            {
+                "text": str(row.get("annotation_text", "")),
+                "reason": str(row.get("annotation_reason", "")),
+            }
+        )
+
+    for example in grouped_examples.values():
+        params = {
+            "dataset": example["dataset"],
+            "split": example["split"],
+            "example_idx": example["example_idx"],
+            "setup_id": example["setup_id"],
+        }
+        host_prefix = getattr(app, "config", {}).get("host_prefix", "")
+        example["browse_url"] = f"{host_prefix}/browse?{urlencode(params)}"
+
+    grouped_by_mistake = {key: [] for key in mistake_definitions}
+    for (mistake_key, *_), example in grouped_examples.items():
+        grouped_by_mistake[mistake_key].append(example)
+
+    summary_rows = []
+    for mistake_key in ["collection", "search", "generation"]:
+        examples = sorted(
+            grouped_by_mistake[mistake_key],
+            key=lambda item: (item["dataset"], item["split"], item["setup_id"], item["example_idx"], item["annotator_id"]),
+        )
+        summary_rows.append(
+            {
+                "key": mistake_key,
+                **mistake_definitions[mistake_key],
+                "example_count": len(examples),
+                "span_count": sum(len(example["spans"]) for example in examples),
+                "examples": examples,
+            }
+        )
+
+    return summary_rows
 
 
 def _is_skip_selected(flags):
@@ -1228,12 +1438,24 @@ def compute_slider_stats(example_index, datasets, slider_label_order=None):
     }
 
 
-def compute_statistics(app, campaign, show_real_annotator_names=True):
+def compute_statistics(
+    app,
+    campaign,
+    show_real_annotator_names=True,
+    rag_mistake_setup_id=None,
+    rag_mistake_span_category=None,
+):
     statistics = {}
 
     span_index = generate_span_index(app, campaign)
     example_index = generate_example_index(app, campaign)
     annotator_aliases = _load_campaign_annotator_alias_map(campaign)
+    rag_mistake_defaults = _get_rag_summary_defaults(span_index, campaign)
+    selected_rag_setup_id, selected_rag_span_category = _resolve_rag_summary_selection(
+        rag_mistake_defaults,
+        selected_setup_id=rag_mistake_setup_id,
+        selected_span_category=rag_mistake_span_category,
+    )
     coverage_stats = compute_question_coverage_stats(
         app,
         campaign,
@@ -1262,6 +1484,29 @@ def compute_statistics(app, campaign, show_real_annotator_names=True):
         filtered_example_index = example_index
         if "flags" in example_index.columns:
             filtered_example_index = example_index[~example_index["flags"].apply(_is_skip_selected)]
+
+        rag_mistake_stats = compute_rag_mistake_stats(
+            app,
+            campaign,
+            selected_setup_id=selected_rag_setup_id,
+            selected_span_category=selected_rag_span_category,
+            show_real_annotator_names=show_real_annotator_names,
+            span_index=span_index,
+        )
+        if rag_mistake_stats:
+            statistics["rag_mistake_stats"] = rag_mistake_stats
+        statistics["rag_mistake_summary"] = {
+            "setup_ids": rag_mistake_defaults["setup_ids"],
+            "span_categories": rag_mistake_defaults["span_categories"],
+            "default_setup_id": rag_mistake_defaults["default_setup_id"],
+            "default_span_category": rag_mistake_defaults["default_span_category"],
+            "selected_setup_id": selected_rag_setup_id,
+            "selected_span_category": selected_rag_span_category,
+            "selected_setup_label": "All setups" if selected_rag_setup_id == "all" else selected_rag_setup_id,
+            "selected_span_category_label": "All span types"
+            if selected_rag_span_category == "all"
+            else selected_rag_span_category,
+        }
 
         extra_fields_stats = compute_extra_fields_stats(filtered_example_index)
         statistics["extra_fields"] = extra_fields_stats
