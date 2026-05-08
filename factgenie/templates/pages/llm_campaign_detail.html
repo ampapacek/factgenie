@@ -41,6 +41,22 @@
           <dd class="col-sm-9" id="metadata-example-cnt-{{ campaign_id }}"> {{ finished_examples | length }} / {{
             overview | length }}
           </dd>
+          {% if mode == 'llm_eval' %}
+          <dt class="col-sm-3"> Public anonymization </dt>
+          <dd class="col-sm-9">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="{{ campaign_id }}-pseudonymize-switch-detail"
+                {% if metadata.config.get('pseudonymize_annotators', True) %} checked {% endif %}
+                onclick="setCampaignPseudonymizeAnnotators('{{ campaign_id }}', this.checked)">
+              <label class="form-check-label" for="{{ campaign_id }}-pseudonymize-switch-detail">
+                Use aliases for logged-out Browse and Analyze
+              </label>
+            </div>
+            <div class="small text-muted">
+              Authenticated users can see both aliases and real annotator names.
+            </div>
+          </dd>
+          {% endif %}
         </dl>
         <div>
           <a onclick="runLLMCampaign('{{ campaign_id }}')" class="btn btn-outline-secondary" data-bs-toggle="tooltip"

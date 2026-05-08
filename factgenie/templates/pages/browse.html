@@ -80,7 +80,7 @@
             </a>
           </li>
           {% if show_annotator_toggle %}
-          <li class="page-item">
+          <li class="page-item" style="display: none;">
             <a class="page-link" id="toggle-annotator-names-btn" onclick="toggleAnnotatorNames();"
               title="Show annotator names">
               <i class="fa fa-user"></i> <small style="padding-left: 5px">Show annotator names</small>
@@ -109,6 +109,39 @@
       {{ browse_access_error }}
     </div>
     {% endif %}
+    <div class="border rounded p-2 mt-3 mb-2 bg-light" id="browse-filter-builder">
+      <div class="d-flex align-items-end justify-content-between gap-2 flex-wrap">
+        <div>
+          <label class="form-label small mb-1" for="browse-filter-match-mode">Filters</label>
+          <select class="form-select form-select-sm" id="browse-filter-match-mode">
+            <option value="all">Match all</option>
+            <option value="any">Match any</option>
+          </select>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <span class="small text-muted" id="browse-filter-count"></span>
+          <span class="small text-danger" id="browse-filter-error"></span>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal"
+            data-bs-target="#browse-filter-help-modal" title="How Browse filters work">
+            <i class="fa fa-question-circle"></i> Help
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="browse-toggle-highlights" style="display: none;">
+            Disable highlights
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="browse-add-condition">
+            <i class="fa fa-plus"></i> Add condition
+          </button>
+          <button type="button" class="btn btn-sm btn-primary" id="browse-apply-filters">
+            Apply
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="browse-reset-filters">
+            Reset
+          </button>
+        </div>
+      </div>
+      <div class="d-flex flex-column gap-2 mt-2" id="browse-filter-conditions"></div>
+      <div class="browse-match-details mt-2" id="browse-match-details" style="display: none;"></div>
+    </div>
     <div class="row">
 
       <div class="split col-12">
@@ -152,6 +185,55 @@
   </div>
 
   <!-- modal windows -->
+
+  <div class="modal fade" id="browse-filter-help-modal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="browse-filter-help-modal-label">How Browse filters work</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <h6 class="fw-bold">Basic behavior</h6>
+          <ul>
+            <li>Filters apply only to the currently selected dataset and split.</li>
+            <li><b>Match all</b> keeps examples where all conditions are true. <b>Match any</b> keeps examples where at least one condition is true.</li>
+            <li>Each matching question appears once in navigation, even if several outputs, annotators, spans, or sliders match.</li>
+            <li>Text matching is case-insensitive: <code>top10</code>, <code>Top10</code>, and <code>TOP10</code> match the same text.</li>
+          </ul>
+
+          <h6 class="fw-bold mt-3">Span conditions</h6>
+          <ul>
+            <li>With <b>Match all</b>, span conditions are evaluated on the same span. For example, <code>Span category is Chybí</code> and <code>Span reason regex \bNotInTop10\b</code> means: keep rows where there is a <code>Chybí</code> span whose own reason matches <code>NotInTop10</code>.</li>
+            <li>Multiple span-reason conditions also mean the same span must satisfy all of them.</li>
+            <li>The matching span, reason text, output text, or slider row is highlighted when possible. You can turn this off with <b>Disable highlights</b>.</li>
+          </ul>
+
+          <h6 class="fw-bold mt-3">Example: NotInTop10 and InSeafile on the same span</h6>
+          <p class="mb-2">
+            To find one span whose reason contains both <code>NotInTop10</code> and <code>InSeafile</code>, use <b>Match all</b> and add two conditions:
+          </p>
+          <ol>
+            <li><code>Span reason</code> <b>matches regex</b> <code>\bNotInTop10\b</code></li>
+            <li><code>Span reason</code> <b>matches regex</b> <code>\bInSeafile\b</code></li>
+          </ol>
+          <p>
+            Prefer regex here because <code>contains InSeafile</code> also matches <code>NotInSeafile</code>. The <code>\b</code> parts are word boundaries, so <code>\bInSeafile\b</code> matches the standalone label <code>InSeafile</code> but not <code>NotInSeafile</code>.
+          </p>
+
+          <h6 class="fw-bold mt-3">Annotator names</h6>
+          <ul>
+            <li>If campaign pseudonymization is enabled, public users see and filter by city aliases only.</li>
+            <li>If pseudonymization is disabled, public users can show/hide and filter by both real annotator names and city aliases.</li>
+            <li>Authenticated users can see both real names and aliases.</li>
+          </ul>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="modal fade" id="setup-modal" tabindex="-1">
     <div class="modal-dialog">

@@ -258,16 +258,31 @@ function formatCoverageStateLabel(state) {
 
 function buildCoverageTooltip(cell) {
     const state = cell?.state || 'todo';
+    const redoStatus = cell?.redo_status || '';
+    const revisionCount = Number(cell?.revision_count || 0);
     const start = formatCoverageTimestamp(cell?.start, { second: '2-digit' });
     const end = formatCoverageTimestamp(cell?.end, { second: '2-digit' });
     const elapsed = formatCoverageElapsed(cell?.start, cell?.end);
 
-    return [
+    const rows = [
         `<div><strong>State:</strong> ${escapeHtml(formatCoverageStateLabel(state))}</div>`,
         `<div><strong>Started:</strong> ${escapeHtml(start || '-')}</div>`,
         `<div><strong>Ended:</strong> ${escapeHtml(end || '-')}</div>`,
         `<div><strong>Elapsed time:</strong> ${escapeHtml(elapsed || '-')}</div>`,
-    ].join('');
+    ];
+    if (redoStatus) {
+        rows.push(`<div><strong>Redo:</strong> ${escapeHtml(redoStatus)}</div>`);
+    }
+    if (revisionCount > 0) {
+        rows.push(`<div><strong>Revisions:</strong> ${escapeHtml(revisionCount)}</div>`);
+        if (cell?.latest_revision_at) {
+            rows.push(`<div><strong>Latest revision:</strong> ${escapeHtml(cell.latest_revision_at)}</div>`);
+        }
+        if (cell?.latest_revision_by) {
+            rows.push(`<div><strong>Latest revised by:</strong> ${escapeHtml(cell.latest_revision_by)}</div>`);
+        }
+    }
+    return rows.join('');
 }
 
 function slugifyField(label) {
@@ -972,10 +987,12 @@ function renderCoverageMatrix(coverageStats) {
             const cell = row.cell_details?.[groupKey] || { state: status };
             const tooltip = buildCoverageTooltip(cell);
             const cellBrowseUrl = buildCoverageCellBrowseUrl(row, groupKey, status);
+            const redoBadge = cell.redo_status ? `<div><span class="badge bg-info text-dark">redo ${escapeHtml(cell.redo_status)}</span></div>` : '';
             html += `
                 <td class="text-center">
                   <a href="${cellBrowseUrl}" target="_blank" data-bs-toggle="tooltip" data-bs-html="true" title="${tooltip}">
                     ${statusBadge(status)}
+                    ${redoBadge}
                   </a>
                 </td>
             `;

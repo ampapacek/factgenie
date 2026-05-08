@@ -31,6 +31,9 @@
   <div id="overlay-start" class="overlay">
     <div id="overlay-start-content" class="overlay-content">
       <h1>Welcome!</h1>
+      {% if redo_context and redo_context.empty_redo_fallback %}
+      <p>No redo items remain. Continue with normal assignment.</p>
+      {% endif %}
       <p>There are no more tasks available for you within this annotation campaign.</p>
 
       <p>Please, contact the campaign authors for more information.</p>

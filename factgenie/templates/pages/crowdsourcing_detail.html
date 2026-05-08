@@ -47,7 +47,21 @@
               <span id="statusBtn{{ rowId }}" class="badge bg-assigned"><i class="fa fa-edit"></i> {{ stats.assigned
                 }}</span>
               <span id="statusBtn{{ rowId }}" class="badge bg-free"><i class="fa fa-clock-o"></i> {{ stats.free
-                }}</span>
+              }}</span>
+            </div>
+          </dd>
+          <dt class="col-sm-3"> Public anonymization </dt>
+          <dd class="col-sm-9">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="{{ campaign_id }}-pseudonymize-switch-detail"
+                {% if metadata.config.get('pseudonymize_annotators', True) %} checked {% endif %}
+                onclick="setCampaignPseudonymizeAnnotators('{{ campaign_id }}', this.checked)">
+              <label class="form-check-label" for="{{ campaign_id }}-pseudonymize-switch-detail">
+                Use aliases for logged-out Browse and Analyze
+              </label>
+            </div>
+            <div class="small text-muted">
+              Authenticated users can see both aliases and real annotator names.
             </div>
           </dd>
         </dl>
@@ -90,6 +104,149 @@
         </div>
         <div id="log-area" class="font-monospace mt-3"></div>
         <hr>
+      </div>
+
+      <div id="redo-admin" class="mb-5">
+        <div class="d-flex align-items-center justify-content-between">
+          <h4 class="mb-0">Redo annotations</h4>
+          <button
+            id="redo-admin-toggle"
+            class="btn btn-sm btn-outline-secondary"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#redo-admin-body"
+            aria-expanded="false"
+            aria-controls="redo-admin-body"
+          >
+            <i class="fa fa-chevron-down"></i> Expand
+          </button>
+        </div>
+        <div class="collapse mt-3" id="redo-admin-body">
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          <a href="{{ host_prefix }}/redo/{{ campaign_id }}/queue.json" class="btn btn-sm btn-outline-secondary">
+            <i class="fa fa-download"></i> Queue JSON
+          </a>
+          <a href="{{ host_prefix }}/redo/{{ campaign_id }}/queue.csv" class="btn btn-sm btn-outline-secondary">
+            <i class="fa fa-download"></i> Queue CSV
+          </a>
+          <a href="{{ host_prefix }}/redo/{{ campaign_id }}/revisions.json" class="btn btn-sm btn-outline-secondary">
+            <i class="fa fa-download"></i> Revisions JSON
+          </a>
+          <a href="{{ host_prefix }}/redo/{{ campaign_id }}/revisions.csv" class="btn btn-sm btn-outline-secondary">
+            <i class="fa fa-download"></i> Revisions CSV
+          </a>
+        </div>
+
+        <div class="row g-2 align-items-end mb-3">
+          <div class="col-md-4">
+            <label class="form-label" for="redo-annotator-select">Annotator</label>
+            <select class="form-select" id="redo-annotator-select">
+              <option value="">Select annotator...</option>
+              {% for annotator in redo_admin.annotators %}
+              <option value="{{ annotator.id }}">
+                {{ annotator.id }}{% if annotator.alias %} ({{ annotator.alias }}){% endif %}
+                - pending {{ annotator.counts.pending }}, saved {{ annotator.counts.completed }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" for="redo-shared-instruction">Shared instruction</label>
+            <input class="form-control" id="redo-shared-instruction" placeholder="Optional">
+          </div>
+        </div>
+
+        <div class="border rounded p-2 mb-3" id="redo-filter-builder">
+          <div class="row g-2 align-items-end mb-2">
+            <div class="col-md-3">
+              <label class="form-label" for="redo-filter-match-mode">Conditions</label>
+              <select class="form-select form-select-sm" id="redo-filter-match-mode">
+                <option value="all">Match all</option>
+                <option value="any">Match any</option>
+              </select>
+            </div>
+            <div class="col-md-9 d-flex flex-wrap gap-2 align-items-end">
+              <button type="button" class="btn btn-sm btn-outline-primary" onclick="addRedoFilterCondition()">Add condition</button>
+              <button type="button" class="btn btn-sm btn-primary" onclick="applyRedoFilters()">Apply</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="resetRedoFilters()">Reset filters</button>
+              <span class="text-muted small" id="redo-filter-count"></span>
+              <span class="text-danger small" id="redo-filter-error"></span>
+            </div>
+          </div>
+          <div class="d-flex flex-column gap-2" id="redo-filter-conditions"></div>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+          <button type="button" class="btn btn-sm btn-primary" onclick="createRedoItems('example')">Add selected examples</button>
+          <button type="button" class="btn btn-sm btn-outline-primary" onclick="createRedoItems('batch')">Add selected batches</button>
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="cancelSelectedRedoItems()">Cancel selected pending items</button>
+          <button type="button" class="btn btn-sm btn-outline-warning" onclick="restoreSelectedOriginalRedoItems()">Restore original annotation</button>
+          <div class="form-check ms-2">
+            <input class="form-check-input" type="checkbox" id="redo-include-skipped">
+            <label class="form-check-label" for="redo-include-skipped">Allow skipped</label>
+          </div>
+          <div class="form-check ms-2">
+            <input class="form-check-input" type="checkbox" id="redo-include-completed">
+            <label class="form-check-label" for="redo-include-completed">Allow completed redo</label>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectVisibleRedoRows(true)">Select visible</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectVisibleRedoRows(false)">Clear visible</button>
+        </div>
+
+        <table class="table table-sm table-striped" id="redo-items-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Annotator</th>
+              <th>Alias</th>
+              <th>Batch</th>
+              <th>Dataset</th>
+              <th>Split</th>
+              <th>Setup</th>
+              <th>Example</th>
+              <th>Skipped</th>
+              <th>Redo</th>
+              <th>Preview</th>
+            </tr>
+          </thead>
+        <tbody>
+            {% for item in redo_admin.examples %}
+            <tr class="redo-row" data-annotator-id="{{ item.annotator_id }}"
+              data-redo-key="{{ item.row_key }}">
+              <td>
+                <input type="checkbox" class="form-check-input redo-row-checkbox"
+                  data-annotator-id="{{ item.annotator_id }}"
+                  data-annotator-group="{{ item.annotator_group }}"
+                  data-batch-idx="{{ item.batch_idx }}"
+                  data-dataset="{{ item.dataset }}"
+                  data-split="{{ item.split }}"
+                  data-setup-id="{{ item.setup_id }}"
+                  data-example-idx="{{ item.example_idx }}"
+                  data-skipped="unknown"
+                  data-redo-status="{{ item.redo_status }}"
+                  data-redo-id="{{ item.redo_id }}"
+                  data-redo-key="{{ item.row_key }}">
+              </td>
+              <td>{{ item.annotator_id }}</td>
+              <td>{{ item.annotator_alias }}</td>
+              <td>{{ item.batch_idx }}</td>
+              <td>{{ item.dataset }}</td>
+              <td>{{ item.split }}</td>
+              <td>{{ item.setup_id }}</td>
+              <td>{{ item.example_idx }}</td>
+              <td class="redo-skipped-cell">
+                <span class="badge bg-light text-muted" title="Loaded when annotation filter data is applied">unknown</span>
+              </td>
+              <td class="redo-status-cell">{% if item.redo_status %}<span class="badge bg-info text-dark">{{ item.redo_status }}</span>{% endif %}</td>
+              <td>
+                <a href="{{ host_prefix }}/browse?dataset={{ item.dataset }}&split={{ item.split }}&example_idx={{ item.example_idx }}&setup_id={{ item.setup_id }}"
+                  class="blue-link redo-preview-link" target="_blank"><i class="fa fa-external-link"></i></a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
       </div>
 
       <div id="campaign-status" class="mb-5">
@@ -179,21 +336,130 @@
   {% include 'include/import_annotations_modal.html' %}
 
   <div class="modal fade" id="campaign-help-modal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-xl">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title" id="campaign-help-modal-label">How to manage the campaign</h5>
+          <h5 class="modal-title" id="campaign-help-modal-label">How to manage the campaign and redo workflow</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
           <div class="tab-pane sidepanel-panel" role="tabpanel" tabindex="0">
-            <p>Use the <b>Page link</b> to share the URL with your annotators, e.g. through the crowdsourcing platform.
+            <p>
+              Use the <b>Page link</b> to share the annotation URL with annotators, for example through your
+              crowdsourcing platform.
             </p>
-            <p>Use the <b>Download annotations</b> button to download the annotations
-              collected so far.</p>
-            <p>See the <a class="blue-link"
-                href="https://github.com/ufal/factgenie/wiki/Crowdsourcing-Annotations">crowsourcing
-                annotation tutorial</a> on the project wiiki for more information.</p>
+            <p>
+              Use the <b>Download annotations</b> button to export the campaign outputs collected so far.
+            </p>
+            <p>
+              For the full crowdsourcing basics, see the
+              <a class="blue-link" href="https://github.com/ufal/factgenie/wiki/Crowdsourcing-Annotations">
+                crowdsourcing annotation tutorial
+              </a>.
+            </p>
+
+            <hr>
+
+            <h6 class="fw-bold">Redo annotations in this version</h6>
+            <p>
+              Redo is a per-annotator queue. There is no separate on/off toggle in the UI: as soon as an annotator
+              has pending redo items, the normal annotation link serves those redo items first.
+            </p>
+            <p>
+              Redo saves do not delete the original submission. Each save archives the old active JSONL record and
+              writes the corrected version as the new active annotation.
+            </p>
+
+            <h6 class="fw-bold">How to set up redo for an annotator</h6>
+            <ol class="mb-3">
+              <li>Click the <b>Expand</b> button on the right side next to the <b>Redo annotations</b> title.</li>
+              <li>Scroll to the <b>Redo annotations</b> section.</li>
+              <li>You can select the annotator in the dropdown so the table only shows that annotator's examples.</li>
+              <li>
+                Use the condition builder if you want to target examples by annotation content, question/output text,
+                free-text fields, or slider values.
+              </li>
+              <li>Select the rows you want to send back for correction.</li>
+              <li>
+                Add an optional shared instruction if you want the annotator to see a short note while reviewing the
+                redo item.
+              </li>
+              <li>
+                Use <b>Add selected examples</b> for a few individual items, or <b>Add selected batches</b> when you
+                want the whole batch to go back to the same annotator.
+              </li>
+            </ol>
+
+            <h6 class="fw-bold">Details of admin controls and filtering method</h6>
+            <ul class="mb-3">
+              <li>
+                <b>Add condition</b> adds a filter row. Use <b>Match all</b> for AND behavior or <b>Match any</b> for
+                OR behavior.
+              </li>
+              <li>
+                Span conditions are matched against the same saved span when <b>Match all</b> is selected. For example,
+                <b>Span category is Chybí</b> plus <b>Span reason does not contain top10</b> keeps rows with a
+                <b>Chybí</b> span whose own reason lacks <b>top10</b>.
+              </li>
+              <li>
+                The same applies to regex filters: <b>Span category is Chybí</b> plus
+                <b>Span reason matches regex top10</b> means keep rows where there is a <b>Chybí</b> span whose own
+                reason matches the regex.
+              </li>
+              <li>
+                Text filters can search the question, output, span reason, span text, or all saved text/reason fields.
+                Regex filters use Python regular expressions without wrapping slashes.
+              </li>
+              <li>
+                Slider filters match saved slider labels and numeric values.
+              </li>
+              <li>
+                <b>Allow skipped</b> makes skipped examples selectable for redo. Skipped rows stay visible when it is
+                off, but they cannot be selected.
+              </li>
+              <li>
+                <b>Allow completed redo</b> makes redo items that have already been saved once selectable for another
+                correction pass. Completed rows stay visible when it is off, but they cannot be selected.
+              </li>
+              <li>
+                <b>Select visible</b> and <b>Clear visible</b> work only on the rows currently shown after filtering by
+                annotator and span content.
+              </li>
+              <li>
+                <b>Cancel selected pending items</b> removes only pending redo items from the queue. It does not touch
+                saved redo items or archived revisions.
+              </li>
+              <li>
+                <b>Restore original annotation</b> takes a completed redo item, archives the current active redo save,
+                and restores the first archived original annotation as the active one again.
+              </li>
+            </ul>
+
+            <h6 class="fw-bold">Queue and revision downloads</h6>
+            <ul class="mb-3">
+              <li>
+                <b>Queue JSON</b> and <b>Queue CSV</b> download the current redo queue, including pending, completed,
+                cancelled, reopened, and restored item status.
+              </li>
+              <li>
+                <b>Revisions JSON</b> and <b>Revisions CSV</b> download the archived annotation records created by redo
+                saves and restore actions.
+              </li>
+              <li>
+                The queue is useful for seeing what was assigned for redo. The revisions are useful for auditing what
+                active annotation was replaced and when.
+              </li>
+            </ul>
+
+            <h6 class="fw-bold">What the annotator sees</h6>
+            <ul class="mb-3">
+              <li>The annotator opens the usual campaign link or login flow. No special redo URL is needed.</li>
+              <li>If the annotator has pending redo items, those items appear before normal free work.</li>
+              <li>The redo page uses <b>Save current item</b> so each corrected annotation is saved one item at a time.</li>
+              <li>
+                Completed redo items are hidden by default, but they can be shown again for review when needed.
+              </li>
+            </ul>
           </div>
         </div>
       </div>
@@ -204,6 +470,584 @@
   window.url_prefix = "{{ host_prefix }}";
   window.campaigns = "{{ campaigns }}";
   window.mode = "crowdsourcing";
+  window.campaign_id = "{{ campaign_id }}";
+</script>
+<script>
+  function selectedAnnotatorId() {
+    return $("#redo-annotator-select").val();
+  }
+
+  function setRedoAdminCollapseButton(expanded) {
+    const button = $("#redo-admin-toggle");
+    const icon = button.find("i");
+    button.contents().filter(function () {
+      return this.nodeType === Node.TEXT_NODE;
+    }).remove();
+    button.append(expanded ? " Collapse" : " Expand");
+    icon.attr("class", expanded ? "fa fa-chevron-up" : "fa fa-chevron-down");
+  }
+
+  setRedoAdminCollapseButton(false);
+
+  var redoFilterOptions = {{ redo_admin.filter_options | tojson }};
+  const REDO_PREVIEW_MATCH_PREFIX = "factgenie_redo_preview_match:";
+
+  function redoRowKey(row) {
+    return row.attr("data-redo-key") || JSON.stringify([
+      String(row.data("annotator-id") || ""),
+      String(row.data("annotator-group") || ""),
+      String(row.data("batch-idx") || ""),
+      String(row.data("dataset") || ""),
+      String(row.data("split") || ""),
+      String(row.data("setup-id") || ""),
+      String(row.data("example-idx") || ""),
+    ]);
+  }
+
+  function redoRowByKey(rowKey) {
+    return $(".redo-row").filter(function () {
+      return String($(this).attr("data-redo-key") || "") === String(rowKey);
+    });
+  }
+
+  function updateRedoSkippedState(row, skipped) {
+    const checkbox = row.find(".redo-row-checkbox");
+    const cell = row.find(".redo-skipped-cell");
+    checkbox.data("skipped", skipped === true);
+    cell.empty();
+    if (skipped === true) {
+      cell.append('<span class="badge bg-warning text-dark">skipped</span>');
+    }
+    updateRedoCheckboxAvailability(row);
+  }
+
+  function updateRedoStatusState(row, status) {
+    const checkbox = row.find(".redo-row-checkbox");
+    const cell = row.find(".redo-status-cell");
+    checkbox.data("redo-status", status || "");
+    cell.empty();
+    if (status) {
+      cell.append($("<span>").addClass("badge bg-info text-dark").text(status));
+    }
+    updateRedoCheckboxAvailability(row);
+  }
+
+  function refreshRedoConditionControls() {
+    $(".redo-filter-condition").each(function () {
+      const row = $(this);
+      renderRedoConditionControls(row, redoFilterConditionValues(row));
+    });
+  }
+
+  $("#redo-admin-body").on("shown.bs.collapse", function () {
+    setRedoAdminCollapseButton(true);
+    applyRedoFilters();
+  });
+  $("#redo-admin-body").on("hidden.bs.collapse", function () {
+    setRedoAdminCollapseButton(false);
+  });
+
+  function showInitialRedoRows() {
+    const annotatorId = selectedAnnotatorId();
+    let visibleCount = 0;
+    $(".redo-row").each(function () {
+      const row = $(this);
+      const show = !annotatorId || row.data("annotator-id") === annotatorId;
+      row.data("match-details", []);
+      row.toggle(show);
+      if (show) {
+        visibleCount += 1;
+      }
+    });
+    $("#redo-filter-count").text(`${visibleCount} visible item(s). Expand or Apply to load annotation filters.`);
+  }
+
+  function applyRedoFilterResponse(response) {
+    if (response.filter_options) {
+      redoFilterOptions.categories = response.filter_options.categories || redoFilterOptions.categories || [];
+      redoFilterOptions.sliders = response.filter_options.sliders || redoFilterOptions.sliders || [];
+      refreshRedoConditionControls();
+    }
+    const visibleKeys = new Set();
+    (response.rows || []).forEach(function (item) {
+      if (!item || !item.row_key) {
+        return;
+      }
+      const rowKey = String(item.row_key);
+      visibleKeys.add(rowKey);
+      const row = redoRowByKey(rowKey);
+      updateRedoSkippedState(row, item.skipped === true);
+      updateRedoStatusState(row, item.redo_status || "");
+      row.data("match-details", item.match_details || []);
+    });
+    $(".redo-row").each(function () {
+      const row = $(this);
+      const isVisible = visibleKeys.has(redoRowKey(row));
+      if (!isVisible) {
+        row.find(".redo-row-checkbox").prop("checked", false);
+        row.data("match-details", []);
+      }
+      row.toggle(isVisible);
+    });
+    $("#redo-filter-count").text(`${response.visible_count || visibleKeys.size} visible item(s)`);
+  }
+
+  function updateRedoCheckboxAvailability(row) {
+    const checkbox = row.find(".redo-row-checkbox");
+    const skippedDisabled = checkbox.data("skipped") === true && !$("#redo-include-skipped").prop("checked");
+    const completedDisabled = checkbox.data("redo-status") === "completed" && !$("#redo-include-completed").prop("checked");
+    const disabled = skippedDisabled || completedDisabled;
+    if (disabled) {
+      checkbox.prop("checked", false);
+    }
+    checkbox.prop("disabled", disabled);
+  }
+
+  function updateAllRedoCheckboxAvailability() {
+    $(".redo-row").each(function () {
+      updateRedoCheckboxAvailability($(this));
+    });
+  }
+
+  function redoFilterTextOperators(field) {
+    if (field === "slider") {
+      return [
+        ["eq", "Equals"],
+        ["neq", "Does not equal"],
+        ["gt", "Greater than"],
+        ["gte", "Greater than or equal"],
+        ["lt", "Less than"],
+        ["lte", "Less than or equal"],
+        ["missing", "Is missing"],
+        ["not_missing", "Is not missing"],
+      ];
+    }
+    if (field === "span_category") {
+      return [
+        ["eq", "Is"],
+        ["neq", "Is not"],
+        ["contains", "Contains"],
+        ["not_contains", "Does not contain"],
+        ["missing", "Is missing"],
+        ["not_missing", "Is not missing"],
+        ["regex", "Matches regex"],
+        ["not_regex", "Does not match regex"],
+      ];
+    }
+    return [
+      ["contains", "Contains"],
+      ["not_contains", "Does not contain"],
+      ["eq", "Is"],
+      ["neq", "Is not"],
+      ["missing", "Is missing"],
+      ["not_missing", "Is not missing"],
+      ["regex", "Matches regex"],
+      ["not_regex", "Does not match regex"],
+    ];
+  }
+
+  function redoFilterConditionValues(row) {
+    return {
+      field: row.find(".redo-condition-field").val(),
+      op: row.find(".redo-condition-op").val(),
+      value: row.find(".redo-condition-value").val(),
+      sliderLabel: row.find(".redo-condition-slider-label").val(),
+    };
+  }
+
+  function redoActiveConditions() {
+    const conditions = [];
+    $(".redo-filter-condition").each(function () {
+      const condition = redoFilterConditionValues($(this));
+      const valueRequired = !["missing", "not_missing"].includes(condition.op);
+      const hasValue = condition.field === "slider" ? condition.value !== "" : String(condition.value || "").trim() !== "";
+      const hasSliderLabel = condition.field !== "slider" || condition.sliderLabel;
+      if (condition.field && condition.op && (!valueRequired || hasValue) && hasSliderLabel) {
+        conditions.push(condition);
+      }
+    });
+    return conditions;
+  }
+
+  function escapeRedoOption(value) {
+    return $("<option>").attr("value", value).text(value);
+  }
+
+  function addRedoFilterCondition(condition) {
+    const row = $(`
+      <div class="row g-2 align-items-end redo-filter-condition">
+        <div class="col-md-3">
+          <label class="form-label small mb-1">Field</label>
+          <select class="form-select form-select-sm redo-condition-field">
+            <option value="span_category">Span category</option>
+            <option value="span_reason">Span reason</option>
+            <option value="span_text">Span text</option>
+            <option value="question">Question</option>
+            <option value="output">Output</option>
+            <option value="any_text">Any text</option>
+            <option value="slider">Slider</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small mb-1">Operator</label>
+          <select class="form-select form-select-sm redo-condition-op"></select>
+        </div>
+        <div class="col-md-5 redo-condition-value-wrap"></div>
+        <div class="col-md-1">
+          <button type="button" class="btn btn-sm btn-outline-secondary w-100 redo-remove-condition" title="Remove condition">
+            <i class="fa fa-times"></i>
+          </button>
+        </div>
+      </div>
+    `);
+    $("#redo-filter-conditions").append(row);
+    row.find(".redo-condition-field").val(condition?.field || "span_category");
+    renderRedoConditionControls(row, condition || {});
+  }
+
+  function renderRedoConditionControls(row, condition) {
+    const field = row.find(".redo-condition-field").val();
+    const opSelect = row.find(".redo-condition-op");
+    const previousOp = condition.op || opSelect.val();
+    opSelect.empty();
+    redoFilterTextOperators(field).forEach(function ([value, label]) {
+      opSelect.append(escapeRedoOption(value).text(label));
+    });
+    if (previousOp && opSelect.find(`option[value="${previousOp}"]`).length) {
+      opSelect.val(previousOp);
+    }
+
+    const wrap = row.find(".redo-condition-value-wrap");
+    wrap.empty();
+    if (field === "span_category") {
+      const select = $('<select class="form-select form-select-sm redo-condition-value"></select>');
+      select.append(escapeRedoOption("").text("Select category..."));
+      (redoFilterOptions.categories || []).forEach(function (category) {
+        select.append(escapeRedoOption(category));
+      });
+      wrap.append('<label class="form-label small mb-1">Value</label>');
+      wrap.append(select);
+      select.val(condition.value || "");
+    } else if (field === "slider") {
+      const controls = $(`
+        <div class="row g-2">
+          <div class="col-md-6">
+            <label class="form-label small mb-1">Slider</label>
+            <select class="form-select form-select-sm redo-condition-slider-label"></select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small mb-1">Value</label>
+            <input class="form-control form-control-sm redo-condition-value" type="number" step="any">
+          </div>
+        </div>
+      `);
+      const labelSelect = controls.find(".redo-condition-slider-label");
+      labelSelect.append(escapeRedoOption("").text("Select slider..."));
+      (redoFilterOptions.sliders || []).forEach(function (label) {
+        labelSelect.append(escapeRedoOption(label));
+      });
+      wrap.append(controls);
+      labelSelect.val(condition.sliderLabel || "");
+      controls.find(".redo-condition-value").val(condition.value || "");
+    } else {
+      wrap.append('<label class="form-label small mb-1">Value</label>');
+      wrap.append('<input class="form-control form-control-sm redo-condition-value" type="search">');
+      wrap.find(".redo-condition-value").val(condition.value || "");
+    }
+    row.find(".redo-condition-value").prop("disabled", ["missing", "not_missing"].includes(opSelect.val()));
+  }
+
+  function resetRedoFilters() {
+    $("#redo-filter-match-mode").val("all");
+    $("#redo-filter-conditions").empty();
+    addRedoFilterCondition();
+    applyRedoFilters();
+  }
+
+  function applyRedoFilters() {
+    $("#redo-filter-error").text("");
+    $("#redo-filter-count").text("Loading annotation filters...");
+    $.ajax({
+      url: `${url_prefix}/redo/${window.campaign_id}/filter`,
+      method: "POST",
+      contentType: "application/json",
+      data: JSON.stringify({
+        annotatorId: selectedAnnotatorId(),
+        includeSkipped: $("#redo-include-skipped").prop("checked"),
+        includeCompleted: $("#redo-include-completed").prop("checked"),
+        filters: {
+          mode: $("#redo-filter-match-mode").val(),
+          conditions: redoActiveConditions(),
+        },
+      }),
+    })
+      .done(function (response) {
+        if (response.success === false) {
+          $("#redo-filter-error").text(response.message || response.error || "Could not apply redo filters.");
+          $("#redo-filter-count").text("0 visible item(s)");
+          $(".redo-row").hide();
+          return;
+        }
+        applyRedoFilterResponse(response);
+      })
+      .fail(function () {
+        $("#redo-filter-error").text("Could not apply redo filters.");
+      });
+  }
+
+  $("#redo-annotator-select").on("change", applyRedoFilters);
+  $("#redo-include-skipped").on("change", function () {
+    updateAllRedoCheckboxAvailability();
+    applyRedoFilters();
+  });
+  $("#redo-include-completed").on("change", function () {
+    updateAllRedoCheckboxAvailability();
+    applyRedoFilters();
+  });
+  $("#redo-filter-conditions").on("change", ".redo-condition-field", function () {
+    renderRedoConditionControls($(this).closest(".redo-filter-condition"), redoFilterConditionValues($(this).closest(".redo-filter-condition")));
+  });
+  $("#redo-filter-conditions").on("change", ".redo-condition-op", function () {
+    const row = $(this).closest(".redo-filter-condition");
+    row.find(".redo-condition-value").prop("disabled", ["missing", "not_missing"].includes($(this).val()));
+  });
+  $("#redo-filter-conditions").on("keydown", ".redo-condition-value", function (event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      applyRedoFilters();
+    }
+  });
+  $("#redo-filter-conditions").on("click", ".redo-remove-condition", function () {
+    $(this).closest(".redo-filter-condition").remove();
+  });
+  $("#redo-items-table").on("click", ".redo-preview-link", function () {
+    const link = this;
+    const row = $(link).closest(".redo-row");
+    const matchDetails = row.data("match-details") || [];
+    if (!matchDetails.length) {
+      return;
+    }
+    try {
+      const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const payload = {
+        created_at: new Date().toISOString(),
+        match_details: matchDetails,
+      };
+      window.localStorage.setItem(`${REDO_PREVIEW_MATCH_PREFIX}${token}`, JSON.stringify(payload));
+      const url = new URL(link.href, window.location.origin);
+      const firstDetail = matchDetails[0] || {};
+      const annotatorId = firstDetail.annotator_id || firstDetail.annotator_alias || row.data("annotator-id") || "";
+      if (firstDetail.setup_id) {
+        url.searchParams.set("setup_id", firstDetail.setup_id);
+      }
+      if (annotatorId) {
+        url.searchParams.set("ann_campaign", annotatorId);
+      }
+      url.searchParams.set("redo_preview_match", token);
+      link.href = url.toString();
+    } catch (error) {
+      console.warn("Could not prepare redo preview highlights.", error);
+    }
+  });
+  addRedoFilterCondition();
+  showInitialRedoRows();
+
+  function selectVisibleRedoRows(checked) {
+    $(".redo-row:visible .redo-row-checkbox").each(function () {
+      const checkbox = $(this);
+      if (checked && !shouldUseRedoCheckbox(checkbox)) {
+        checkbox.prop("checked", false);
+        return;
+      }
+      checkbox.prop("checked", checked);
+    });
+  }
+
+  function shouldUseRedoCheckbox(checkbox) {
+    const skippedAllowed = $("#redo-include-skipped").prop("checked") || checkbox.data("skipped") !== true;
+    const completedAllowed = $("#redo-include-completed").prop("checked") || checkbox.data("redo-status") !== "completed";
+    return skippedAllowed && completedAllowed;
+  }
+
+  function selectedRedoExclusionMessage() {
+    let skippedCount = 0;
+    let completedCount = 0;
+    $(".redo-row-checkbox:checked").each(function () {
+      const checkbox = $(this);
+      if (!$("#redo-include-skipped").prop("checked") && checkbox.data("skipped") === true) {
+        skippedCount += 1;
+      }
+      if (!$("#redo-include-completed").prop("checked") && checkbox.data("redo-status") === "completed") {
+        completedCount += 1;
+      }
+    });
+    const messages = [];
+    if (skippedCount > 0) {
+      messages.push(`${skippedCount} selected skipped example(s) are ignored because Allow skipped is off.`);
+    }
+    if (completedCount > 0) {
+      messages.push(`${completedCount} selected completed redo item(s) are ignored because Allow completed redo is off.`);
+    }
+    if (messages.length > 0) {
+      messages.push("Turn on the matching checkbox to add them to the redo queue.");
+      return messages.join("\n");
+    }
+    return "Select at least one example.";
+  }
+
+  function gatherSelectedRedoRows(selector) {
+    const rows = [];
+    const seen = new Set();
+    $(".redo-row-checkbox:checked").each(function () {
+      const checkbox = $(this);
+      if (!shouldUseRedoCheckbox(checkbox)) {
+        return;
+      }
+      const batchKey = `${checkbox.data("annotator-id")}|${checkbox.data("batch-idx")}`;
+      if (selector === "batch" && seen.has(batchKey)) {
+        return;
+      }
+      seen.add(batchKey);
+      rows.push({
+        annotator_id: checkbox.data("annotator-id"),
+        annotator_group: checkbox.data("annotator-group"),
+        batch_idx: checkbox.data("batch-idx"),
+        dataset: checkbox.data("dataset"),
+        split: checkbox.data("split"),
+        setup_id: checkbox.data("setup-id"),
+        example_idx: checkbox.data("example-idx"),
+      });
+    });
+    if (selector !== "batch") {
+      return rows;
+    }
+    const selectedBatches = new Set(rows.map(row => `${row.annotator_id}|${row.batch_idx}`));
+    const batchRows = [];
+    $(".redo-row-checkbox").each(function () {
+      const checkbox = $(this);
+      if (!shouldUseRedoCheckbox(checkbox)) {
+        return;
+      }
+      const batchKey = `${checkbox.data("annotator-id")}|${checkbox.data("batch-idx")}`;
+      if (!selectedBatches.has(batchKey)) {
+        return;
+      }
+      batchRows.push({
+        annotator_id: checkbox.data("annotator-id"),
+        annotator_group: checkbox.data("annotator-group"),
+        batch_idx: checkbox.data("batch-idx"),
+        dataset: checkbox.data("dataset"),
+        split: checkbox.data("split"),
+        setup_id: checkbox.data("setup-id"),
+        example_idx: checkbox.data("example-idx"),
+      });
+    });
+    return batchRows;
+  }
+
+  function createRedoItems(selector) {
+    const items = gatherSelectedRedoRows(selector);
+    if (items.length === 0) {
+      alert(selectedRedoExclusionMessage());
+      return;
+    }
+    $.post({
+      url: `${url_prefix}/redo/${window.campaign_id}/items`,
+      contentType: "application/json",
+      data: JSON.stringify({
+        items: items,
+        selector: selector,
+        includeSkipped: $("#redo-include-skipped").prop("checked"),
+        includeCompleted: $("#redo-include-completed").prop("checked"),
+        instruction: $("#redo-shared-instruction").val(),
+      }),
+      success: function (response) {
+        if (response.success !== true) {
+          alert(response.error || "Could not create redo items.");
+          return;
+        }
+        window.location.reload();
+      },
+    });
+  }
+
+  function cancelSelectedRedoItems() {
+    const selected = $(".redo-row-checkbox:checked");
+    const nonPendingCount = selected.filter(function () {
+      return $(this).data("redo-status") && $(this).data("redo-status") !== "pending";
+    }).length;
+    const redoIds = selected.filter(function () {
+      return $(this).data("redo-status") === "pending";
+    }).map(function () {
+      return $(this).data("redo-id");
+    }).get().filter(Boolean);
+    if (redoIds.length === 0) {
+      alert("Select at least one pending redo item. Saved/completed redo items cannot be cancelled.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Cancel ${redoIds.length} selected pending redo item(s)?\n\n` +
+      "This removes the selected items from the annotator redo queue. " +
+      "It does not delete active annotations or archived revisions, and it does not reset the original batch assignment. " +
+      "Cancelled items will no longer appear for the annotator unless you add them to the redo queue again." +
+      (nonPendingCount > 0 ? `\n\n${nonPendingCount} selected saved/cancelled item(s) will be ignored.` : "")
+    );
+    if (!confirmed) {
+      return;
+    }
+    $.post({
+      url: `${url_prefix}/redo/${window.campaign_id}/items/cancel`,
+      contentType: "application/json",
+      data: JSON.stringify({ redo_ids: redoIds }),
+      success: function (response) {
+        if (response.success !== true) {
+          alert(response.error || "Could not cancel redo items.");
+          return;
+        }
+        window.location.reload();
+      },
+    });
+  }
+
+  function restoreSelectedOriginalRedoItems() {
+    const selected = $(".redo-row-checkbox:checked");
+    const nonCompletedCount = selected.filter(function () {
+      return $(this).data("redo-status") !== "completed";
+    }).length;
+    const redoIds = selected.filter(function () {
+      return $(this).data("redo-status") === "completed";
+    }).map(function () {
+      return $(this).data("redo-id");
+    }).get().filter(Boolean);
+    if (redoIds.length === 0) {
+      alert("Select at least one saved/completed redo item to restore.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Restore the original annotation for ${redoIds.length} selected saved redo item(s)?\n\n` +
+      "This archives the current active annotation and makes the original archived annotation active again. " +
+      "The revision history is preserved." +
+      (nonCompletedCount > 0 ? `\n\n${nonCompletedCount} selected pending/cancelled item(s) will be ignored.` : "")
+    );
+    if (!confirmed) {
+      return;
+    }
+    $.post({
+      url: `${url_prefix}/redo/${window.campaign_id}/items/restore_original`,
+      contentType: "application/json",
+      data: JSON.stringify({ redo_ids: redoIds }),
+      success: function (response) {
+        if (response.success !== true) {
+          alert(response.error || "Could not restore original annotations.");
+          return;
+        }
+        if (response.errors && response.errors.length > 0) {
+          alert(`Restored ${response.restored || 0} item(s). Some selected items could not be restored.`);
+        }
+        window.location.reload();
+      },
+    });
+  }
 </script>
 <script src="{{ host_prefix }}/static/js/utils.js"></script>
 <script src="{{ host_prefix }}/static/js/campaigns.js"></script>

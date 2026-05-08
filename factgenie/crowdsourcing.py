@@ -8,6 +8,7 @@ import os
 import random
 import shutil
 import time
+from pathlib import Path
 
 import markdown
 import pandas as pd
@@ -15,6 +16,7 @@ from flask import jsonify
 from jinja2 import Template
 
 import factgenie.utils as utils
+import factgenie.redo as redo
 import factgenie.workflows as workflows
 from factgenie import CAMPAIGN_DIR, PREVIEW_STUDY_ID, TEMPLATES_DIR
 from factgenie.campaign import CampaignMode, ExampleStatus
@@ -92,6 +94,21 @@ def create_crowdsourcing_page(campaign_id, config):
 
     with open(final_page_path, "w") as f:
         f.write(content)
+
+
+def ensure_crowdsourcing_page_current(campaign_id, config):
+    final_page_path = os.path.join(CAMPAIGN_DIR, campaign_id, "pages", "annotate.html")
+    template_paths = [
+        os.path.join(TEMPLATES_DIR, CampaignMode.CROWDSOURCING, "annotate_{}.html".format(part))
+        for part in ["header", "body", "footer"]
+    ]
+    if not os.path.exists(final_page_path):
+        create_crowdsourcing_page(campaign_id, config)
+        return
+
+    page_mtime = os.path.getmtime(final_page_path)
+    if any(os.path.getmtime(path) > page_mtime for path in template_paths):
+        create_crowdsourcing_page(campaign_id, config)
 
 
 def generate_text_fields(text_fields):
@@ -276,6 +293,7 @@ def parse_crowdsourcing_config(config):
         "annotation_granularity": config.get("annotationGranularity"),
         "annotation_overlap_allowed": config.get("annotationOverlapAllowed", False),
         "annotate_reason": config.get("annotateReason", False),
+        "pseudonymize_annotators": config.get("pseudonymizeAnnotators", True),
         "service": config.get("service"),
         "sort_order": config.get("sortOrder"),
         "annotation_span_categories": config.get("annotationSpanCategories"),
@@ -364,8 +382,43 @@ def get_examples_for_batch(db, batch_idx):
     return annotator_batch
 
 
-def get_annotator_batch(app, campaign, service_ids, batch_idx=None):
+def get_redo_annotation_set(app, campaign, db, annotator_id, include_completed=False):
+    items = redo.list_items_for_annotator(campaign.campaign_id, annotator_id, include_completed=include_completed)
+    annotation_set = []
+
+    for item in items:
+        active_record = redo.latest_active_record(campaign.campaign_id, item) or {}
+        annotation_set.append(
+            {
+                "dataset": item["dataset"],
+                "split": item["split"],
+                "setup_id": item["setup_id"],
+                "example_idx": int(item["example_idx"]),
+                "batch_idx": int(item["batch_idx"]),
+                "annotator_group": int(item.get("annotator_group", 0)),
+                "annotations": active_record.get("annotations", []),
+                "flags": active_record.get("flags", []),
+                "options": active_record.get("options", []),
+                "sliders": active_record.get("sliders", []),
+                "textFields": active_record.get("text_fields", []),
+                "redo": True,
+                "redo_id": item["redo_id"],
+                "redo_status": item.get("status", redo.STATUS_PENDING),
+                "redo_instruction": item.get("instruction"),
+            }
+        )
+
+    return annotation_set
+
+
+def get_annotator_batch(app, campaign, service_ids, batch_idx=None, include_completed_redo=False, return_context=False):
     # simple locking over the CSV file to prevent double writes
+    redo_context = {
+        "mode": "normal",
+        "is_redo": False,
+        "empty_redo_fallback": False,
+        "show_completed": include_completed_redo,
+    }
     with app.db["lock"]:
         campaign.load_db()
         db = campaign.db
@@ -376,6 +429,25 @@ def get_annotator_batch(app, campaign, service_ids, batch_idx=None):
         seed_source = json.dumps({"start": start, "service_ids": service_ids}, sort_keys=True, default=str)
         seed = int(hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:8], 16)
 
+        should_serve_redo = False
+        if annotator_id != PREVIEW_STUDY_ID and (batch_idx is None or batch_idx == ""):
+            should_serve_redo = redo.is_redo_mode(campaign.campaign_id, annotator_id)
+            if include_completed_redo and not should_serve_redo:
+                should_serve_redo = bool(
+                    redo.list_items_for_annotator(campaign.campaign_id, annotator_id, include_completed=True)
+                )
+
+        if should_serve_redo:
+            redo_context["mode"] = "redo"
+            redo_set = get_redo_annotation_set(app, campaign, db, annotator_id, include_completed_redo)
+            if redo_set:
+                redo_context["is_redo"] = True
+                logging.info(f"Serving {len(redo_set)} redo item(s) for {annotator_id}")
+                if return_context:
+                    return redo_set, redo_context
+                return redo_set
+            redo_context["empty_redo_fallback"] = True
+
         if batch_idx is None or batch_idx == "":
             # usual case: an annotator opened the annotation page, we need to select the batch
             try:
@@ -383,6 +455,8 @@ def get_annotator_batch(app, campaign, service_ids, batch_idx=None):
             except ValueError as e:
                 logger.info(str(e))
                 # no available batches
+                if return_context:
+                    return [], redo_context
                 return []
         else:
             # preview mode with the specific batch
@@ -401,7 +475,186 @@ def get_annotator_batch(app, campaign, service_ids, batch_idx=None):
         annotator_batch = get_examples_for_batch(db, batch_idx)
         logging.info(f"Releasing lock for {annotator_id}")
 
+    if return_context:
+        return annotator_batch, redo_context
     return annotator_batch
+
+
+def save_redo_annotation(app, campaign_id, redo_id, annotation, annotator_id):
+    if not campaign_id or not redo_id or not annotator_id or not isinstance(annotation, dict):
+        return utils.error("Missing campaign_id, redo_id, annotator_id, or annotation")
+
+    now = int(time.time())
+    campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+
+    with app.db["lock"]:
+        queue_path = redo.queue_path(campaign_id)
+        revision_path = redo.revision_log_path(campaign_id)
+        db_path = Path(CAMPAIGN_DIR) / campaign_id / "db.csv"
+        queue_backup = queue_path.read_text(encoding="utf-8") if queue_path.exists() else None
+        revision_backup = revision_path.read_text(encoding="utf-8") if revision_path.exists() else None
+        db_backup = db_path.read_text(encoding="utf-8") if db_path.exists() else None
+
+        queue = redo.load_queue(campaign_id)
+        item = redo.find_item(queue, redo_id)
+        if item is None:
+            return utils.error(f"Unknown redo item: {redo_id}")
+        if item.get("campaign_id") != campaign_id:
+            return utils.error("Redo item does not belong to this campaign")
+        if redo.normalize_annotator_id(item.get("annotator_id")) != redo.normalize_annotator_id(annotator_id):
+            return utils.error(f"Redo item not assigned to annotator {annotator_id}")
+        if item.get("status") == redo.STATUS_CANCELLED:
+            return utils.error("Redo item is cancelled")
+
+        campaign.load_db()
+        db = campaign.db
+        mask = (
+            (db["dataset"].astype(str) == str(item["dataset"]))
+            & (db["split"].astype(str) == str(item["split"]))
+            & (db["setup_id"].astype(str) == str(item["setup_id"]))
+            & (db["example_idx"].astype(int) == int(item["example_idx"]))
+            & (db["annotator_group"].astype(int) == int(item.get("annotator_group", 0)))
+            & (db["annotator_id"].fillna("").astype(str) == str(annotator_id))
+        )
+        if mask.sum() != 1:
+            return utils.error("Could not find a unique assigned campaign row for this redo item")
+
+        row_idx = db[mask].index[0]
+        row = db.loc[row_idx]
+        save_dir = os.path.join(CAMPAIGN_DIR, campaign_id, "files")
+        batch_end = int(row["end"])
+        save_filename = f"{row['batch_idx']}-{row.get('annotator_group', 0)}-{annotator_id}-{batch_end}.jsonl"
+        save_path = os.path.join(save_dir, save_filename)
+
+        active_matches = redo.find_active_records(campaign_id, item)
+        active_backups = {}
+        for match in active_matches:
+            match_path = str(match["file"])
+            if match_path not in active_backups:
+                active_backups[match_path] = match["file"].read_text(encoding="utf-8")
+
+        save_path_backup = Path(save_path).read_text(encoding="utf-8") if Path(save_path).exists() else None
+
+        def restore_backups():
+            if queue_backup is not None:
+                queue_path.write_text(queue_backup, encoding="utf-8")
+            elif queue_path.exists():
+                queue_path.unlink()
+
+            if revision_backup is not None:
+                revision_path.parent.mkdir(parents=True, exist_ok=True)
+                revision_path.write_text(revision_backup, encoding="utf-8")
+            elif revision_path.exists():
+                revision_path.unlink()
+
+            for match_path, content in active_backups.items():
+                Path(match_path).write_text(content, encoding="utf-8")
+
+            if save_path_backup is not None:
+                Path(save_path).write_text(save_path_backup, encoding="utf-8")
+            elif Path(save_path).exists():
+                Path(save_path).unlink()
+
+            if db_backup is not None:
+                db_path.write_text(db_backup, encoding="utf-8")
+            elif db_path.exists():
+                db_path.unlink()
+
+        try:
+            output = workflows.get_output_for_setup(
+                dataset=row["dataset"],
+                split=row["split"],
+                setup_id=row["setup_id"],
+                example_idx=row["example_idx"],
+                app=app,
+                force_reload=False,
+            )["output"]
+
+            annotations = [a for a in annotation.get("annotations", []) if a.get("text")]
+            result = {
+                "annotations": annotations,
+                "flags": annotation.get("flags", []),
+                "options": annotation.get("options", []),
+                "sliders": annotation.get("sliders", []),
+                "text_fields": annotation.get("textFields", annotation.get("text_fields", [])),
+                "time_last_saved": annotation.get("timeLastSaved", annotation.get("time_last_saved")),
+                "time_last_accessed": annotation.get("timeLastAccessed", annotation.get("time_last_accessed")),
+                "output": output,
+            }
+
+            redo.archive_and_remove_active_records(
+                campaign_id,
+                item,
+                archived_by=annotator_id,
+                replacement_saved_at=redo.utc_now(),
+            )
+            workflows.save_record(
+                mode=CampaignMode.CROWDSOURCING,
+                campaign=campaign,
+                row=row,
+                result=result,
+            )
+            completed = redo.mark_completed(campaign_id, redo_id, saved_by=annotator_id)
+
+            updated_db = db.copy()
+            updated_db.loc[row_idx, "status"] = ExampleStatus.FINISHED
+            updated_db.loc[row_idx, "end"] = now
+            campaign.update_db(updated_db)
+        except Exception as exc:
+            restore_backups()
+            return utils.error(f"Redo item could not be saved: {exc}")
+
+    workflows.refresh_indexes(app)
+    logger.info(
+        "Redo annotation saved for %s by %s (%s/%s/%s/%s)",
+        campaign_id,
+        annotator_id,
+        item["dataset"],
+        item["split"],
+        item["setup_id"],
+        item["example_idx"],
+    )
+    final_message_html = markdown.markdown(campaign.metadata["config"].get("final_message", "Thank you."))
+    return jsonify(
+        success=True,
+        item=completed,
+        message="Redo item saved.",
+        final_message=final_message_html,
+        remaining_pending=redo.pending_count(campaign_id, annotator_id),
+    )
+
+
+def keep_redo_annotation(app, campaign_id, redo_id, annotator_id):
+    if not campaign_id or not redo_id or not annotator_id:
+        return utils.error("Missing campaign_id, redo_id, or annotator_id")
+
+    campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+
+    with app.db["lock"]:
+        queue = redo.load_queue(campaign_id)
+        item = redo.find_item(queue, redo_id)
+        if item is None:
+            return utils.error(f"Unknown redo item: {redo_id}")
+        if item.get("campaign_id") != campaign_id:
+            return utils.error("Redo item does not belong to this campaign")
+        if redo.normalize_annotator_id(item.get("annotator_id")) != redo.normalize_annotator_id(annotator_id):
+            return utils.error(f"Redo item not assigned to annotator {annotator_id}")
+        if item.get("status") == redo.STATUS_CANCELLED:
+            return utils.error("Redo item is cancelled")
+
+        if item.get("status") == redo.STATUS_PENDING:
+            kept_item = redo.mark_completed(campaign_id, redo_id, saved_by=annotator_id)
+        else:
+            kept_item = item
+
+    final_message_html = markdown.markdown(campaign.metadata["config"].get("final_message", "Thank you."))
+    return jsonify(
+        success=True,
+        item=kept_item,
+        message="Redo item kept.",
+        final_message=final_message_html,
+        remaining_pending=redo.pending_count(campaign_id, annotator_id),
+    )
 
 
 def save_annotations(app, campaign_id, annotation_set, annotator_id, is_backup_import=False):

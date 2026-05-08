@@ -75,142 +75,269 @@
 
     <ul class="nav nav-tabs nav-fill mt-5" id="pills-tab" role="tablist">
       <li class="nav-item" role="presentation">
-        <a class="nav-link active" id="pills-span-stats-tab" data-bs-toggle="pill" href="#pills-stats-full" role="tab"
-          aria-controls="pills-stats-full"><img src="{{ host_prefix }}/static/img/stats/stats-full.png" height="30px"
-            class="heading-img-inline">Full results</a>
+        <a class="nav-link {% if active_stats_tab == 'spans' %}active{% endif %}" id="pills-spans-tab" data-bs-toggle="pill" href="#pills-stats-spans" role="tab"
+          aria-controls="pills-stats-spans"><img src="{{ host_prefix }}/static/img/stats/stats-span.png" height="30px"
+            class="heading-img-inline">Spans</a>
       </li>
       <li class="nav-item" role="presentation">
-        <a class="nav-link" id="pills-span-stats-tab" data-bs-toggle="pill" href="#pills-stats-span" role="tab"
-          aria-controls="pills-stats-span"><img src="{{ host_prefix }}/static/img/stats/stats-span.png" height="30px"
-            class="heading-img-inline">By span categories</a>
+        <a class="nav-link {% if active_stats_tab == 'summaries' %}active{% endif %}" id="pills-summaries-tab" data-bs-toggle="pill" href="#pills-stats-summaries" role="tab"
+          aria-controls="pills-stats-summaries"><img src="{{ host_prefix }}/static/img/stats/stats-charts.png"
+            height="30px" class="heading-img-inline">Summaries</a>
       </li>
       <li class="nav-item" role="presentation">
-        <a class="nav-link" id="pills-span-stats-tab" data-bs-toggle="pill" href="#pills-stats-setup" role="tab"
-          aria-controls="pills-stats-setup"><img src="{{ host_prefix }}/static/img/stats/stats-setup.png" height="30px"
-            class="heading-img-inline">By setups</a>
-      </li>
-      <li class="nav-item" role="presentation">
-        <a class="nav-link" id="pills-span-stats-tab" data-bs-toggle="pill" href="#pills-stats-dataset" role="tab"
-          aria-controls="pills-stats-dataset"><img src="{{ host_prefix }}/static/img/stats/stats-dataset.png"
-            height="30px" class="heading-img-inline">By datasets</a>
-      </li>
-      <li class="nav-item" role="presentation">
-        <a class="nav-link" id="pills-slider-stats-tab" data-bs-toggle="pill" href="#pills-stats-sliders" role="tab"
+        <a class="nav-link {% if active_stats_tab == 'sliders' %}active{% endif %}" id="pills-slider-stats-tab" data-bs-toggle="pill" href="#pills-stats-sliders" role="tab"
           aria-controls="pills-stats-sliders"><i class="fa fa-sliders heading-img-inline"></i> By sliders</a>
       </li>
       <li class="nav-item" role="presentation">
-        <a class="nav-link" id="pills-annotator-stats-tab" data-bs-toggle="pill" href="#pills-stats-annotators"
+        <a class="nav-link {% if active_stats_tab == 'annotators' %}active{% endif %}" id="pills-annotator-stats-tab" data-bs-toggle="pill" href="#pills-stats-annotators"
           role="tab" aria-controls="pills-stats-annotators"><i class="fa fa-user heading-img-inline"></i> By annotator</a>
       </li>
       <li class="nav-item" role="presentation">
-        <a class="nav-link" id="pills-coverage-stats-tab" data-bs-toggle="pill" href="#pills-stats-coverage"
-          role="tab" aria-controls="pills-stats-coverage"><i class="fa fa-check-square-o heading-img-inline"></i> Question coverage</a>
-      </li>
-      <li class="nav-item" role="presentation">
-        <a class="nav-link" id="pills-charts-tab" data-bs-toggle="pill" href="#pills-charts" role="tab"
-          aria-controls="pills-charts"><img src="{{ host_prefix }}/static/img/stats/stats-charts.png" height="30px"
-            class="heading-img-inline">Extra fields</a>
+        <a class="nav-link {% if active_stats_tab == 'coverage' %}active{% endif %}" id="pills-coverage-stats-tab" data-bs-toggle="pill" href="#pills-stats-coverage"
+          role="tab" aria-controls="pills-stats-coverage"><i class="fa fa-check-square-o heading-img-inline"></i>
+          Question coverage</a>
       </li>
     </ul>
     <div class="tab-content" id="pills-tabContent">
-      <div class="tab-pane mb-5 fade show active" id="pills-stats-full" role="tabpanel"
-        aria-labelledby="pills-stats-full-tab">
-        <table id="full-table" class="table table-bordered table-hover" data-show-export="true" data-sortable="true"
-          data-toolbar="#toolbar">
+      <div class="tab-pane mb-5 fade {% if active_stats_tab == 'spans' %}show active{% endif %}" id="pills-stats-spans" role="tabpanel" aria-labelledby="pills-spans-tab">
+        <div class="mt-4">
+          <h5>Full results</h5>
+          <table id="full-table" class="table table-bordered table-hover" data-show-export="true" data-sortable="true"
+            data-toolbar="#toolbar">
+            <thead>
+              <tr>
+                <th data-sortable="true" data-field="dataset">Dataset</th>
+                <th data-sortable="true" data-field="split">Split</th>
+                <th data-sortable="true" data-field="setup_id">Setup</th>
+                <th data-sortable="true" data-field="example_count">Ex. annotated</th>
+                <th data-sortable="true" data-field="annotation_type">Category</th>
+                <th data-sortable="true" data-field="ann_count" data-align="right"
+                  data-title-tooltip="The total number of label occurences within annotated examples.">Count</th>
+                <th data-sortable="true" data-field="avg_count" data-align="right"
+                  data-title-tooltip="The average number of label occurences within annotated examples (=Count / Ex. annotated).">
+                  Avg. per ex.</th>
+                <th data-sortable="true" data-field="prevalence" data-align="right"
+                  data-title-tooltip="A ratio of outputs containing the label (0 to 1 range).">Prevalence</th>
+              </tr>
+            </thead>
+            <tbody>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="mt-5">
+          <h5>By span categories</h5>
+          <table id="span-table" class="table table-bordered table-hover" data-show-export="true" data-sortable="true"
+            data-toolbar="#toolbar">
+            <thead>
+              <tr>
+                <th data-sortable="true" data-field="example_count">Ex. annotated</th>
+                <th data-sortable="true" data-field="annotation_type">Category</th>
+                <th data-sortable="true" data-field="ann_count" data-align="right"
+                  data-title-tooltip="The total number of label occurences within annotated examples.">Count</th>
+                <th data-sortable="true" data-field="avg_count" data-align="right"
+                  data-title-tooltip="The average number of label occurences within annotated examples (=Count / Ex. annotated).">
+                  Avg. per ex.</th>
+                <th data-sortable="true" data-field="prevalence" data-align="right"
+                  data-title-tooltip="A ratio of outputs containing the label (0 to 1 range).">Prevalence</th>
+              </tr>
+            </thead>
+            <tbody>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="mt-5">
+          <h5>By setups</h5>
+          <table id="setup-table" class="table table-bordered table-hover" data-show-export="true" data-sortable="true"
+            data-toolbar="#toolbar">
+            <thead>
+              <tr>
+                <th data-sortable="true" data-field="setup_id">Setup</th>
+                <th data-sortable="true" data-field="example_count">Ex. annotated</th>
+                <th data-sortable="true" data-field="annotation_type">Category</th>
+                <th data-sortable="true" data-field="ann_count" data-align="right"
+                  data-title-tooltip="The total number of label occurences within annotated examples.">Count</th>
+                <th data-sortable="true" data-field="avg_count" data-align="right"
+                  data-title-tooltip="The average number of label occurences within annotated examples (=Count / Ex. annotated).">
+                  Avg. per ex.</th>
+                <th data-sortable="true" data-field="prevalence" data-align="right"
+                  data-title-tooltip="A ratio of outputs containing the label (0 to 1 range).">Prevalence</th>
+              </tr>
+            </thead>
+            <tbody>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="mt-5">
+          <h5>By datasets</h5>
+          <table id="dataset-table" class="table table-bordered table-hover" data-show-export="true"
+            data-sortable="true" data-toolbar="#toolbar">
+            <thead>
+              <tr>
+                <th data-sortable="true" data-field="dataset">Dataset</th>
+                <th data-sortable="true" data-field="split">Split</th>
+                <th data-sortable="true" data-field="example_count">Ex. annotated</th>
+                <th data-sortable="true" data-field="annotation_type">Category</th>
+                <th data-sortable="true" data-field="ann_count" data-align="right"
+                  data-title-tooltip="The total number of label occurences within annotated examples.">Count</th>
+                <th data-sortable="true" data-field="avg_count" data-align="right"
+                  data-title-tooltip="The average number of label occurences within annotated examples (=Count / Ex. annotated).">
+                  Avg. per ex.</th>
+                <th data-sortable="true" data-field="prevalence" data-align="right"
+                  data-title-tooltip="A ratio of outputs containing the label (0 to 1 range).">Prevalence</th>
+              </tr>
+            </thead>
+            <tbody>
+            </tbody>
+          </table>
+        </div>
+
+        <details class="mt-5">
+          <summary class="fw-bold">Extra fields</summary>
+          <div class="mt-3">
+            {% if statistics.extra_fields %}
+            <table id="extra-fields-table" class="table table-bordered table-hover" data-show-export="true"
+              data-toggle="table" data-sortable="true" data-toolbar="#toolbar">
+              <thead>
+                <tr>
+                  <th data-sortable="true" data-field="label">Label</th>
+                  <th data-sortable="true" data-field="value">Value</th>
+                  <th data-sortable="true" data-field="count"
+                    data-title-tooltip="The total number of label occurences within annotated examples.">Count</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for label, value_counts in statistics.extra_fields.items() %}
+                {% for value, count in value_counts.items() %}
+                <tr>
+                  <td>{{ label }}</td>
+                  <td>{{ value }}</td>
+                  <td>{{ count }}</td>
+                </tr>
+                {% endfor %}
+                {% endfor %}
+              </tbody>
+            </table>
+            {% else %}
+            <div class="text-muted">No extra fields were collected for this campaign.</div>
+            {% endif %}
+          </div>
+        </details>
+      </div>
+
+      <div class="tab-pane mb-5 fade {% if active_stats_tab == 'summaries' %}show active{% endif %}" id="pills-stats-summaries" role="tabpanel" aria-labelledby="pills-summaries-tab">
+        {% if statistics.rag_mistake_summary %}
+        {% set rag_summary = statistics.rag_mistake_summary %}
+        <form class="card mt-4 mb-4" method="get" action="{{ host_prefix }}/analyze/detail/{{ campaign.metadata.id }}">
+          <div class="card-body">
+            <input type="hidden" name="tab" value="summaries">
+            <div class="row g-3 align-items-end">
+              <div class="col-md-6">
+                <label for="summary_setup_id" class="form-label">Setup</label>
+                <select id="summary_setup_id" name="summary_setup_id" class="form-select">
+                  <option value="all" {% if rag_summary.selected_setup_id == 'all' %}selected{% endif %}>All setups</option>
+                  {% for setup_id in rag_summary.setup_ids %}
+                  <option value="{{ setup_id }}" {% if rag_summary.selected_setup_id == setup_id %}selected{% endif %}>{{ setup_id }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label for="summary_span_category" class="form-label">Span type</label>
+                <select id="summary_span_category" name="summary_span_category" class="form-select">
+                  <option value="all" {% if rag_summary.selected_span_category == 'all' %}selected{% endif %}>All span types</option>
+                  {% for span_category in rag_summary.span_categories %}
+                  <option value="{{ span_category }}" {% if rag_summary.selected_span_category == span_category %}selected{% endif %}>{{ span_category }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            <div class="d-flex justify-content-between align-items-center mt-3">
+              <div class="text-muted small">
+                Showing summaries for setup <b>{{ rag_summary.selected_setup_label }}</b> and span type <b>{{ rag_summary.selected_span_category_label }}</b>.
+              </div>
+              <button type="submit" class="btn btn-outline-secondary">Update summary</button>
+            </div>
+          </div>
+        </form>
+
+        {% if statistics.rag_mistake_stats %}
+        <table class="table table-bordered table-hover">
           <thead>
             <tr>
-              <th data-sortable="true" data-field="dataset">Dataset</th>
-              <th data-sortable="true" data-field="split">Split</th>
-              <th data-sortable="true" data-field="setup_id">Setup</th>
-              <th data-sortable="true" data-field="example_count">Ex. annotated</th>
-              <th data-sortable="true" data-field="annotation_type">Category</th>
-              <th data-sortable="true" data-field="ann_count" data-align="right"
-                data-title-tooltip="The total number of label occurences within annotated examples.">Count</th>
-              <th data-sortable="true" data-field="avg_count" data-align="right"
-                data-title-tooltip="The average number of label occurences within annotated examples (=Count / Ex. annotated).">
-                Avg. per ex.</th>
-              <th data-sortable="true" data-field="prevalence" data-align="right"
-                data-title-tooltip="A ratio of outputs containing the label (0 to 1 range).">Prevalence</th>
+              <th>Mistake</th>
+              <th>Short name</th>
+              <th>Examples</th>
+              <th>Matched spans</th>
+              <th>Description</th>
             </tr>
           </thead>
           <tbody>
-          </tbody>
-        </table>
-      </div>
-    </div>
-    <div class="tab-content" id="pills-tabContent">
-      <div class="tab-pane mb-5 fade show" id="pills-stats-span" role="tabpanel" aria-labelledby="pills-stats-span-tab">
-        <table id="span-table" class="table table-bordered table-hover" data-show-export="true" data-sortable="true"
-          data-toolbar="#toolbar">
-          <thead>
+            {% for mistake in statistics.rag_mistake_stats %}
             <tr>
-              <th data-sortable="true" data-field="example_count">Ex. annotated</th>
-              <th data-sortable="true" data-field="annotation_type">Category</th>
-              <th data-sortable="true" data-field="ann_count" data-align="right"
-                data-title-tooltip="The total number of label occurences within annotated examples.">Count</th>
-              <th data-sortable="true" data-field="avg_count" data-align="right"
-                data-title-tooltip="The average number of label occurences within annotated examples (=Count / Ex. annotated).">
-                Avg. per ex.</th>
-              <th data-sortable="true" data-field="prevalence" data-align="right"
-                data-title-tooltip="A ratio of outputs containing the label (0 to 1 range).">Prevalence</th>
+              <td><b>{{ mistake.label }}</b></td>
+              <td><span class="badge bg-secondary">{{ mistake.short_label }}</span></td>
+              <td>{{ mistake.example_count }}</td>
+              <td>{{ mistake.span_count }}</td>
+              <td>{{ mistake.lead }}</td>
             </tr>
-          </thead>
-          <tbody>
+            {% endfor %}
           </tbody>
         </table>
+
+        {% for mistake in statistics.rag_mistake_stats %}
+        <details class="card mb-3">
+          <summary class="card-header d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">{{ mistake.label }}</span>
+            <span class="badge bg-primary">{{ mistake.example_count }} examples</span>
+          </summary>
+          <div class="card-body">
+            <p class="text-muted mb-3">{{ mistake.description }}</p>
+            {% if mistake.examples %}
+            {% for example in mistake.examples %}
+            <details class="border rounded p-3 mb-2 bg-light">
+              <summary class="d-flex justify-content-between align-items-center">
+                <span>
+                  {{ example.dataset }} / {{ example.split }} / {{ example.setup_id }} #{{ example.example_idx }}
+                  <span class="text-muted ms-2">{{ example.annotator_id }}</span>
+                </span>
+                <span class="badge bg-secondary">{{ example.spans | length }} spans</span>
+              </summary>
+              <div class="mt-3">
+                <a href="{{ example.browse_url }}" class="btn btn-sm btn-outline-secondary mb-3" target="_blank">
+                  Open in Browse
+                </a>
+                {% for span in example.spans %}
+                <div class="border-start border-4 ps-3 mb-3">
+                  <div><b>Span text:</b> {{ span.text }}</div>
+                  <div><b>Reason:</b> {{ span.reason }}</div>
+                </div>
+                {% endfor %}
+              </div>
+            </details>
+            {% endfor %}
+            {% else %}
+            <div class="text-muted">No examples matched this bucket.</div>
+            {% endif %}
+          </div>
+        </details>
+        {% endfor %}
+        {% else %}
+        <div class="alert alert-secondary mt-3" role="alert">
+          <i class="fa fa-info-circle"></i>
+          No examples matched the selected setup and span type.
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="alert alert-secondary mt-4" role="alert">
+          <i class="fa fa-info-circle"></i>
+          No RAG mistake summary is available for this campaign yet.
+        </div>
+        {% endif %}
       </div>
-    </div>
-    <div class="tab-content" id="pills-tabContent">
-      <div class="tab-pane mb-5 fade show" id="pills-stats-setup" role="tabpanel"
-        aria-labelledby="pills-stats-setup-tab">
-        <table id="setup-table" class="table table-bordered table-hover" data-show-export="true" data-sortable="true"
-          data-toolbar="#toolbar">
-          <thead>
-            <tr>
-              <th data-sortable="true" data-field="setup_id">Setup</th>
-              <th data-sortable="true" data-field="example_count">Ex. annotated</th>
-              <th data-sortable="true" data-field="annotation_type">Category</th>
-              <th data-sortable="true" data-field="ann_count" data-align="right"
-                data-title-tooltip="The total number of label occurences within annotated examples.">Count</th>
-              <th data-sortable="true" data-field="avg_count" data-align="right"
-                data-title-tooltip="The average number of label occurences within annotated examples (=Count / Ex. annotated).">
-                Avg. per ex.</th>
-              <th data-sortable="true" data-field="prevalence" data-align="right"
-                data-title-tooltip="A ratio of outputs containing the label (0 to 1 range).">Prevalence</th>
-            </tr>
-          </thead>
-          <tbody>
-          </tbody>
-        </table>
-      </div>
-    </div>
-    <div class="tab-content" id="pills-tabContent">
-      <div class="tab-pane mb-5 fade show" id="pills-stats-dataset" role="tabpanel"
-        aria-labelledby="pills-stats-dataset-tab">
-        <table id="dataset-table" class="table table-bordered table-hover" data-show-export="true" data-sortable="true"
-          data-toolbar="#toolbar">
-          <thead>
-            <tr>
-              <th data-sortable="true" data-field="dataset">Dataset</th>
-              <th data-sortable="true" data-field="split">Split</th>
-              <th data-sortable="true" data-field="example_count">Ex. annotated</th>
-              <th data-sortable="true" data-field="annotation_type">Category</th>
-              <th data-sortable="true" data-field="ann_count" data-align="right"
-                data-title-tooltip="The total number of label occurences within annotated examples.">Count</th>
-              <th data-sortable="true" data-field="avg_count" data-align="right"
-                data-title-tooltip="The average number of label occurences within annotated examples (=Count / Ex. annotated).">
-                Avg. per ex.</th>
-              <th data-sortable="true" data-field="prevalence" data-align="right"
-                data-title-tooltip="A ratio of outputs containing the label (0 to 1 range).">Prevalence</th>
-            </tr>
-          </thead>
-          <tbody>
-          </tbody>
-        </table>
-      </div>
-    </div>
-    <div class="tab-content" id="pills-tabContent">
-      <div class="tab-pane mb-5 fade" id="pills-stats-sliders" role="tabpanel" aria-labelledby="pills-stats-sliders-tab">
+
+      <div class="tab-pane mb-5 fade {% if active_stats_tab == 'sliders' %}show active{% endif %}" id="pills-stats-sliders" role="tabpanel" aria-labelledby="pills-slider-stats-tab">
         <div id="slider-stats-empty" class="alert alert-info" role="alert">
           <i class="fa fa-info"></i>
           <span>No slider data was collected for this campaign.</span>
@@ -244,10 +371,8 @@
         <h5 class="mt-4">By question and setup</h5>
         <div id="slider-setup-tables"></div>
       </div>
-    </div>
-    <div class="tab-content" id="pills-tabContent">
-      <div class="tab-pane mb-5 fade" id="pills-stats-annotators" role="tabpanel"
-        aria-labelledby="pills-stats-annotators-tab">
+      <div class="tab-pane mb-5 fade {% if active_stats_tab == 'annotators' %}show active{% endif %}" id="pills-stats-annotators" role="tabpanel"
+        aria-labelledby="pills-annotator-stats-tab">
         <div id="annotator-stats-empty" class="alert alert-info" role="alert">
           <i class="fa fa-info"></i>
           <span>No annotator statistics are available for this campaign.</span>
@@ -262,9 +387,7 @@
           </tbody>
         </table>
       </div>
-    </div>
-    <div class="tab-content" id="pills-tabContent">
-      <div class="tab-pane mb-5 fade" id="pills-stats-coverage" role="tabpanel" aria-labelledby="pills-coverage-stats-tab">
+      <div class="tab-pane mb-5 fade {% if active_stats_tab == 'coverage' %}show active{% endif %}" id="pills-stats-coverage" role="tabpanel" aria-labelledby="pills-coverage-stats-tab">
         <div id="coverage-stats-empty" class="alert alert-info" role="alert">
           <i class="fa fa-info"></i>
           <span>No output coverage data is available for this campaign.</span>
@@ -293,34 +416,6 @@
           </div>
           <div id="coverage-matrix-container" class="mt-3"></div>
         </div>
-      </div>
-    </div>
-    <div class="tab-content" id="pills-tabContent">
-      <div class="tab-pane mb-5 fade" id="pills-charts" role="tabpanel" aria-labelledby="pills-charts-tab">
-        {% if statistics.extra_fields %}
-        <table id="extra-fields-table" class="table table-bordered table-hover" data-show-export="true"
-          data-toggle="table" data-sortable="true" data-toolbar="#toolbar">
-          <thead>
-            <tr>
-              <th data-sortable="true" data-field="label">Label</th>
-              <th data-sortable="true" data-field="value">Value</th>
-              <th data-sortable="true" data-field="count"
-                data-title-tooltip="The total number of label occurences within annotated examples.">Count</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for label, value_counts in statistics.extra_fields.items() %}
-            {% for value, count in value_counts.items() %}
-            <tr>
-              <td>{{ label }}</td>
-              <td>{{ value }}</td>
-              <td>{{ count }}</td>
-            </tr>
-            {% endfor %}
-            {% endfor %}
-          </tbody>
-        </table>
-        {% endif %}
       </div>
     </div>
   </div>

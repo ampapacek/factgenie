@@ -466,6 +466,7 @@ function gatherConfig() {
         config.annotationGranularity = $("#annotationGranularity").val();
         config.annotationOverlapAllowed = $("#annotationOverlapAllowed").is(":checked");
         config.annotateReason = $("#annotateReason").is(":checked");
+        config.pseudonymizeAnnotators = $("#pseudonymizeAnnotators").is(":checked");
         config.service = $("#service").val();
         config.sortOrder = $("#sortOrder").val();
         config.annotationSpanCategories = getAnnotationSpanCategories();
@@ -924,6 +925,26 @@ function updateCampaignConfig(campaignId) {
     });
 }
 
+function setCampaignPseudonymizeAnnotators(campaignId, pseudonymizeAnnotators) {
+    $.post({
+        url: `${url_prefix}/set_campaign_pseudonymize_annotators`,
+        contentType: 'application/json',
+        data: JSON.stringify({
+            campaignId: campaignId,
+            pseudonymizeAnnotators: pseudonymizeAnnotators
+        }),
+        success: function (response) {
+            console.log(response);
+
+            if (response.success !== true) {
+                alert(response.error);
+            } else {
+                location.reload();
+            }
+        }
+    });
+}
+
 function updateCrowdsourcingConfig() {
     const crowdsourcingConfig = $('#crowdsourcingConfig').val();
 
@@ -936,6 +957,7 @@ function updateCrowdsourcingConfig() {
         $("#idleTime").val("");
         $("#annotationOverlapAllowed").prop("checked", false);
         $("#annotateReason").prop("checked", false);
+        $("#pseudonymizeAnnotators").prop("checked", true);
         $("#annotation-span-categories").empty();
         $("#flags").empty();
         $("#options").empty();
@@ -953,6 +975,7 @@ function updateCrowdsourcingConfig() {
     const annotationGranularity = cfg.annotation_granularity;
     const annotationOverlapAllowed = cfg.annotation_overlap_allowed;
     const annotateReason = cfg.annotate_reason;
+    const pseudonymizeAnnotators = cfg.pseudonymize_annotators !== false;
     const service = cfg.service;
     const sortOrder = cfg.sort_order;
     const annotationSpanCategories = cfg.annotation_span_categories;
@@ -970,6 +993,7 @@ function updateCrowdsourcingConfig() {
     $("#annotationGranularity").val(annotationGranularity);
     $("#annotationOverlapAllowed").prop("checked", annotationOverlapAllowed);
     $("#annotateReason").prop("checked", annotateReason);
+    $("#pseudonymizeAnnotators").prop("checked", pseudonymizeAnnotators);
     $("#service").val(service);
     $("#sortOrder").val(sortOrder);
     $("#annotation-span-categories").empty();

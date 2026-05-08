@@ -5,6 +5,7 @@
   window.annotator_id = "{{ annotator_id }}";
   window.annotator_preferences = {{ annotator_preferences | tojson | safe }};
   window.metadata = {{ metadata | tojson | safe }};
+  window.redo_context = {{ redo_context | default({}) | tojson | safe }};
 </script>
 
 <script src="{{ host_prefix }}/static/js/utils.js"></script>
