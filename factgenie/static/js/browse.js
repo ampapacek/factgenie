@@ -3,6 +3,12 @@ var selected_campaigns = [];
 var collapsed_boxes = [];
 var showAnnotatorNames = false;
 var preferredAnnotatorIds = [];
+var browseFilterSchema = {};
+var filteredResults = [];
+var filteredQueueActive = false;
+var filteredQueueIndex = 0;
+var activeBrowseMatchDetails = [];
+var browseHighlightsEnabled = true;
 var currentAnnInfo = new Map();
 var annotatorAliases = new Map();
 var annotatorAliasList = [
@@ -197,6 +203,8 @@ function changeDataset() {
     const split = $('#split-select').val();
 
     current_example_idx = 0;
+    clearFilteredQueue();
+    loadBrowseFilterSchema();
     fetchExample(dataset, split, current_example_idx);
     $("#page-input").val(current_example_idx);
 }
@@ -206,6 +214,8 @@ function changeSplit() {
     const dataset = $('#dataset-select').val();
     const split = $('#split-select').val();
     current_example_idx = 0;
+    clearFilteredQueue();
+    loadBrowseFilterSchema();
     fetchExample(dataset, split, current_example_idx);
     $("#page-input").val(current_example_idx);
 }
@@ -226,6 +236,8 @@ function changeExample(dataset, split, example_idx) {
 
 function createOutputBox(content, exampleLevelFields, annId, annLabel, setup_id, extraClasses = "") {
     var card = $('<div>', { class: `card output-box generated-output-box box-${setup_id} box-${annId} box-${setup_id}-${annId} ${extraClasses}`.trim() });
+    card.attr("data-setup-id", setup_id);
+    card.attr("data-ann-id", annId);
 
     const badgeLabel = annLabel || annId;
     var annotationBadge = (annId !== "original")
@@ -316,11 +328,13 @@ function buildAnnotationInfo(generated_outputs) {
             const campaign_id = annotation.campaign_id;
             const annotator_group = annotation.annotator_group;
             const annotator_id = String(annotation.annotator_id || "").trim();
+            const annotator_alias = String(annotation.annotator_alias || "").trim();
             const hasAnnotatorId = annotator_id !== "" && !isInvalidAnnotatorId(annotator_id);
             if (!campaign_id) {
                 return;
             }
             const ann_id = (hasAnnotatorId ? generateAnnotatorKey(campaign_id, annotator_id) : null) ||
+                (annotator_alias ? generateAnnotatorKey(campaign_id, annotator_alias) : null) ||
                 generateAnnotatorShortId(campaign_id, annotator_group);
 
             if (!annIds.has(ann_id)) {
@@ -343,7 +357,7 @@ function buildAnnotationInfo(generated_outputs) {
             if (hasAnnotatorId) {
                 annIds.get(ann_id).annotator_ids.add(annotator_id);
             }
-            let alias = String(annotation.annotator_alias || "").trim();
+            let alias = annotator_alias;
             if (!alias && hasAnnotatorId) {
                 alias = getOrCreateAnnotatorAlias(campaign_id, annotator_id);
             }
@@ -523,6 +537,35 @@ function setActiveAnnotatorButtons(annIds) {
     });
 }
 
+function currentExampleCanShowAnnotatorNames() {
+    if ($("#toggle-annotator-names-btn").length === 0) {
+        return false;
+    }
+    for (const annInfo of currentAnnInfo.values()) {
+        if (getAnnotatorNames(annInfo).length > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function updateAnnotatorNamesToggleAvailability() {
+    const button = $("#toggle-annotator-names-btn");
+    if (button.length === 0) {
+        showAnnotatorNames = false;
+        return;
+    }
+
+    const canShowNames = currentExampleCanShowAnnotatorNames();
+    button.closest(".page-item").toggle(canShowNames);
+    if (!canShowNames) {
+        showAnnotatorNames = false;
+    }
+
+    const label = showAnnotatorNames ? "Hide annotator names" : "Show annotator names";
+    button.find("small").text(label);
+}
+
 function createOutputBoxes(generated_outputs) {
     // clear the output area
     $("#outputarea").empty();
@@ -535,6 +578,7 @@ function createOutputBoxes(generated_outputs) {
     // find all campaign ids in output annotations
     const annIds = buildAnnotationInfo(generated_outputs);
     currentAnnInfo = annIds;
+    updateAnnotatorNamesToggleAvailability();
 
     const selectBox = $("#annotations-select");
     // clear the selectbox
@@ -597,6 +641,10 @@ function createOutputBoxes(generated_outputs) {
                 annotations = output.annotations.find(a => a.campaign_id == info.campaign_id && a.annotator_id == info.annotator_id) || null;
             }
             if (!annotations) {
+                const aliases = getAnnotatorAliases(info);
+                annotations = output.annotations.find(a => a.campaign_id == info.campaign_id && aliases.includes(String(a.annotator_alias || "").trim())) || null;
+            }
+            if (!annotations) {
                 annotations = output.annotations.find(a => a.campaign_id == info.campaign_id && a.annotator_group == info.annotator_group) || null;
             }
             if (!annotations) {
@@ -644,7 +692,10 @@ function highlightSetup() {
 
     if (window.highlight_ann_campaign) {
         // If both setup_id and campaign are highlighted, highlight that specific box
-        const specificBox = $(`.output-box.box-${window.highlight_setup_id}-${window.highlight_ann_campaign}`);
+        const specificBox = $(".output-box").filter(function () {
+            return String($(this).data("setup-id") || "") === String(window.highlight_setup_id) &&
+                String($(this).data("ann-id") || "") === String(window.highlight_ann_campaign);
+        });
         specificBox.addClass('border border-primary border-2');
 
         // Make sure the highlighted campaign is visible if not already
@@ -669,7 +720,9 @@ function highlightSetup() {
         }, 100);
     } else {
         // If only setup_id is highlighted, highlight all boxes with that setup_id that are currently visible
-        const visibleBoxes = $(`.output-box.box-${window.highlight_setup_id}:visible`);
+        const visibleBoxes = $(".output-box:visible").filter(function () {
+            return String($(this).data("setup-id") || "") === String(window.highlight_setup_id);
+        });
         visibleBoxes.addClass('border border-primary border-2');
 
         // Scroll to the first visible highlighted box
@@ -682,6 +735,295 @@ function highlightSetup() {
             }, 100);
         }
     }
+}
+
+function getDetailAnnotatorId(detail) {
+    const rawId = String(detail?.annotator_id || "").trim();
+    const campaignId = String(detail?.campaign_id || "").trim();
+    if (rawId && campaignId) {
+        return generateAnnotatorKey(campaignId, rawId) || rawId;
+    }
+    return String(detail?.annotator_alias || rawId || "").trim();
+}
+
+function getDetailAnnotatorIds(detail) {
+    const ids = [];
+    const rawId = String(detail?.annotator_id || "").trim();
+    const campaignId = String(detail?.campaign_id || "").trim();
+    const alias = String(detail?.annotator_alias || "").trim();
+    if (rawId && campaignId) {
+        ids.push(generateAnnotatorKey(campaignId, rawId) || rawId);
+    }
+    if (rawId) {
+        ids.push(rawId);
+    }
+    if (alias) {
+        currentAnnInfo.forEach(function (info, annId) {
+            if (getAnnotatorAliases(info).includes(alias) && (!campaignId || String(info?.campaign_id || "") === campaignId)) {
+                ids.push(annId);
+            }
+        });
+        ids.push(alias);
+    }
+    return Array.from(new Set(ids.filter((value) => String(value || "").trim())));
+}
+
+function matchedAnnotatorIdsFromDetails(details) {
+    const ids = [];
+    (details || []).forEach(function (detail) {
+        getDetailAnnotatorIds(detail).forEach(function (annId) {
+            if (annId && !ids.includes(annId)) {
+                ids.push(annId);
+            }
+        });
+    });
+    return ids;
+}
+
+function browseDetailBox(detail) {
+    const setupId = String(detail?.setup_id || "");
+    const annIds = getDetailAnnotatorIds(detail);
+    if (setupId && annIds.length) {
+        return $(".output-box").filter(function () {
+            return String($(this).data("setup-id") || "") === setupId && annIds.includes(String($(this).data("ann-id") || ""));
+        });
+    }
+    if (setupId) {
+        return $(".output-box").filter(function () {
+            return String($(this).data("setup-id") || "") === setupId;
+        });
+    }
+    if (annIds.length) {
+        return $(".output-box").filter(function () {
+            return annIds.includes(String($(this).data("ann-id") || ""));
+        });
+    }
+    return $();
+}
+
+function detailLabel(detail) {
+    const fieldLabels = {
+        setup: "Setup",
+        annotation_state: "State",
+        annotator: "Annotator",
+        span_category: "Span category",
+        span_reason: "Span reason",
+        span_text: "Span text",
+        question: "Question",
+        output: "Output",
+        any_text: "Any text",
+        slider: "Slider",
+    };
+    const opLabels = {
+        contains: "contains",
+        not_contains: "does not contain",
+        eq: "is",
+        neq: "is not",
+        missing: "is missing",
+        not_missing: "is not missing",
+        regex: "matches regex",
+        not_regex: "does not match regex",
+        gt: ">",
+        gte: ">=",
+        lt: "<",
+        lte: "<=",
+    };
+    const field = fieldLabels[detail.field] || detail.field || "Filter";
+    const op = opLabels[detail.op] || detail.op || "";
+    const setup = detail.setup_id ? ` · ${detail.setup_id}` : "";
+    const who = detailAnnotatorLabel(detail);
+    if (detail.target === "span") {
+        const spanText = shortenMatchText(detail.span_text || detail.matched_text || detail.reason || "", 60);
+        const category = detail.category ? `${detail.category}: ` : "";
+        return `Span ${category}${spanText || "(empty)"}${setup}${who}`;
+    }
+    const value = detail.slider_label
+        ? `${detail.slider_label}${detail.value ? ` ${detail.value}` : ""}`
+        : (detail.matched_text || detail.value || detail.span_text || detail.reason || "");
+    return `${field} ${op}${value ? ` ${shortenMatchText(value, 60)}` : ""}${setup}${who}`;
+}
+
+function detailAnnotatorLabel(detail) {
+    const alias = String(detail?.annotator_alias || "").trim();
+    const rawId = String(detail?.annotator_id || "").trim();
+    if (alias && rawId && alias !== rawId) {
+        return ` · ${alias} (${rawId})`;
+    }
+    if (alias || rawId) {
+        return ` · ${alias || rawId}`;
+    }
+    return "";
+}
+
+function shortenMatchText(text, maxLength) {
+    const normalized = String(text || "").replace(/\s+/g, " ").trim();
+    if (normalized.length <= maxLength) {
+        return normalized;
+    }
+    return `${normalized.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+}
+
+function renderBrowseMatchDetails() {
+    const panel = $("#browse-match-details");
+    panel.empty();
+    if (!filteredQueueActive || !activeBrowseMatchDetails.length) {
+        panel.hide();
+        return;
+    }
+    panel.append($('<div>', { class: "small text-muted mb-1" }).text("Matched filters"));
+    const chips = $('<div>');
+    activeBrowseMatchDetails.forEach(function (detail) {
+        const chip = $('<span>', { class: "browse-match-chip", title: detailLabel(detail) });
+        chip.text(detailLabel(detail));
+        chips.append(chip);
+    });
+    panel.append(chips).show();
+}
+
+function clearBrowseMatchHighlights() {
+    $(".browse-match-highlight").each(function () {
+        const node = $(this);
+        if (node.is("mark")) {
+            node.replaceWith(document.createTextNode(node.text()));
+        } else {
+            node.removeClass("browse-match-highlight");
+        }
+    });
+    $(".browse-match-span").removeClass("browse-match-span");
+    $(".browse-match-slider").removeClass("browse-match-slider");
+    $(".browse-match-box").removeClass("browse-match-box border border-primary border-2");
+}
+
+function markTextNodes(container, text) {
+    const needle = String(text || "");
+    if (!needle) {
+        return false;
+    }
+    const element = $(container).get(0);
+    if (!element) {
+        return false;
+    }
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+        acceptNode: function (node) {
+            if (!node.nodeValue || !node.nodeValue.trim()) {
+                return NodeFilter.FILTER_REJECT;
+            }
+            if ($(node.parentElement).closest("mark, script, style").length) {
+                return NodeFilter.FILTER_REJECT;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+        }
+    });
+    const nodes = [];
+    while (walker.nextNode()) {
+        nodes.push(walker.currentNode);
+    }
+    let marked = false;
+    nodes.forEach(function (node) {
+        let current = node;
+        while (current && current.nodeType === Node.TEXT_NODE) {
+            const index = current.nodeValue.toLowerCase().indexOf(needle.toLowerCase());
+            if (index < 0) {
+                break;
+            }
+            const after = current.splitText(index);
+            const rest = after.splitText(needle.length);
+            const mark = document.createElement("mark");
+            mark.className = "browse-match-highlight";
+            mark.textContent = after.nodeValue;
+            after.parentNode.replaceChild(mark, after);
+            current = rest;
+            marked = true;
+        }
+    });
+    return marked;
+}
+
+function markAnnotatableRange(box, start, length) {
+    const numericStart = Number(start);
+    const numericLength = Number(length);
+    if (!Number.isFinite(numericStart) || !Number.isFinite(numericLength) || numericLength <= 0) {
+        return false;
+    }
+    const end = numericStart + numericLength;
+    let marked = false;
+    box.find(".annotatable").each(function () {
+        const span = $(this);
+        const idx = Number(span.data("index"));
+        const contentLength = String(span.data("content") || "").length;
+        if (Number.isFinite(idx) && idx < end && idx + Math.max(contentLength, 1) > numericStart) {
+            span.addClass("browse-match-span");
+            marked = true;
+        }
+    });
+    return marked;
+}
+
+function markAnnotatableText(box, text) {
+    const needle = String(text || "");
+    if (!needle) {
+        return false;
+    }
+    let fullText = "";
+    const spans = [];
+    box.find(".annotatable").each(function () {
+        const span = $(this);
+        const chunk = String(span.data("content") || "");
+        spans.push({ span, start: fullText.length, end: fullText.length + chunk.length });
+        fullText += chunk + String(span.data("whitespace") || "");
+    });
+    const ranges = [];
+    const haystack = fullText.toLowerCase();
+    const loweredNeedle = needle.toLowerCase();
+    let searchFrom = 0;
+    while (searchFrom <= haystack.length) {
+        const index = haystack.indexOf(loweredNeedle, searchFrom);
+        if (index < 0) {
+            break;
+        }
+        ranges.push({ start: index, end: index + needle.length });
+        searchFrom = index + Math.max(needle.length, 1);
+    }
+    if (!ranges.length) {
+        return false;
+    }
+    spans.forEach(function (item) {
+        if (ranges.some((range) => item.start < range.end && item.end > range.start)) {
+            item.span.addClass("browse-match-span");
+        }
+    });
+    return true;
+}
+
+function applyBrowseMatchHighlights() {
+    clearBrowseMatchHighlights();
+    if (!browseHighlightsEnabled || !filteredQueueActive || !activeBrowseMatchDetails.length) {
+        return;
+    }
+    activeBrowseMatchDetails.forEach(function (detail) {
+        const box = browseDetailBox(detail);
+        if (detail.target === "span") {
+            const marked = markAnnotatableRange(box, detail.start, String(detail.span_text || "").length);
+            if (!marked) {
+                markAnnotatableText(box, detail.span_text || detail.matched_text);
+            }
+            box.addClass("browse-match-box border border-primary border-2");
+        } else if (detail.target === "slider") {
+            box.find(".browse-slider-row").filter(function () {
+                return String($(this).data("slider-label") || "") === String(detail.slider_label || detail.sliderLabel || "");
+            }).addClass("browse-match-slider");
+            box.addClass("browse-match-box border border-primary border-2");
+        } else if (detail.target === "question") {
+            markTextNodes($("#examplearea"), detail.matched_text || detail.value);
+        } else if (detail.target === "output") {
+            if (!markAnnotatableText(box, detail.matched_text || detail.value)) {
+                markTextNodes(box, detail.matched_text || detail.value);
+            }
+            box.addClass("browse-match-box border border-primary border-2");
+        } else if (detail.matched_text) {
+            markTextNodes(box.length ? box : $("#examplearea"), detail.matched_text);
+        }
+    });
 }
 
 function fetchExample(dataset, split, example_idx) {
@@ -732,10 +1074,12 @@ function fetchExample(dataset, split, example_idx) {
         showSelectedCampaigns();
         updateDisplayedAnnotations();
         highlightSetup();
+        applyBrowseMatchHighlights();
 
 
         window.highlight_ann_campaign = null;
         window.highlight_setup_id = null;
+        window.highlight_ann_campaigns = [];
     }).fail(function (response) {
         console.log(response);
         alert("Failed to fetch example.");
@@ -824,11 +1168,13 @@ function getExampleLevelFields(annotations) {
         var slidersDiv = $('<div>', { class: "small" });
 
         for (const slider of sliders) {
+            var sliderRow = $('<div>', { class: "browse-slider-row", "data-slider-label": String(slider.label || "") });
             var labelDiv = $('<div>', { class: "small text-muted" }).text(`${slider.label}`);
             var valueDiv = $('<div>', { class: "small mb-1 fw-bold" }).text(`${slider.value}`);
 
-            slidersDiv.append(labelDiv);
-            slidersDiv.append(valueDiv);
+            sliderRow.append(labelDiv);
+            sliderRow.append(valueDiv);
+            slidersDiv.append(sliderRow);
         }
         html.append(slidersDiv);
     }
@@ -848,7 +1194,273 @@ function getExampleLevelFields(annotations) {
     return html;
 }
 
+function browseTextOperators(field) {
+    if (field === "slider") {
+        return [
+            ["eq", "equals"],
+            ["neq", "does not equal"],
+            ["gt", ">"],
+            ["gte", ">="],
+            ["lt", "<"],
+            ["lte", "<="],
+            ["missing", "is missing"],
+            ["not_missing", "is not missing"],
+        ];
+    }
+    return [
+        ["contains", "contains"],
+        ["not_contains", "does not contain"],
+        ["eq", "is"],
+        ["neq", "is not"],
+        ["missing", "is missing"],
+        ["not_missing", "is not missing"],
+        ["regex", "matches regex"],
+        ["not_regex", "does not match regex"],
+    ];
+}
+
+function browseFieldOptions() {
+    return [
+        ["setup", "Setup"],
+        ["annotation_state", "Annotation state"],
+        ["annotator", "Annotator"],
+        ["span_category", "Span category"],
+        ["span_reason", "Span reason"],
+        ["span_text", "Span text"],
+        ["question", "Question"],
+        ["output", "Output"],
+        ["any_text", "Any text"],
+        ["slider", "Slider"],
+    ];
+}
+
+function browseConditionValues(row) {
+    return {
+        field: row.find(".browse-condition-field").val(),
+        op: row.find(".browse-condition-op").val(),
+        value: row.find(".browse-condition-value").val(),
+        sliderLabel: row.find(".browse-condition-slider-label").val(),
+    };
+}
+
+function escapeBrowseOption(value) {
+    return $("<option>").attr("value", value).text(value);
+}
+
+function addBrowseFilterCondition(condition) {
+    const row = $(`
+      <div class="row g-2 align-items-end browse-filter-condition">
+        <div class="col-md-3">
+          <label class="form-label small mb-1">Field</label>
+          <select class="form-select form-select-sm browse-condition-field"></select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small mb-1">Operator</label>
+          <select class="form-select form-select-sm browse-condition-op"></select>
+        </div>
+        <div class="col-md-5 browse-condition-value-wrap"></div>
+        <div class="col-md-1">
+          <button type="button" class="btn btn-sm btn-outline-secondary w-100 browse-remove-condition" title="Remove condition">
+            <i class="fa fa-times"></i>
+          </button>
+        </div>
+      </div>
+    `);
+    const fieldSelect = row.find(".browse-condition-field");
+    browseFieldOptions().forEach(function ([value, label]) {
+        fieldSelect.append(escapeBrowseOption(value).text(label));
+    });
+    $("#browse-filter-conditions").append(row);
+    fieldSelect.val(condition?.field || "span_category");
+    renderBrowseConditionControls(row, condition || {});
+}
+
+function renderBrowseConditionControls(row, condition) {
+    const field = row.find(".browse-condition-field").val();
+    const opSelect = row.find(".browse-condition-op");
+    const previousOp = condition.op || opSelect.val();
+    opSelect.empty();
+    browseTextOperators(field).forEach(function ([value, label]) {
+        opSelect.append(escapeBrowseOption(value).text(label));
+    });
+    if (previousOp && opSelect.find(`option[value="${previousOp}"]`).length) {
+        opSelect.val(previousOp);
+    }
+
+    const wrap = row.find(".browse-condition-value-wrap");
+    wrap.empty();
+    const selectFields = {
+        setup: ["Select setup...", browseFilterSchema.setups || []],
+        annotation_state: ["Select state...", browseFilterSchema.annotation_states || []],
+        annotator: ["Select annotator...", browseFilterSchema.annotators || []],
+        span_category: ["Select category...", browseFilterSchema.categories || []],
+    };
+    if (field in selectFields) {
+        const [placeholder, values] = selectFields[field];
+        const select = $('<select class="form-select form-select-sm browse-condition-value"></select>');
+        select.append(escapeBrowseOption("").text(placeholder));
+        values.forEach(function (value) {
+            select.append(escapeBrowseOption(value));
+        });
+        wrap.append('<label class="form-label small mb-1">Value</label>');
+        wrap.append(select);
+        select.val(condition.value || "");
+    } else if (field === "slider") {
+        const controls = $(`
+          <div class="row g-2">
+            <div class="col-md-6">
+              <label class="form-label small mb-1">Slider</label>
+              <select class="form-select form-select-sm browse-condition-slider-label"></select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small mb-1">Value</label>
+              <input class="form-control form-control-sm browse-condition-value" type="number" step="any">
+            </div>
+          </div>
+        `);
+        const labelSelect = controls.find(".browse-condition-slider-label");
+        labelSelect.append(escapeBrowseOption("").text("Select slider..."));
+        (browseFilterSchema.slider_labels || []).forEach(function (label) {
+            labelSelect.append(escapeBrowseOption(label));
+        });
+        wrap.append(controls);
+        labelSelect.val(condition.sliderLabel || "");
+        controls.find(".browse-condition-value").val(condition.value || "");
+    } else {
+        wrap.append('<label class="form-label small mb-1">Value</label>');
+        wrap.append('<input class="form-control form-control-sm browse-condition-value" type="search">');
+        wrap.find(".browse-condition-value").val(condition.value || "");
+    }
+    row.find(".browse-condition-value").prop("disabled", ["missing", "not_missing"].includes(opSelect.val()));
+}
+
+function browseActiveConditions() {
+    const conditions = [];
+    $(".browse-filter-condition").each(function () {
+        const condition = browseConditionValues($(this));
+        const valueRequired = !["missing", "not_missing"].includes(condition.op);
+        const hasValue = condition.field === "slider" ? condition.value !== "" : String(condition.value || "").trim() !== "";
+        const hasSliderLabel = condition.field !== "slider" || condition.sliderLabel;
+        if (condition.field && condition.op && (!valueRequired || hasValue) && hasSliderLabel) {
+            conditions.push(condition);
+        }
+    });
+    return conditions;
+}
+
+function loadBrowseFilterSchema() {
+    const dataset = $('#dataset-select').val();
+    const split = $('#split-select').val();
+    if (!dataset || !split) {
+        return;
+    }
+    const params = new URLSearchParams({ dataset, split });
+    $.get(`${url_prefix}/query/schema?${params.toString()}`, function (schema) {
+        if (!schema.success) {
+            return;
+        }
+        browseFilterSchema = schema;
+        const conditions = $(".browse-filter-condition").map(function () {
+            return browseConditionValues($(this));
+        }).get();
+        $("#browse-filter-conditions").empty();
+        if (conditions.length) {
+            conditions.forEach(addBrowseFilterCondition);
+        } else {
+            addBrowseFilterCondition();
+        }
+    });
+}
+
+function clearFilteredQueue() {
+    const wasActive = filteredQueueActive;
+    filteredResults = [];
+    filteredQueueActive = false;
+    filteredQueueIndex = 0;
+    activeBrowseMatchDetails = [];
+    renderBrowseMatchDetails();
+    clearBrowseMatchHighlights();
+    $("#browse-filter-count").removeClass("text-danger").text("");
+    $("#browse-filter-error").text("");
+    $("#browse-toggle-highlights").hide();
+    if (wasActive) {
+        $("#page-input").val(current_example_idx);
+    }
+}
+
+function resetBrowseFilters() {
+    clearFilteredQueue();
+    $("#browse-filter-match-mode").val("all");
+    $("#browse-filter-conditions").empty();
+    addBrowseFilterCondition();
+    $("#page-input").val(current_example_idx);
+}
+
+function setBrowseFilterStatus(message, isError = false) {
+    $("#browse-filter-count").toggleClass("text-danger", isError).text(message || "");
+}
+
+function applyBrowseFilters() {
+    const dataset = $('#dataset-select').val();
+    const split = $('#split-select').val();
+    const conditions = browseActiveConditions();
+    $("#browse-filter-error").text("");
+    if (!conditions.length) {
+        resetBrowseFilters();
+        return;
+    }
+    setBrowseFilterStatus("Finding matches...");
+    $.ajax({
+        url: `${url_prefix}/query/filter`,
+        method: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({
+            dataset,
+            split,
+            filters: {
+                mode: $("#browse-filter-match-mode").val(),
+                conditions,
+            },
+            limit: 5000,
+        }),
+        success: function (payload) {
+            if (!payload.success) {
+                clearFilteredQueue();
+                $("#browse-filter-error").text(payload.error || "Filter failed.");
+                setBrowseFilterStatus("Filter failed.", true);
+                return;
+            }
+            filteredResults = payload.rows || [];
+            filteredQueueActive = filteredResults.length > 0;
+            filteredQueueIndex = 0;
+            setBrowseFilterStatus(`${filteredResults.length} match${filteredResults.length === 1 ? "" : "es"}`);
+            $("#browse-toggle-highlights").toggle(filteredQueueActive);
+            if (filteredQueueActive) {
+                goToPage(0);
+            }
+        },
+        error: function () {
+            clearFilteredQueue();
+            setBrowseFilterStatus("Filter failed.", true);
+        }
+    });
+}
+
 function goToPage(page) {
+    if (filteredQueueActive) {
+        filteredQueueIndex = Math.min(Math.max(Number(page), 0), filteredResults.length - 1);
+        const row = filteredResults[filteredQueueIndex];
+        current_example_idx = Number(row.example_idx);
+        activeBrowseMatchDetails = row.match_details || [];
+        window.highlight_setup_id = row.match_setup_id || null;
+        window.highlight_ann_campaign = row.match_annotator_id || row.match_annotator_alias || null;
+        window.highlight_ann_campaigns = matchedAnnotatorIdsFromDetails(activeBrowseMatchDetails);
+        fetchExample(row.dataset, row.split, current_example_idx);
+        renderBrowseMatchDetails();
+        $("#page-input").val(`${filteredQueueIndex + 1}/${filteredResults.length}`);
+        return;
+    }
+
     current_example_idx = Math.min(page, total_examples - 1);
     current_example_idx = Math.max(0, current_example_idx);
 
@@ -858,6 +1470,51 @@ function goToPage(page) {
     fetchExample(dataset, split, current_example_idx);
 
     $("#page-input").val(current_example_idx);
+}
+
+function nextBtn() {
+    if (filteredQueueActive) {
+        goToPage(filteredQueueIndex + 1);
+        return;
+    }
+    goToPage(current_example_idx + 1);
+}
+
+function prevBtn() {
+    if (filteredQueueActive) {
+        goToPage(filteredQueueIndex - 1);
+        return;
+    }
+    goToPage(current_example_idx - 1);
+}
+
+function startBtn() {
+    goToPage(0);
+}
+
+function endBtn() {
+    if (filteredQueueActive) {
+        goToPage(filteredResults.length - 1);
+        return;
+    }
+    goToPage(total_examples - 1);
+}
+
+function randomBtn() {
+    if (filteredQueueActive) {
+        goToPage(randInt(filteredResults.length));
+        return;
+    }
+    goToPage(randInt(total_examples));
+}
+
+function goToBtn() {
+    if (filteredQueueActive) {
+        const raw = String($("#page-input").val() || "1").split("/")[0];
+        goToPage(Number(raw) - 1);
+        return;
+    }
+    goToPage($("#page-input").val());
 }
 
 function showRawData(data) {
@@ -875,6 +1532,13 @@ function showRawData(data) {
 function showSelectedCampaigns() {
     const availableAnnIds = getSelectableAnnotatorIds();
     const availableSet = new Set(availableAnnIds);
+    const highlightedAnnIds = matchedAnnotatorIdsFromDetails(activeBrowseMatchDetails).filter((annId) => availableSet.has(annId));
+
+    if (highlightedAnnIds.length > 0) {
+        selected_campaigns = highlightedAnnIds;
+        setActiveAnnotatorButtons(selected_campaigns);
+        return;
+    }
 
     // if window.highlight_ann_campaign is set, select the corresponding campaign
     if (window.highlight_ann_campaign && availableSet.has(window.highlight_ann_campaign)) {
@@ -910,9 +1574,7 @@ function toggleRaw() {
 
 function toggleAnnotatorNames() {
     showAnnotatorNames = !showAnnotatorNames;
-
-    const label = showAnnotatorNames ? "Hide annotator names" : "Show annotator names";
-    $("#toggle-annotator-names-btn small").text(label);
+    updateAnnotatorNamesToggleAvailability();
 
     if (window.generated_outputs) {
         createOutputBoxes(window.generated_outputs);
@@ -955,6 +1617,7 @@ function updateDisplayedAnnotations() {
 
     restoreCollapsedStates();
     enableTooltips();
+    applyBrowseMatchHighlights();
 }
 
 $('#page-input').keypress(function (event) {
@@ -966,6 +1629,35 @@ $('#page-input').keypress(function (event) {
 
 $("#dataset-select").on("change", changeDataset);
 $("#split-select").on("change", changeSplit);
+$("#browse-filter-match-mode").on("change", clearFilteredQueue);
+$("#browse-add-condition").on("click", function () {
+    addBrowseFilterCondition();
+});
+$("#browse-apply-filters").on("click", applyBrowseFilters);
+$("#browse-reset-filters").on("click", resetBrowseFilters);
+$("#browse-toggle-highlights").on("click", function () {
+    browseHighlightsEnabled = !browseHighlightsEnabled;
+    $(this).text(browseHighlightsEnabled ? "Disable highlights" : "Enable highlights");
+    applyBrowseMatchHighlights();
+});
+$("#browse-filter-conditions").on("change", ".browse-condition-field", function () {
+    const row = $(this).closest(".browse-filter-condition");
+    renderBrowseConditionControls(row, browseConditionValues(row));
+    clearFilteredQueue();
+});
+$("#browse-filter-conditions").on("change", ".browse-condition-op", function () {
+    const row = $(this).closest(".browse-filter-condition");
+    row.find(".browse-condition-value").prop("disabled", ["missing", "not_missing"].includes($(this).val()));
+    clearFilteredQueue();
+});
+$("#browse-filter-conditions").on("input change", ".browse-condition-value, .browse-condition-slider-label", clearFilteredQueue);
+$("#browse-filter-conditions").on("click", ".browse-remove-condition", function () {
+    $(this).closest(".browse-filter-condition").remove();
+    if (!$(".browse-filter-condition").length) {
+        addBrowseFilterCondition();
+    }
+    clearFilteredQueue();
+});
 
 // Handle permalink button clicks
 $(document).on('click', '.permalink-btn', function (e) {
@@ -1090,6 +1782,7 @@ $(document).ready(function () {
     if (window.display_example != null) {
         const e = window.display_example;
         changeExample(e.dataset, e.split, e.example_idx);
+        loadBrowseFilterSchema();
     }
     else {
         // select the first dataset from the selectbox

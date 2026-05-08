@@ -27,6 +27,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import factgenie.analysis as analysis
 import factgenie.crowdsourcing as crowdsourcing
 import factgenie.llm_campaign as llm_campaign
+import factgenie.querying as querying
 import factgenie.redo as redo
 import factgenie.utils as utils
 import factgenie.workflows as workflows
@@ -206,6 +207,9 @@ def is_view_allowed(path):
     if path.startswith("/analyze"):
         return is_analyze_public()
 
+    if path.startswith("/query"):
+        return is_browse_public() or is_analyze_public()
+
     # and lock the rest of pages
     return False
 
@@ -266,6 +270,49 @@ def _filter_campaigns_for_viewer(campaigns, visible_dataset_ids):
         filtered[campaign_id] = campaign
 
     return filtered
+
+
+def _get_visible_query_scope():
+    is_authenticated = _is_authenticated_viewer()
+    datasets = workflows.get_local_dataset_overview(app)
+    datasets = {k: v for k, v in datasets.items() if v["enabled"]}
+    visible_datasets = _filter_datasets_for_viewer(datasets, is_authenticated=is_authenticated)
+    campaigns = workflows.get_sorted_campaign_list(
+        app, modes=[CampaignMode.CROWDSOURCING, CampaignMode.LLM_EVAL, CampaignMode.EXTERNAL]
+    )
+    if not is_authenticated:
+        campaigns = _filter_campaigns_for_viewer(campaigns, visible_dataset_ids=set(visible_datasets.keys()))
+    return set(campaigns.keys()), set(visible_datasets.keys())
+
+
+def _get_query_tables():
+    workflows.refresh_indexes(app)
+    visible_campaign_ids, visible_dataset_ids = _get_visible_query_scope()
+    return querying.build_query_tables(
+        app,
+        visible_campaign_ids=visible_campaign_ids,
+        visible_dataset_ids=visible_dataset_ids,
+    )
+
+
+def _campaign_pseudonymizes_annotators(campaign_id):
+    try:
+        campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    except Exception:
+        return True
+    return campaign.metadata.get("config", {}).get("pseudonymize_annotators", True) is not False
+
+
+def _can_reveal_campaign_annotator_ids(campaign_id, is_authenticated):
+    return bool(is_authenticated or not _campaign_pseudonymizes_annotators(campaign_id))
+
+
+def _has_public_annotator_name_campaign(visible_dataset_ids):
+    campaigns = workflows.get_sorted_campaign_list(
+        app, modes=[CampaignMode.CROWDSOURCING, CampaignMode.LLM_EVAL, CampaignMode.EXTERNAL]
+    )
+    campaigns = _filter_campaigns_for_viewer(campaigns, visible_dataset_ids=set(visible_dataset_ids))
+    return any(not _campaign_pseudonymizes_annotators(campaign_id) for campaign_id in campaigns)
 
 
 # -----------------
@@ -330,13 +377,15 @@ def analyze_detail(campaign_id):
         if campaign_dataset_ids and not campaign_dataset_ids.issubset(visible_dataset_ids):
             return redirect(app.config["host_prefix"] + "/analyze")
 
-    statistics = analysis.compute_statistics(app, campaign, show_real_annotator_names=is_authenticated)
+    show_real_annotator_names = _can_reveal_campaign_annotator_ids(campaign_id, is_authenticated)
+    statistics = analysis.compute_statistics(app, campaign, show_real_annotator_names=show_real_annotator_names)
 
     return render_template(
         "pages/analyze_detail.html",
         statistics=statistics,
         campaign=campaign,
         is_authenticated=is_authenticated,
+        show_real_annotator_names=show_real_annotator_names,
         host_prefix=app.config["host_prefix"],
     )
 
@@ -567,9 +616,23 @@ def _attach_annotation_aliases(example_data):
             if campaign_id not in alias_cache:
                 alias_cache[campaign_id] = _annotator_alias_map(campaign_id)
 
-            alias = alias_cache[campaign_id].get(annotator_id.lower())
-            if alias:
-                annotation["annotator_alias"] = alias
+            alias = alias_cache[campaign_id].get(annotator_id.lower()) or querying._fallback_alias(campaign_id, annotator_id)
+            annotation["annotator_alias"] = alias
+
+
+def _sanitize_example_annotator_ids(example_data, is_authenticated):
+    generated_outputs = example_data.get("generated_outputs")
+    if not isinstance(generated_outputs, list):
+        return
+
+    for output in generated_outputs:
+        annotations = output.get("annotations", [])
+        if not isinstance(annotations, list):
+            continue
+        for annotation in annotations:
+            campaign_id = annotation.get("campaign_id")
+            if not _can_reveal_campaign_annotator_ids(campaign_id, is_authenticated):
+                annotation.pop("annotator_id", None)
 
 
 @app.route("/annotator/exists", methods=["GET"])
@@ -692,12 +755,12 @@ def browse():
     setup_id = request.args.get("setup_id")
     ann_campaign = request.args.get("ann_campaign")
     is_authenticated = _is_authenticated_viewer()
-    show_annotator_toggle = is_authenticated or is_annotator_name_toggle_public()
 
     workflows.refresh_indexes(app)
     datasets = workflows.get_local_dataset_overview(app)
     datasets = {k: v for k, v in datasets.items() if v["enabled"]}
     visible_datasets = _filter_datasets_for_viewer(datasets, is_authenticated=is_authenticated)
+    show_annotator_toggle = is_authenticated or _has_public_annotator_name_campaign(visible_datasets.keys())
 
     browse_access_error = None
     response_status = 200
@@ -738,6 +801,43 @@ def browse():
         ),
         response_status,
     )
+
+
+@app.route("/query/schema", methods=["GET"])
+@login_required
+def query_schema():
+    is_authenticated = _is_authenticated_viewer()
+    dataset = str(request.args.get("dataset") or "").strip()
+    split = str(request.args.get("split") or "").strip()
+    tables = _get_query_tables()
+    scoped_tables = querying.scope_tables(
+        tables,
+        datasets=[dataset] if dataset else None,
+        splits=[split] if split else None,
+    )
+    return jsonify(success=True, **querying.schema_payload(scoped_tables, authenticated=is_authenticated))
+
+
+@app.route("/query/filter", methods=["POST"])
+@login_required
+def query_filter():
+    is_authenticated = _is_authenticated_viewer()
+    data = request.get_json() or {}
+    dataset = str(data.get("dataset") or "").strip()
+    split = str(data.get("split") or "").strip()
+    filters = data.get("filters") or {}
+    limit = int(data.get("limit") or 500)
+    tables = querying.scope_tables(
+        _get_query_tables(),
+        datasets=[dataset] if dataset else None,
+        splits=[split] if split else None,
+    )
+    try:
+        rows = querying.apply_condition_filter(tables, filters, authenticated=is_authenticated)
+    except querying.QueryFilterError as exc:
+        return utils.error(str(exc))
+    payload = querying.table_payload(rows, limit=limit, authenticated=is_authenticated)
+    return jsonify(success=True, **payload)
 
 
 @app.route("/clear_campaign", methods=["POST"])
@@ -838,6 +938,13 @@ def redo_revisions_json(campaign_id):
 @login_required
 def redo_revisions_csv(campaign_id):
     return _download_csv(redo.load_revision_log(campaign_id), f"{campaign_id}-redo-revisions.csv")
+
+
+@app.route("/redo/<campaign_id>/filter_data", methods=["GET"])
+@login_required
+def redo_filter_data(campaign_id):
+    campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    return jsonify(success=True, **redo.build_admin_filter_payload(campaign))
 
 
 @app.route("/redo/<campaign_id>/items", methods=["POST"])
@@ -1099,7 +1206,9 @@ def render_example():
 
     try:
         example_data = workflows.get_example_data(app, dataset_id, split, example_idx, setup_id)
+        is_authenticated = _is_authenticated_viewer()
         _attach_annotation_aliases(example_data)
+        _sanitize_example_annotator_ids(example_data, is_authenticated=is_authenticated)
         example_data = sanitize_json(example_data)
         return jsonify(example_data)
     except Exception as e:
@@ -1505,6 +1614,18 @@ def set_campaign_hidden_from_regular_users():
     hidden_from_regular_users = data.get("hiddenFromRegularUsers")
 
     workflows.set_campaign_hidden_from_regular_users(app, campaign_id, hidden_from_regular_users)
+
+    return utils.success()
+
+
+@app.route("/set_campaign_pseudonymize_annotators", methods=["POST"])
+@login_required
+def set_campaign_pseudonymize_annotators():
+    data = request.get_json()
+    campaign_id = data.get("campaignId")
+    pseudonymize_annotators = data.get("pseudonymizeAnnotators")
+
+    workflows.set_campaign_pseudonymize_annotators(app, campaign_id, pseudonymize_annotators)
 
     return utils.success()
 

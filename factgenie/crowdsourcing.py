@@ -293,6 +293,7 @@ def parse_crowdsourcing_config(config):
         "annotation_granularity": config.get("annotationGranularity"),
         "annotation_overlap_allowed": config.get("annotationOverlapAllowed", False),
         "annotate_reason": config.get("annotateReason", False),
+        "pseudonymize_annotators": config.get("pseudonymizeAnnotators", True),
         "service": config.get("service"),
         "sort_order": config.get("sortOrder"),
         "annotation_span_categories": config.get("annotationSpanCategories"),

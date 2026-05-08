@@ -655,6 +655,16 @@ def set_campaign_hidden_from_regular_users(app, campaign_id, hidden_from_regular
     campaign.update_metadata()
 
 
+def set_campaign_pseudonymize_annotators(app, campaign_id, pseudonymize_annotators):
+    campaign = load_campaign(app, campaign_id=campaign_id)
+
+    if campaign is None:
+        raise ValueError(f"Unknown campaign {campaign_id}")
+
+    campaign.metadata.setdefault("config", {})["pseudonymize_annotators"] = bool(pseudonymize_annotators)
+    campaign.update_metadata()
+
+
 def upload_dataset(app, dataset_id, dataset_name, dataset_description, dataset_format, dataset_data):
     params = {
         "text": {"suffix": "txt", "class": "basic.PlainTextDataset", "type": "default"},

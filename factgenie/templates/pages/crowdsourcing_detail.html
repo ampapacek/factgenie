@@ -47,7 +47,21 @@
               <span id="statusBtn{{ rowId }}" class="badge bg-assigned"><i class="fa fa-edit"></i> {{ stats.assigned
                 }}</span>
               <span id="statusBtn{{ rowId }}" class="badge bg-free"><i class="fa fa-clock-o"></i> {{ stats.free
-                }}</span>
+              }}</span>
+            </div>
+          </dd>
+          <dt class="col-sm-3"> Public anonymization </dt>
+          <dd class="col-sm-9">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="{{ campaign_id }}-pseudonymize-switch-detail"
+                {% if metadata.config.get('pseudonymize_annotators', True) %} checked {% endif %}
+                onclick="setCampaignPseudonymizeAnnotators('{{ campaign_id }}', this.checked)">
+              <label class="form-check-label" for="{{ campaign_id }}-pseudonymize-switch-detail">
+                Use aliases for logged-out Browse and Analyze
+              </label>
+            </div>
+            <div class="small text-muted">
+              Authenticated users can see both aliases and real annotator names.
             </div>
           </dd>
         </dl>
@@ -101,13 +115,13 @@
             type="button"
             data-bs-toggle="collapse"
             data-bs-target="#redo-admin-body"
-            aria-expanded="true"
+            aria-expanded="false"
             aria-controls="redo-admin-body"
           >
-            <i class="fa fa-chevron-up"></i> Collapse
+            <i class="fa fa-chevron-down"></i> Expand
           </button>
         </div>
-        <div class="collapse show mt-3" id="redo-admin-body">
+        <div class="collapse mt-3" id="redo-admin-body">
         <div class="d-flex flex-wrap gap-2 mb-3">
           <a href="{{ host_prefix }}/redo/{{ campaign_id }}/queue.json" class="btn btn-sm btn-outline-secondary">
             <i class="fa fa-download"></i> Queue JSON
@@ -194,10 +208,10 @@
               <th>Preview</th>
             </tr>
           </thead>
-          <tbody>
+        <tbody>
             {% for item in redo_admin.examples %}
             <tr class="redo-row" data-annotator-id="{{ item.annotator_id }}"
-              data-filter-data='{{ item.filter_data | tojson }}'>
+              data-redo-key="{{ item.row_key }}">
               <td>
                 <input type="checkbox" class="form-check-input redo-row-checkbox"
                   data-annotator-id="{{ item.annotator_id }}"
@@ -209,7 +223,8 @@
                   data-example-idx="{{ item.example_idx }}"
                   data-skipped="{{ 'true' if item.skipped else 'false' }}"
                   data-redo-status="{{ item.redo_status }}"
-                  data-redo-id="{{ item.redo_id }}">
+                  data-redo-id="{{ item.redo_id }}"
+                  data-redo-key="{{ item.row_key }}">
               </td>
               <td>{{ item.annotator_id }}</td>
               <td>{{ item.annotator_alias }}</td>
@@ -464,8 +479,61 @@
     icon.attr("class", expanded ? "fa fa-chevron-up" : "fa fa-chevron-down");
   }
 
+  setRedoAdminCollapseButton(false);
+
+  var redoFilterDataCache = new Map();
+  var redoFilterDataLoaded = false;
+  var redoFilterDataLoading = null;
+
+  function redoRowKey(row) {
+    return row.data("redo-key") || JSON.stringify([
+      String(row.data("annotator-id") || ""),
+      String(row.data("annotator-group") || ""),
+      String(row.data("batch-idx") || ""),
+      String(row.data("dataset") || ""),
+      String(row.data("split") || ""),
+      String(row.data("setup-id") || ""),
+      String(row.data("example-idx") || ""),
+    ]);
+  }
+
+  function loadRedoFilterData() {
+    if (redoFilterDataLoaded) {
+      return Promise.resolve(redoFilterDataCache);
+    }
+    if (redoFilterDataLoading) {
+      return redoFilterDataLoading;
+    }
+    redoFilterDataLoading = new Promise(function (resolve, reject) {
+      $.getJSON(`${url_prefix}/redo/${window.campaign_id}/filter_data`)
+        .done(function (response) {
+          redoFilterDataCache.clear();
+          (response.rows || []).forEach(function (row) {
+            if (!row || !row.row_key) {
+              return;
+            }
+            redoFilterDataCache.set(String(row.row_key), row.filter_data || {});
+          });
+          redoFilterDataLoaded = true;
+          resolve(redoFilterDataCache);
+        })
+        .fail(function (error) {
+          redoFilterDataLoading = null;
+          reject(error);
+        });
+    });
+    return redoFilterDataLoading;
+  }
+
   $("#redo-admin-body").on("shown.bs.collapse", function () {
     setRedoAdminCollapseButton(true);
+    loadRedoFilterData()
+      .then(function () {
+        filterRedoRows();
+      })
+      .catch(function () {
+        $("#redo-filter-error").text("Could not load redo filter data.");
+      });
   });
   $("#redo-admin-body").on("hidden.bs.collapse", function () {
     setRedoAdminCollapseButton(false);
@@ -475,6 +543,18 @@
     const annotatorId = selectedAnnotatorId();
     let visibleCount = 0;
     const regexErrors = [];
+    const activeConditions = redoActiveConditions();
+    if (!redoFilterDataLoaded && activeConditions.length > 0) {
+      $("#redo-filter-count").text("Loading filter data...");
+      loadRedoFilterData()
+        .then(function () {
+          filterRedoRows();
+        })
+        .catch(function () {
+          $("#redo-filter-error").text("Could not load redo filter data.");
+        });
+      return;
+    }
     $(".redo-row").each(function () {
       const row = $(this);
       const show = (!annotatorId || row.data("annotator-id") === annotatorId) && rowMatchesRedoFilters(row, regexErrors);
@@ -494,13 +574,7 @@
   const redoFilterOptions = {{ redo_admin.filter_options | tojson }};
 
   function redoFilterData(row) {
-    const raw = row.attr("data-filter-data") || "{}";
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch (error) {
-      return {};
-    }
+    return redoFilterDataCache.get(redoRowKey(row)) || {};
   }
 
   function redoFilterTextOperators(field) {

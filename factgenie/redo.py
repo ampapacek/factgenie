@@ -93,6 +93,21 @@ def item_key(item):
     return tuple(normalize_key_value(field, item.get(field)) for field in KEY_FIELDS)
 
 
+def admin_row_key(row):
+    return json.dumps(
+        [
+            normalize_annotator_id(row.get("annotator_id")),
+            normalize_key_value("annotator_group", row.get("annotator_group")),
+            normalize_key_value("batch_idx", row.get("batch_idx", row.get("example_idx", 0))),
+            normalize_key_value("dataset", row.get("dataset")),
+            normalize_key_value("split", row.get("split")),
+            normalize_key_value("setup_id", row.get("setup_id")),
+            normalize_key_value("example_idx", row.get("example_idx")),
+        ],
+        ensure_ascii=False,
+    )
+
+
 def row_to_item(campaign_id, row, annotator_id=None, source=None, instruction=None, created_by="admin"):
     now = utc_now()
     annotator = normalize_annotator_id(annotator_id if annotator_id is not None else row.get("annotator_id"))
@@ -487,6 +502,14 @@ def slider_labels_from_config(campaign):
     ]
 
 
+def slider_labels_from_record(record):
+    labels = []
+    for slider in record.get("sliders", []) if record else []:
+        if isinstance(slider, dict) and slider.get("label") is not None:
+            labels.append(str(slider["label"]))
+    return labels
+
+
 def text_values_for_keys(value, keys):
     texts = []
     if isinstance(value, dict):
@@ -601,8 +624,7 @@ def build_admin_overview(campaign, alias_map=None):
         existing = queue_by_key.get(item_key(item))
         active_record = latest_active_record(campaign.campaign_id, item)
         flags = active_record.get("flags", []) if active_record else []
-        filter_data = span_filter_data(active_record, categories)
-        slider_labels.update(slider["label"] for slider in filter_data["sliders"])
+        slider_labels.update(slider_labels_from_record(active_record))
         example = {
             "annotator_id": annotator_id,
             "annotator_alias": alias_map.get(annotator_id.lower(), ""),
@@ -616,7 +638,7 @@ def build_admin_overview(campaign, alias_map=None):
             "skipped": is_skip_selected(flags),
             "redo_id": existing.get("redo_id") if existing else "",
             "redo_status": existing.get("status") if existing else "",
-            "filter_data": filter_data,
+            "row_key": admin_row_key(row),
         }
         examples.append(example)
 
@@ -643,3 +665,26 @@ def build_admin_overview(campaign, alias_map=None):
             "sliders": sorted(slider_labels, key=lambda value: value.casefold()),
         },
     }
+
+
+def build_admin_filter_payload(campaign):
+    categories = category_lookup(campaign)
+    db = campaign.db.copy() if hasattr(campaign, "db") else pd.DataFrame()
+    rows = []
+    if db.empty:
+        return {"rows": rows}
+
+    for _, row in db.iterrows():
+        annotator_id = normalize_annotator_id(row.get("annotator_id"))
+        if not annotator_id:
+            continue
+        item = row_to_item(campaign.campaign_id, row, annotator_id=annotator_id)
+        active_record = latest_active_record(campaign.campaign_id, item)
+        rows.append(
+            {
+                "row_key": admin_row_key(row),
+                "filter_data": span_filter_data(active_record, categories),
+            }
+        )
+
+    return {"rows": rows}

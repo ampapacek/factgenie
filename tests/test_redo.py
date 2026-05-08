@@ -146,9 +146,11 @@ def test_admin_overview_exposes_span_filter_data_for_category_and_reasons(monkey
     )
 
     overview = redo.build_admin_overview(campaign)
-    filter_data = overview["examples"][0]["filter_data"]
+    payload = redo.build_admin_filter_payload(campaign)
+    filter_data = payload["rows"][0]["filter_data"]
 
     assert "Chybí" in overview["filter_options"]["categories"]
+    assert "row_key" in overview["examples"][0]
     assert "Chybí" in filter_data["span_categories"]
     assert filter_data["has_chybi"] is True
     assert filter_data["has_missing_reason"] is True
@@ -173,7 +175,8 @@ def test_admin_overview_exposes_text_and_slider_filter_data(monkeypatch, tmp_pat
     path.write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
 
     overview = redo.build_admin_overview(campaign)
-    filter_data = overview["examples"][0]["filter_data"]
+    payload = redo.build_admin_filter_payload(campaign)
+    filter_data = payload["rows"][0]["filter_data"]
 
     assert "Tone" in overview["filter_options"]["sliders"]
     assert "Which claim is supported?" in filter_data["question_texts"]
@@ -193,7 +196,7 @@ def test_admin_overview_treats_top10_reasons_as_present_for_chybi_filter(monkeyp
         [{"type": 6, "text": "①", "start": 0, "reason": "InTop10 InSeafile"}],
         end_timestamp=20,
     )
-    assert redo.build_admin_overview(campaign)["examples"][0]["filter_data"]["has_chybi_without_top10"] is False
+    assert redo.build_admin_filter_payload(campaign)["rows"][0]["filter_data"]["has_chybi_without_top10"] is False
 
     write_active_record_with_annotations(
         "redo-test",
@@ -201,7 +204,7 @@ def test_admin_overview_treats_top10_reasons_as_present_for_chybi_filter(monkeyp
         [{"type": 6, "text": "①", "start": 0, "reason": "NotInTop10 InSeafile"}],
         end_timestamp=30,
     )
-    assert redo.build_admin_overview(campaign)["examples"][0]["filter_data"]["has_chybi_without_top10"] is False
+    assert redo.build_admin_filter_payload(campaign)["rows"][0]["filter_data"]["has_chybi_without_top10"] is False
 
 
 def test_admin_overview_marks_chybi_without_top10_when_reason_lacks_token(monkeypatch, tmp_path):
@@ -213,7 +216,7 @@ def test_admin_overview_marks_chybi_without_top10_when_reason_lacks_token(monkey
         [{"type": 6, "text": "①", "start": 0, "reason": "InSeafile missing example"}],
     )
 
-    filter_data = redo.build_admin_overview(campaign)["examples"][0]["filter_data"]
+    filter_data = redo.build_admin_filter_payload(campaign)["rows"][0]["filter_data"]
 
     assert filter_data["has_chybi"] is True
     assert filter_data["has_missing_reason"] is False
