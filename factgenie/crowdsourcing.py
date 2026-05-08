@@ -24,6 +24,10 @@ from factgenie.campaign import CampaignMode, ExampleStatus
 logger = logging.getLogger("factgenie")
 
 
+def is_preview_annotator(annotator_id):
+    return annotator_id == PREVIEW_STUDY_ID
+
+
 def create_crowdsourcing_campaign(app, campaign_id, config, campaign_data):
     # create a new directory
     if os.path.exists(os.path.join(CAMPAIGN_DIR, campaign_id)):
@@ -396,6 +400,7 @@ def get_redo_annotation_set(app, campaign, db, annotator_id, include_completed=F
                 "example_idx": int(item["example_idx"]),
                 "batch_idx": int(item["batch_idx"]),
                 "annotator_group": int(item.get("annotator_group", 0)),
+                "output": active_record.get("output", ""),
                 "annotations": active_record.get("annotations", []),
                 "flags": active_record.get("flags", []),
                 "options": active_record.get("options", []),
@@ -658,6 +663,10 @@ def keep_redo_annotation(app, campaign_id, redo_id, annotator_id):
 
 
 def save_annotations(app, campaign_id, annotation_set, annotator_id, is_backup_import=False):
+    if is_preview_annotator(annotator_id) and not is_backup_import:
+        logger.info(f"Rejected preview annotation submit for {campaign_id}")
+        return utils.error("Preview mode is read-only. Preview annotations are not saved.")
+
     now = int(time.time())
 
     save_dir = os.path.join(CAMPAIGN_DIR, campaign_id, "files")
@@ -677,7 +686,7 @@ def save_annotations(app, campaign_id, annotation_set, annotator_id, is_backup_i
         if not is_backup_import:
             batch_annotator_id = db.loc[mask].iloc[0]["annotator_id"]
 
-            if batch_annotator_id != annotator_id and annotator_id != PREVIEW_STUDY_ID:
+            if batch_annotator_id != annotator_id and not is_preview_annotator(annotator_id):
                 logger.info(
                     f"Annotations rejected: batch {batch_idx} in {campaign_id} not assigned to annotator {annotator_id}"
                 )
@@ -729,7 +738,7 @@ def save_annotations(app, campaign_id, annotation_set, annotator_id, is_backup_i
 
     final_message_html = markdown.markdown(campaign.metadata["config"]["final_message"])
 
-    if annotator_id == PREVIEW_STUDY_ID:
+    if is_preview_annotator(annotator_id):
         preview_message = f'<div class="alert alert-info" role="alert"><p>You are in a preview mode. Click <a href="{app.config["host_prefix"]}/crowdsourcing"><b>here</b></a> to go back to the campaign view.</p><p><i>This message will not be displayed to the annotators.</i></p></div>'
 
         return utils.success(message=final_message_html + preview_message)

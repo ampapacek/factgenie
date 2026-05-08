@@ -105,9 +105,11 @@ def get_example_data(app, dataset_id, split, example_idx, setup_id=None):
         raise ValueError("Example cannot be rendered")
 
     if setup_id:
-        generated_outputs = [
-            get_output_for_setup(dataset_id, split, example_idx, setup_id, app=app, force_reload=False)
-        ]
+        setup_output = get_output_for_setup(dataset_id, split, example_idx, setup_id, app=app, force_reload=False)
+        if setup_output is None:
+            generated_outputs = [{"setup_id": slugify(setup_id), "output": ""}]
+        else:
+            generated_outputs = [setup_output]
     else:
         generated_outputs = get_outputs(dataset_id, split, example_idx, app=app, force_reload=False)
 

@@ -549,6 +549,32 @@ def test_blank_or_placeholder_annotator_id_keeps_auth_page_before_batch_load(mon
     assert "instructions" not in captured["kwargs"]
 
 
+def test_preview_batch_link_bypasses_local_auth_page(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    campaign.metadata["config"]["service"] = "local"
+    app_mod.app.config.update(login={"active": False}, host_prefix="")
+
+    monkeypatch.setattr(workflows, "load_campaign", lambda app, campaign_id: campaign)
+    monkeypatch.setattr(workflows, "refresh_indexes", lambda app: None)
+    monkeypatch.setattr(crowdsourcing, "ensure_crowdsourcing_page_current", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        crowdsourcing,
+        "get_annotator_batch",
+        lambda *args, **kwargs: (
+            [{"dataset": "dataset-a", "split": "test", "setup_id": "setup-a", "example_idx": 0, "batch_idx": 0}],
+            {"mode": "normal", "is_redo": False, "empty_redo_fallback": False, "show_completed": False},
+        ),
+    )
+    monkeypatch.setattr(app_mod.utils, "render_from_folder", lambda *args, **kwargs: "preview-shell")
+
+    client = app_mod.app.test_client()
+    response = client.get("/annotate/redo-test?batch_idx=0")
+
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "preview-shell"
+
+
 def test_build_auth_redirect_template_points_to_annotation_route():
     assert app_mod._build_auth_redirect_template("", "redo-test") == "/annotate/redo-test?annotatorId=__ANNOTATOR__"
 
@@ -613,6 +639,55 @@ def test_normal_submit_rejects_redo_payload(monkeypatch, tmp_path):
     payload = response.get_json()
     assert payload["success"] is False
     assert "Save current item" in payload["error"]
+
+
+def test_normal_submit_rejects_preview_payload_before_save(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    make_campaign(tmp_path)
+    app_mod.app.config.update(login={"active": False}, host_prefix="")
+
+    def fail_if_save_called(*args, **kwargs):
+        raise AssertionError("preview submit should be rejected before save_annotations is called")
+
+    monkeypatch.setattr(crowdsourcing, "save_annotations", fail_if_save_called)
+
+    response = app_mod.app.test_client().post(
+        "/submit_annotations",
+        json={
+            "campaign_id": "redo-test",
+            "annotator_id": app_mod.PREVIEW_STUDY_ID,
+            "annotation_set": [{"batch_idx": 0, "annotations": [], "flags": [], "options": [], "sliders": []}],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is False
+    assert "read-only" in payload["error"]
+
+
+def test_save_annotations_rejects_preview_annotator(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    monkeypatch.setattr(workflows, "load_campaign", lambda app, campaign_id: campaign)
+    app = SimpleNamespace(db={"lock": threading.Lock()})
+
+    flask_app = Flask(__name__)
+    with flask_app.app_context():
+        response = crowdsourcing.save_annotations(
+            app,
+            "redo-test",
+            [{"batch_idx": 0, "annotations": [], "flags": [], "options": [], "sliders": [], "textFields": []}],
+            app_mod.PREVIEW_STUDY_ID,
+        )
+
+    payload = response.get_json()
+    assert payload["success"] is False
+    assert "read-only" in payload["error"]
+
+    campaign.load_db()
+    assert campaign.db.loc[0, "status"] == ExampleStatus.FINISHED
+    assert campaign.db.loc[0, "annotator_id"] == "ann-a"
 
 
 def test_archive_replace_archives_duplicates_and_active_index_skips_revisions(monkeypatch, tmp_path):
@@ -938,6 +1013,7 @@ def test_get_annotator_batch_serves_redo_prefill_then_falls_back(monkeypatch, tm
 
     assert context["is_redo"] is True
     assert annotation_set[0]["redo_id"] == add_result["added"][0]["redo_id"]
+    assert annotation_set[0]["output"] == "old output"
     assert annotation_set[0]["annotations"][0]["text"] == "old"
     assert annotation_set[0]["textFields"][0]["value"] == "old note"
 
@@ -971,8 +1047,41 @@ def test_get_annotator_batch_can_review_completed_redo_items(monkeypatch, tmp_pa
     assert context["is_redo"] is True
     assert context["show_completed"] is True
     assert annotation_set[0]["redo_id"] == add_result["added"][0]["redo_id"]
+    assert annotation_set[0]["output"] == "old output"
     assert annotation_set[0]["redo_status"] == redo.STATUS_COMPLETED
     assert annotation_set[0]["annotations"][0]["text"] == "saved"
+
+
+def test_get_example_data_with_missing_setup_output_returns_placeholder(monkeypatch):
+    class DummyDataset:
+        splits = ["test"]
+
+        def get_example(self, split, example_idx):
+            assert split == "test"
+            assert example_idx == 0
+            return {"question": "Q"}
+
+        def render(self, example):
+            return "<div>Example</div>"
+
+    app = SimpleNamespace(
+        db={"datasets_obj": {"dataset-a": DummyDataset()}},
+        config={"host_prefix": ""},
+    )
+
+    monkeypatch.setattr(workflows, "get_output_for_setup", lambda *args, **kwargs: None)
+    monkeypatch.setattr(workflows, "get_annotations", lambda *args, **kwargs: [])
+
+    example_data = workflows.get_example_data(app, "dataset-a", "test", 0, "missing-setup")
+
+    assert example_data["html"] == "<div>Example</div>"
+    assert example_data["generated_outputs"] == [
+        {
+            "setup_id": "missing-setup",
+            "output": "",
+            "annotations": [],
+        }
+    ]
 
 
 def test_full_campaign_export_excludes_redo_artifacts(monkeypatch, tmp_path):
