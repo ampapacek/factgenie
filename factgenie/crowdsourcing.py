@@ -28,6 +28,42 @@ def is_preview_annotator(annotator_id):
     return annotator_id == PREVIEW_STUDY_ID
 
 
+def _sanitize_redo_annotations_for_campaign(campaign, item, annotations):
+    if not isinstance(annotations, list):
+        return []
+
+    categories = campaign.metadata.get("config", {}).get("annotation_span_categories", [])
+    valid_annotations = []
+
+    for index, annotation in enumerate(annotations):
+        try:
+            annotation_type = int(annotation.get("type"))
+        except (TypeError, ValueError, AttributeError):
+            annotation_type = None
+
+        if annotation_type is not None and 0 <= annotation_type < len(categories):
+            valid_annotations.append(annotation)
+            continue
+
+        logger.warning(
+            "Skipping redo annotation with unknown type: campaign=%s redo_id=%s dataset=%s split=%s setup_id=%s example_idx=%s annotator_id=%s annotation_index=%s type=%r text=%r start=%r available_types=%s",
+            campaign.campaign_id,
+            item.get("redo_id"),
+            item.get("dataset"),
+            item.get("split"),
+            item.get("setup_id"),
+            item.get("example_idx"),
+            item.get("annotator_id"),
+            index,
+            annotation.get("type") if isinstance(annotation, dict) else None,
+            annotation.get("text") if isinstance(annotation, dict) else None,
+            annotation.get("start") if isinstance(annotation, dict) else None,
+            [category.get("name", "") for category in categories],
+        )
+
+    return valid_annotations
+
+
 def create_crowdsourcing_campaign(app, campaign_id, config, campaign_data):
     # create a new directory
     if os.path.exists(os.path.join(CAMPAIGN_DIR, campaign_id)):
@@ -392,6 +428,7 @@ def get_redo_annotation_set(app, campaign, db, annotator_id, include_completed=F
 
     for item in items:
         active_record = redo.latest_active_record(campaign.campaign_id, item) or {}
+        annotations = _sanitize_redo_annotations_for_campaign(campaign, item, active_record.get("annotations", []))
         annotation_set.append(
             {
                 "dataset": item["dataset"],
@@ -401,7 +438,7 @@ def get_redo_annotation_set(app, campaign, db, annotator_id, include_completed=F
                 "batch_idx": int(item["batch_idx"]),
                 "annotator_group": int(item.get("annotator_group", 0)),
                 "output": active_record.get("output", ""),
-                "annotations": active_record.get("annotations", []),
+                "annotations": annotations,
                 "flags": active_record.get("flags", []),
                 "options": active_record.get("options", []),
                 "sliders": active_record.get("sliders", []),
