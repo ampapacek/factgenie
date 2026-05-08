@@ -944,7 +944,23 @@ def redo_revisions_csv(campaign_id):
 @login_required
 def redo_filter_data(campaign_id):
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
-    return jsonify(success=True, **redo.build_admin_filter_payload(campaign))
+    return jsonify(success=True, **redo.build_admin_filter_result(campaign))
+
+
+@app.route("/redo/<campaign_id>/filter", methods=["POST"])
+@login_required
+def redo_filter(campaign_id):
+    campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    data = request.get_json() or {}
+    try:
+        payload = redo.build_admin_filter_result(
+            campaign,
+            filters=data.get("filters") or {},
+            annotator_id=data.get("annotatorId") or "",
+        )
+    except querying.QueryFilterError as exc:
+        return utils.error(str(exc))
+    return jsonify(success=True, **payload)
 
 
 @app.route("/redo/<campaign_id>/items", methods=["POST"])
@@ -952,14 +968,24 @@ def redo_filter_data(campaign_id):
 def redo_add_items(campaign_id):
     data = request.get_json() or {}
     include_skipped = bool(data.get("includeSkipped", False))
+    include_completed = bool(data.get("includeCompleted", False))
     instruction = data.get("instruction") or None
     rows = data.get("items", [])
+    queue = redo.load_queue(campaign_id)
+    active_queue_by_key = {
+        redo.item_key(item): item
+        for item in queue.get("items", [])
+        if item.get("status") != redo.STATUS_CANCELLED
+    }
 
     selected_rows = []
     for row in rows:
         item = redo.row_to_item(campaign_id, row, annotator_id=row.get("annotator_id"))
         active_record = redo.latest_active_record(campaign_id, item)
         if not include_skipped and active_record and redo.is_skip_selected(active_record.get("flags", [])):
+            continue
+        existing = active_queue_by_key.get(redo.item_key(item))
+        if not include_completed and existing and existing.get("status") == redo.STATUS_COMPLETED:
             continue
         selected_rows.append(row)
 

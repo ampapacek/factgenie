@@ -9,6 +9,7 @@ var filteredQueueActive = false;
 var filteredQueueIndex = 0;
 var activeBrowseMatchDetails = [];
 var browseHighlightsEnabled = true;
+var browsePreviewMatchActive = false;
 var currentAnnInfo = new Map();
 var annotatorAliases = new Map();
 var annotatorAliasList = [
@@ -26,6 +27,7 @@ var annotatorAliasList = [
 var annotatorAliasStorageKey = "factgenie_browse_annotator_aliases";
 const DEFAULT_SPLIT_SIZES = [66, 33];
 const SPLIT_STORAGE_KEY = "factgenie:splitSizes";
+const REDO_PREVIEW_MATCH_PREFIX = "factgenie_redo_preview_match:";
 
 function loadSplitSizes() {
     try {
@@ -866,7 +868,7 @@ function shortenMatchText(text, maxLength) {
 function renderBrowseMatchDetails() {
     const panel = $("#browse-match-details");
     panel.empty();
-    if (!filteredQueueActive || !activeBrowseMatchDetails.length) {
+    if (!(filteredQueueActive || browsePreviewMatchActive) || !activeBrowseMatchDetails.length) {
         panel.hide();
         return;
     }
@@ -940,6 +942,9 @@ function markTextNodes(container, text) {
 }
 
 function markAnnotatableRange(box, start, length) {
+    if (start === null || start === undefined || String(start).trim() === "") {
+        return false;
+    }
     const numericStart = Number(start);
     const numericLength = Number(length);
     if (!Number.isFinite(numericStart) || !Number.isFinite(numericLength) || numericLength <= 0) {
@@ -997,7 +1002,7 @@ function markAnnotatableText(box, text) {
 
 function applyBrowseMatchHighlights() {
     clearBrowseMatchHighlights();
-    if (!browseHighlightsEnabled || !filteredQueueActive || !activeBrowseMatchDetails.length) {
+    if (!browseHighlightsEnabled || !(filteredQueueActive || browsePreviewMatchActive) || !activeBrowseMatchDetails.length) {
         return;
     }
     activeBrowseMatchDetails.forEach(function (detail) {
@@ -1376,6 +1381,7 @@ function clearFilteredQueue() {
     const wasActive = filteredQueueActive;
     filteredResults = [];
     filteredQueueActive = false;
+    browsePreviewMatchActive = false;
     filteredQueueIndex = 0;
     activeBrowseMatchDetails = [];
     renderBrowseMatchDetails();
@@ -1385,6 +1391,36 @@ function clearFilteredQueue() {
     $("#browse-toggle-highlights").hide();
     if (wasActive) {
         $("#page-input").val(current_example_idx);
+    }
+}
+
+function loadRedoPreviewMatch(params) {
+    const token = params.get("redo_preview_match");
+    if (!token) {
+        return;
+    }
+    try {
+        const storageKey = `${REDO_PREVIEW_MATCH_PREFIX}${token}`;
+        const payload = JSON.parse(window.localStorage.getItem(storageKey) || "{}");
+        const details = Array.isArray(payload.match_details) ? payload.match_details : [];
+        if (!details.length) {
+            return;
+        }
+        activeBrowseMatchDetails = details;
+        browsePreviewMatchActive = true;
+        window.highlight_ann_campaigns = matchedAnnotatorIdsFromDetails(details);
+        const firstDetail = details[0] || {};
+        if (!window.highlight_setup_id && firstDetail.setup_id) {
+            window.highlight_setup_id = firstDetail.setup_id;
+        }
+        if (!window.highlight_ann_campaign) {
+            window.highlight_ann_campaign = firstDetail.annotator_id || firstDetail.annotator_alias || null;
+        }
+        $("#browse-toggle-highlights").show();
+        renderBrowseMatchDetails();
+        window.localStorage.removeItem(storageKey);
+    } catch (error) {
+        console.warn("Could not load redo preview highlights.", error);
     }
 }
 
@@ -1778,6 +1814,7 @@ $(document).ready(function () {
     if (ann_campaign) {
         window.highlight_ann_campaign = ann_campaign;
     }
+    loadRedoPreviewMatch(urlParams);
 
     if (window.display_example != null) {
         const e = window.display_example;

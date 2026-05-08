@@ -13,6 +13,7 @@ import factgenie.app as app_mod
 import factgenie.analysis as analysis
 import factgenie.campaign as campaign_mod
 import factgenie.crowdsourcing as crowdsourcing
+import factgenie.querying as querying
 import factgenie.redo as redo
 import factgenie.workflows as workflows
 from factgenie.campaign import Campaign, CampaignMode, ExampleStatus, HumanCampaign
@@ -95,6 +96,34 @@ def write_active_record(campaign_id, filename, annotation_text="old", end_timest
     return record
 
 
+def active_record_with_overrides(campaign_id, annotation_text="old", end_timestamp=20, **overrides):
+    record = {
+        "dataset": "dataset-a",
+        "split": "test",
+        "setup_id": "setup-a",
+        "example_idx": 0,
+        "output": "old output",
+        "annotations": [{"type": 0, "start": 0, "text": annotation_text}],
+        "flags": [{"label": "Skip", "value": False}],
+        "options": [{"label": "Quality", "index": 0, "value": "Good"}],
+        "sliders": [{"label": "Tone", "value": 3}],
+        "text_fields": [{"label": "Note", "value": "old note"}],
+        "metadata": {
+            "campaign_id": campaign_id,
+            "annotator_id": "ann-a",
+            "annotator_group": 0,
+            "annotation_span_categories": [{"name": "Issue", "color": "#ff0000"}],
+            "end_timestamp": end_timestamp,
+        },
+    }
+    for key, value in overrides.items():
+        if key == "metadata":
+            record["metadata"].update(value)
+        else:
+            record[key] = value
+    return record
+
+
 def write_active_record_with_annotations(campaign_id, filename, annotations, end_timestamp=20):
     record = write_active_record(campaign_id, filename, end_timestamp=end_timestamp)
     record["annotations"] = annotations
@@ -114,6 +143,21 @@ def queue_row():
         "annotator_group": 0,
         "annotator_id": "ann-a",
     }
+
+
+def condition(field, op, value="", slider_label=None):
+    payload = {"field": field, "op": op, "value": value}
+    if slider_label is not None:
+        payload["sliderLabel"] = slider_label
+    return payload
+
+
+def redo_filter(campaign, conditions, mode="all", **kwargs):
+    return redo.build_admin_filter_result(
+        campaign,
+        filters={"mode": mode, "conditions": conditions},
+        **kwargs,
+    )
 
 
 def test_queue_duplicate_reuse_and_pending_mode(monkeypatch, tmp_path):
@@ -155,7 +199,7 @@ def test_admin_overview_exposes_span_filter_data_for_category_and_reasons(monkey
     assert filter_data["has_chybi"] is True
     assert filter_data["has_missing_reason"] is True
     assert filter_data["has_chybi_without_top10"] is True
-    assert {"category": "Chybí", "text": "①", "reason": "", "reason_missing": True} in filter_data["spans"]
+    assert {"category": "Chybí", "text": "①", "reason": "", "reason_missing": True, "start": 0} in filter_data["spans"]
 
 
 def test_admin_overview_exposes_text_and_slider_filter_data(monkeypatch, tmp_path):
@@ -178,12 +222,28 @@ def test_admin_overview_exposes_text_and_slider_filter_data(monkeypatch, tmp_pat
     payload = redo.build_admin_filter_payload(campaign)
     filter_data = payload["rows"][0]["filter_data"]
 
-    assert "Tone" in overview["filter_options"]["sliders"]
+    assert "Tone" not in overview["filter_options"]["sliders"]
+    assert "Tone" in payload["filter_options"]["sliders"]
     assert "Which claim is supported?" in filter_data["question_texts"]
     assert "Nested dataset question" in filter_data["question_texts"]
     assert "Generated answer" in filter_data["output_texts"]
     assert "free text note" in filter_data["any_texts"]
     assert {"label": "Tone", "value": "4", "numeric_value": 4.0, "missing": False} in filter_data["sliders"]
+
+
+def test_admin_overview_does_not_load_annotation_records(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+
+    def fail_if_loaded(*args, **kwargs):
+        raise AssertionError("admin overview should not read annotation JSONL records")
+
+    monkeypatch.setattr(redo, "latest_active_record", fail_if_loaded)
+
+    overview = redo.build_admin_overview(campaign)
+
+    assert overview["examples"]
+    assert overview["examples"][0]["skipped"] is None
 
 
 def test_admin_overview_treats_top10_reasons_as_present_for_chybi_filter(monkeypatch, tmp_path):
@@ -223,6 +283,170 @@ def test_admin_overview_marks_chybi_without_top10_when_reason_lacks_token(monkey
     assert filter_data["has_chybi_without_top10"] is True
 
 
+def test_admin_backend_filter_uses_same_span_semantics(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-20.jsonl",
+        [
+            {"type": 6, "text": "missing city", "start": 0, "reason": "NotInTop10"},
+            {"type": 0, "text": "other", "start": 5, "reason": "InSeafile"},
+        ],
+    )
+
+    crossed_spans = redo_filter(
+        campaign,
+        [
+            condition("span_category", "eq", "Chybí"),
+            condition("span_reason", "contains", "InSeafile"),
+        ],
+    )
+    same_span = redo_filter(
+        campaign,
+        [
+            condition("span_category", "eq", "Chybí"),
+            condition("span_reason", "contains", "NotInTop10"),
+        ],
+    )
+
+    assert crossed_spans["visible_count"] == 0
+    assert same_span["visible_count"] == 1
+    assert same_span["rows"][0]["match_details"][0]["start"] == 0
+
+
+def test_admin_backend_filter_requires_one_reason_to_match_multiple_reason_conditions(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-20.jsonl",
+        [
+            {"type": 6, "text": "one", "start": 0, "reason": "NotInTop10"},
+            {"type": 6, "text": "two", "start": 5, "reason": "InSeafile"},
+        ],
+    )
+
+    split_reasons = redo_filter(
+        campaign,
+        [
+            condition("span_reason", "contains", "NotInTop10"),
+            condition("span_reason", "contains", "InSeafile"),
+        ],
+    )
+
+    write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-30.jsonl",
+        [{"type": 6, "text": "one", "start": 0, "reason": "NotInTop10 InSeafile"}],
+        end_timestamp=30,
+    )
+    same_reason = redo_filter(
+        campaign,
+        [
+            condition("span_reason", "contains", "NotInTop10"),
+            condition("span_reason", "contains", "InSeafile"),
+        ],
+    )
+
+    assert split_reasons["visible_count"] == 0
+    assert same_reason["visible_count"] == 1
+
+
+def test_admin_backend_filter_match_any_slider_and_invalid_regex(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    record = write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-20.jsonl",
+        [{"type": 0, "text": "span", "start": 0, "reason": "plain reason"}],
+    )
+    record["sliders"] = [{"label": "Tone", "value": "4"}]
+    path = Path(redo.CAMPAIGN_DIR) / "redo-test" / "files" / "0-0-ann-a-20.jsonl"
+    path.write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    any_match = redo_filter(
+        campaign,
+        [
+            condition("span_reason", "contains", "absent"),
+            condition("slider", "lt", "5", slider_label="Tone"),
+        ],
+        mode="any",
+    )
+
+    with pytest.raises(querying.QueryFilterError):
+        redo_filter(campaign, [condition("span_reason", "regex", "[")])
+
+    assert any_match["visible_count"] == 1
+    assert "Tone" in any_match["filter_options"]["sliders"]
+
+
+def test_admin_backend_filter_keeps_skipped_and_completed_rows_visible(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    record = write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-20.jsonl",
+        [{"type": 6, "text": "skip me", "start": 0, "reason": "NotInTop10"}],
+    )
+    record["flags"] = [{"label": "Skip", "value": True}]
+    path = Path(redo.CAMPAIGN_DIR) / "redo-test" / "files" / "0-0-ann-a-20.jsonl"
+    path.write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+    skipped_visible = redo_filter(campaign, [condition("span_category", "eq", "Chybí")])
+    item = redo.add_items("redo-test", [queue_row()])["added"][0]
+    redo.mark_completed("redo-test", item["redo_id"], "ann-a")
+
+    completed_visible = redo_filter(campaign, [condition("span_category", "eq", "Chybí")])
+
+    assert skipped_visible["visible_count"] == 1
+    assert skipped_visible["rows"][0]["skipped"] is True
+    assert completed_visible["visible_count"] == 1
+    assert completed_visible["rows"][0]["redo_status"] == redo.STATUS_COMPLETED
+
+
+def test_admin_backend_filter_returns_redo_assignment_rows_not_question_rows(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    campaign.db = pd.concat(
+        [
+            campaign.db,
+            pd.DataFrame(
+                [
+                    {
+                        "dataset": "dataset-a",
+                        "split": "test",
+                        "setup_id": "setup-a",
+                        "example_idx": 0,
+                        "batch_idx": 1,
+                        "annotator_group": 0,
+                        "annotator_id": "ann-b",
+                        "status": ExampleStatus.FINISHED,
+                    }
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+    write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-20.jsonl",
+        [{"type": 6, "text": "first", "start": 0, "reason": "NotInTop10"}],
+    )
+    record = write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-b-20.jsonl",
+        [{"type": 6, "text": "second", "start": 0, "reason": "NotInTop10"}],
+    )
+    record["metadata"]["annotator_id"] = "ann-b"
+    path = Path(redo.CAMPAIGN_DIR) / "redo-test" / "files" / "0-0-ann-b-20.jsonl"
+    path.write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    result = redo_filter(campaign, [condition("span_category", "eq", "Chybí")])
+
+    assert result["visible_count"] == 2
+    assert len({row["row_key"] for row in result["rows"]}) == 2
+
+
 def test_readding_completed_redo_item_reopens_it(monkeypatch, tmp_path):
     configure_campaign_dir(monkeypatch, tmp_path)
     make_campaign(tmp_path)
@@ -253,6 +477,44 @@ def test_admin_add_items_puts_annotator_in_redo_by_pending_queue(monkeypatch, tm
     assert response.status_code == 200
     assert response.get_json()["added"] == 1
     assert redo.is_redo_mode("redo-test", "ann-a")
+
+
+def test_admin_add_items_does_not_reopen_completed_without_allow_completed(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    make_campaign(tmp_path)
+    app_mod.app.config.update(login={"active": False}, host_prefix="")
+    completed_item = redo.add_items("redo-test", [queue_row()])["added"][0]
+    redo.mark_completed("redo-test", completed_item["redo_id"], "ann-a")
+
+    response = app_mod.app.test_client().post(
+        "/redo/redo-test/items",
+        json={"items": [queue_row()], "selector": "example"},
+    )
+    item = redo.find_item(redo.load_queue("redo-test"), completed_item["redo_id"])
+
+    assert response.status_code == 200
+    assert response.get_json()["added"] == 0
+    assert response.get_json()["reused"] == 0
+    assert item["status"] == redo.STATUS_COMPLETED
+
+
+def test_admin_add_items_reopens_completed_when_allowed(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    make_campaign(tmp_path)
+    app_mod.app.config.update(login={"active": False}, host_prefix="")
+    completed_item = redo.add_items("redo-test", [queue_row()])["added"][0]
+    redo.mark_completed("redo-test", completed_item["redo_id"], "ann-a")
+
+    response = app_mod.app.test_client().post(
+        "/redo/redo-test/items",
+        json={"items": [queue_row()], "selector": "example", "includeCompleted": True},
+    )
+    item = redo.find_item(redo.load_queue("redo-test"), completed_item["redo_id"])
+
+    assert response.status_code == 200
+    assert response.get_json()["added"] == 0
+    assert response.get_json()["reused"] == 1
+    assert item["status"] == redo.STATUS_PENDING
 
 
 def test_blank_or_placeholder_annotator_id_keeps_auth_page_before_batch_load(monkeypatch, tmp_path):
@@ -358,6 +620,7 @@ def test_archive_replace_archives_duplicates_and_active_index_skips_revisions(mo
     make_campaign(tmp_path)
     write_active_record("redo-test", "0-0-ann-a-20.jsonl", "older", 20)
     write_active_record("redo-test", "0-0-ann-a-30.jsonl", "newer", 30)
+    files_dir = tmp_path / "redo-test" / "files"
     item = redo.row_to_item("redo-test", queue_row())
 
     archived = redo.archive_and_remove_active_records("redo-test", item, "ann-a", redo.utc_now())
@@ -366,6 +629,35 @@ def test_archive_replace_archives_duplicates_and_active_index_skips_revisions(mo
     assert redo.load_revision_log("redo-test")[0]["record"]["annotations"][0]["text"] in {"older", "newer"}
     assert redo.find_active_records("redo-test", item) == []
     assert str(redo.revision_log_path("redo-test")) not in workflows.get_annotation_files()
+    assert not (files_dir / "0-0-ann-a-20.jsonl").exists()
+    assert not (files_dir / "0-0-ann-a-30.jsonl").exists()
+
+
+def test_archive_replace_keeps_file_when_other_records_remain(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    make_campaign(tmp_path)
+    files_dir = tmp_path / "redo-test" / "files"
+    matching = active_record_with_overrides("redo-test", "matching", 20)
+    other = active_record_with_overrides(
+        "redo-test",
+        "other",
+        21,
+        example_idx=1,
+        output="other output",
+    )
+    mixed_file = files_dir / "0-0-ann-a-20.jsonl"
+    mixed_file.write_text(
+        json.dumps(matching, ensure_ascii=False) + "\n" + json.dumps(other, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    item = redo.row_to_item("redo-test", queue_row())
+
+    archived = redo.archive_and_remove_active_records("redo-test", item, "ann-a", redo.utc_now())
+
+    assert len(archived) == 1
+    assert mixed_file.exists()
+    remaining_records = [json.loads(line) for line in mixed_file.read_text(encoding="utf-8").splitlines()]
+    assert [record["annotations"][0]["text"] for record in remaining_records] == ["other"]
 
 
 def test_redo_save_item_replaces_active_record_and_marks_completed(monkeypatch, tmp_path):

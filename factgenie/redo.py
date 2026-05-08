@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import factgenie.querying as querying
 from factgenie import CAMPAIGN_DIR
 
 QUEUE_VERSION = 1
@@ -453,10 +454,12 @@ def archive_and_remove_active_records(campaign_id, item, archived_by, replacemen
     for jsonl_file, line_indexes in matches_by_file.items():
         with open(jsonl_file) as f:
             lines = f.readlines()
-        with open(jsonl_file, "w") as f:
-            for idx, line in enumerate(lines):
-                if idx not in line_indexes:
-                    f.write(line)
+        remaining_lines = [line for idx, line in enumerate(lines) if idx not in line_indexes]
+        if any(line.strip() for line in remaining_lines):
+            with open(jsonl_file, "w") as f:
+                f.writelines(remaining_lines)
+        else:
+            jsonl_file.unlink()
 
     return archived
 
@@ -549,6 +552,7 @@ def span_filter_data(record, categories):
                 "text": str(annotation.get("text") or ""),
                 "reason": reason,
                 "reason_missing": reason == "",
+                "start": annotation.get("start", ""),
             }
         )
 
@@ -596,13 +600,97 @@ def span_filter_data(record, categories):
     }
 
 
+def annotation_state_for_record(record):
+    if is_skip_selected(record.get("flags", []) if record else []):
+        return "skipped"
+    annotations = record.get("annotations", []) if record else []
+    span_count = len([annotation for annotation in annotations if isinstance(annotation, dict) and annotation.get("text")])
+    if span_count:
+        return "done"
+    return "empty"
+
+
+def redo_query_row(campaign, row, record, categories, alias_map=None):
+    alias_map = alias_map or {}
+    annotator_id = normalize_annotator_id(row.get("annotator_id"))
+    alias = alias_map.get(annotator_id.lower(), "")
+    state = annotation_state_for_record(record)
+    filter_data = span_filter_data(record, categories)
+    submission = {
+        "campaign_id": campaign.campaign_id,
+        "dataset": row.get("dataset"),
+        "split": row.get("split"),
+        "setup_id": row.get("setup_id"),
+        "example_idx": int(row.get("example_idx")),
+        "annotator_id": annotator_id,
+        "annotator_alias": alias,
+        "annotator_group": int(row.get("annotator_group", 0)),
+        "expose_annotator_id": True,
+        "annotation_state": state,
+        "is_skipped": state == "skipped",
+        "flags": record.get("flags", []) if record else [],
+        "options": record.get("options", []) if record else [],
+        "sliders": record.get("sliders", []) if record else [],
+        "text_fields": record.get("text_fields", []) if record else [],
+        "annotations": record.get("annotations", []) if record else [],
+    }
+    spans = [
+        {
+            "campaign_id": campaign.campaign_id,
+            "category": span["category"],
+            "text": span["text"],
+            "reason": span["reason"],
+            "start": span.get("start", ""),
+            "setup_id": row.get("setup_id"),
+            "annotator_id": annotator_id,
+            "annotator_alias": alias,
+            "expose_annotator_id": True,
+        }
+        for span in filter_data["spans"]
+    ]
+    sliders = []
+    if state != "skipped":
+        for slider in filter_data["sliders"]:
+            sliders.append(
+                {
+                    "label": slider["label"],
+                    "value": slider["value"],
+                    "numeric_value": slider["numeric_value"],
+                    "campaign_id": campaign.campaign_id,
+                    "annotator_id": annotator_id,
+                    "annotator_alias": alias,
+                    "expose_annotator_id": True,
+                    "setup_id": row.get("setup_id"),
+                    "missing": slider["missing"],
+                }
+            )
+
+    question_texts = filter_data["question_texts"]
+    output_items = [{"setup_id": row.get("setup_id"), "text": text} for text in filter_data["output_texts"]]
+    any_texts = list(filter_data["any_texts"])
+    return {
+        "dataset": row.get("dataset"),
+        "split": row.get("split"),
+        "example_idx": int(row.get("example_idx")),
+        "question_texts": question_texts,
+        "output_items": output_items,
+        "setup_ids": [str(row.get("setup_id", ""))],
+        "submissions": [submission],
+        "spans": spans,
+        "sliders": sliders,
+        "any_texts": any_texts,
+        "annotation_states": [state],
+        "annotator_alias_values": [alias] if alias else [],
+        "annotator_ids": [annotator_id] if annotator_id else [],
+    }
+
+
 def build_admin_overview(campaign, alias_map=None):
     alias_map = alias_map or {}
     queue = load_queue(campaign.campaign_id)
     counts = counts_by_annotator(campaign.campaign_id)
     queue_by_key = {item_key(item): item for item in queue.get("items", []) if item.get("status") != STATUS_CANCELLED}
     categories = category_lookup(campaign)
-
     examples = []
     annotator_ids = set()
     db = campaign.db.copy() if hasattr(campaign, "db") else pd.DataFrame()
@@ -622,9 +710,6 @@ def build_admin_overview(campaign, alias_map=None):
         annotator_ids.add(annotator_id)
         item = row_to_item(campaign.campaign_id, row, annotator_id=annotator_id)
         existing = queue_by_key.get(item_key(item))
-        active_record = latest_active_record(campaign.campaign_id, item)
-        flags = active_record.get("flags", []) if active_record else []
-        slider_labels.update(slider_labels_from_record(active_record))
         example = {
             "annotator_id": annotator_id,
             "annotator_alias": alias_map.get(annotator_id.lower(), ""),
@@ -635,7 +720,7 @@ def build_admin_overview(campaign, alias_map=None):
             "example_idx": int(row.get("example_idx")),
             "annotator_group": int(row.get("annotator_group", 0)),
             "status": row.get("status"),
-            "skipped": is_skip_selected(flags),
+            "skipped": None,
             "redo_id": existing.get("redo_id") if existing else "",
             "redo_status": existing.get("status") if existing else "",
             "row_key": admin_row_key(row),
@@ -680,11 +765,106 @@ def build_admin_filter_payload(campaign):
             continue
         item = row_to_item(campaign.campaign_id, row, annotator_id=annotator_id)
         active_record = latest_active_record(campaign.campaign_id, item)
+        filter_data = span_filter_data(active_record, categories)
+        filter_data["skipped"] = is_skip_selected(active_record.get("flags", []) if active_record else [])
         rows.append(
             {
                 "row_key": admin_row_key(row),
-                "filter_data": span_filter_data(active_record, categories),
+                "filter_data": filter_data,
             }
         )
 
-    return {"rows": rows}
+    slider_labels = set(slider_labels_from_config(campaign))
+    for row in rows:
+        for slider in row.get("filter_data", {}).get("sliders", []):
+            if slider.get("label"):
+                slider_labels.add(str(slider["label"]))
+    return {
+        "rows": rows,
+        "filter_options": {
+            "categories": [categories[index] for index in sorted(categories)],
+            "sliders": sorted(slider_labels, key=lambda value: value.casefold()),
+        },
+    }
+
+
+def build_admin_filter_result(
+    campaign,
+    filters=None,
+    annotator_id="",
+    alias_map=None,
+):
+    categories = category_lookup(campaign)
+    db = campaign.db.copy() if hasattr(campaign, "db") else pd.DataFrame()
+    rows = []
+    slider_labels = set(slider_labels_from_config(campaign))
+    if db.empty:
+        return {
+            "rows": rows,
+            "visible_count": 0,
+            "filter_options": {
+                "categories": [categories[index] for index in sorted(categories)],
+                "sliders": sorted(slider_labels, key=lambda value: value.casefold()),
+            },
+        }
+
+    queue = load_queue(campaign.campaign_id)
+    queue_by_key = {item_key(item): item for item in queue.get("items", []) if item.get("status") != STATUS_CANCELLED}
+    normalized_conditions = querying.normalize_conditions((filters or {}).get("conditions") or [])
+    mode = str((filters or {}).get("mode") or "all").lower()
+    if mode not in ["all", "any"]:
+        mode = "all"
+    selected_annotator = normalize_annotator_id(annotator_id)
+
+    for _, row in db.iterrows():
+        row_annotator_id = normalize_annotator_id(row.get("annotator_id"))
+        if not row_annotator_id:
+            continue
+        if selected_annotator and row_annotator_id != selected_annotator:
+            continue
+
+        item = row_to_item(campaign.campaign_id, row, annotator_id=row_annotator_id)
+        existing = queue_by_key.get(item_key(item))
+        redo_status = existing.get("status") if existing else ""
+
+        active_record = latest_active_record(campaign.campaign_id, item)
+        skipped = is_skip_selected(active_record.get("flags", []) if active_record else [])
+
+        filter_data = span_filter_data(active_record, categories)
+        filter_data["skipped"] = skipped
+        for slider in filter_data.get("sliders", []):
+            if slider.get("label"):
+                slider_labels.add(str(slider["label"]))
+
+        query_row = redo_query_row(campaign, row, active_record, categories, alias_map=alias_map)
+        if normalized_conditions:
+            matched, metadata = querying.row_matches_conditions(
+                query_row,
+                normalized_conditions,
+                mode,
+                authenticated=True,
+            )
+            if not matched:
+                continue
+            match_details = metadata.get("match_details", [])
+        else:
+            match_details = []
+
+        rows.append(
+            {
+                "row_key": admin_row_key(row),
+                "skipped": skipped,
+                "redo_status": redo_status,
+                "filter_data": filter_data,
+                "match_details": match_details,
+            }
+        )
+
+    return {
+        "rows": rows,
+        "visible_count": len(rows),
+        "filter_options": {
+            "categories": [categories[index] for index in sorted(categories)],
+            "sliders": sorted(slider_labels, key=lambda value: value.casefold()),
+        },
+    }

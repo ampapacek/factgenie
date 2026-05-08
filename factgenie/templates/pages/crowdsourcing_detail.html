@@ -167,6 +167,7 @@
             </div>
             <div class="col-md-9 d-flex flex-wrap gap-2 align-items-end">
               <button type="button" class="btn btn-sm btn-outline-primary" onclick="addRedoFilterCondition()">Add condition</button>
+              <button type="button" class="btn btn-sm btn-primary" onclick="applyRedoFilters()">Apply</button>
               <button type="button" class="btn btn-sm btn-outline-secondary" onclick="resetRedoFilters()">Reset filters</button>
               <span class="text-muted small" id="redo-filter-count"></span>
               <span class="text-danger small" id="redo-filter-error"></span>
@@ -182,11 +183,11 @@
           <button type="button" class="btn btn-sm btn-outline-warning" onclick="restoreSelectedOriginalRedoItems()">Restore original annotation</button>
           <div class="form-check ms-2">
             <input class="form-check-input" type="checkbox" id="redo-include-skipped">
-            <label class="form-check-label" for="redo-include-skipped">Include skipped</label>
+            <label class="form-check-label" for="redo-include-skipped">Allow skipped</label>
           </div>
           <div class="form-check ms-2">
             <input class="form-check-input" type="checkbox" id="redo-include-completed">
-            <label class="form-check-label" for="redo-include-completed">Include completed</label>
+            <label class="form-check-label" for="redo-include-completed">Allow completed redo</label>
           </div>
           <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectVisibleRedoRows(true)">Select visible</button>
           <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectVisibleRedoRows(false)">Clear visible</button>
@@ -221,7 +222,7 @@
                   data-split="{{ item.split }}"
                   data-setup-id="{{ item.setup_id }}"
                   data-example-idx="{{ item.example_idx }}"
-                  data-skipped="{{ 'true' if item.skipped else 'false' }}"
+                  data-skipped="unknown"
                   data-redo-status="{{ item.redo_status }}"
                   data-redo-id="{{ item.redo_id }}"
                   data-redo-key="{{ item.row_key }}">
@@ -233,11 +234,13 @@
               <td>{{ item.split }}</td>
               <td>{{ item.setup_id }}</td>
               <td>{{ item.example_idx }}</td>
-              <td>{% if item.skipped %}<span class="badge bg-warning text-dark">skipped</span>{% endif %}</td>
-              <td>{% if item.redo_status %}<span class="badge bg-info text-dark">{{ item.redo_status }}</span>{% endif %}</td>
+              <td class="redo-skipped-cell">
+                <span class="badge bg-light text-muted" title="Loaded when annotation filter data is applied">unknown</span>
+              </td>
+              <td class="redo-status-cell">{% if item.redo_status %}<span class="badge bg-info text-dark">{{ item.redo_status }}</span>{% endif %}</td>
               <td>
                 <a href="{{ host_prefix }}/browse?dataset={{ item.dataset }}&split={{ item.split }}&example_idx={{ item.example_idx }}&setup_id={{ item.setup_id }}"
-                  class="blue-link" target="_blank"><i class="fa fa-external-link"></i></a>
+                  class="blue-link redo-preview-link" target="_blank"><i class="fa fa-external-link"></i></a>
               </td>
             </tr>
             {% endfor %}
@@ -369,28 +372,25 @@
 
             <h6 class="fw-bold">How to set up redo for an annotator</h6>
             <ol class="mb-3">
-              <li>Find the campaign you want to correct and open this help panel from the campaign detail page.</li>
+              <li>Click the <b>Expand</b> button on the right side next to the <b>Redo annotations</b> title.</li>
               <li>Scroll to the <b>Redo annotations</b> section.</li>
-              <li>Select the annotator in the dropdown so the table only shows that annotator's examples.</li>
+              <li>You can select the annotator in the dropdown so the table only shows that annotator's examples.</li>
               <li>
                 Use the condition builder if you want to target examples by annotation content, question/output text,
                 free-text fields, or slider values.
               </li>
               <li>Select the rows you want to send back for correction.</li>
               <li>
-                Use <b>Add selected examples</b> for a few individual items, or <b>Add selected batches</b> when you
-                want the whole batch to go back to the same annotator.
-              </li>
-              <li>
                 Add an optional shared instruction if you want the annotator to see a short note while reviewing the
                 redo item.
               </li>
               <li>
-                Click the add button. The selected items are written to the redo queue immediately.
+                Use <b>Add selected examples</b> for a few individual items, or <b>Add selected batches</b> when you
+                want the whole batch to go back to the same annotator.
               </li>
             </ol>
 
-            <h6 class="fw-bold">What the admin controls mean</h6>
+            <h6 class="fw-bold">Details of admin controls and filtering method</h6>
             <ul class="mb-3">
               <li>
                 <b>Add condition</b> adds a filter row. Use <b>Match all</b> for AND behavior or <b>Match any</b> for
@@ -408,18 +408,18 @@
               </li>
               <li>
                 Text filters can search the question, output, span reason, span text, or all saved text/reason fields.
-                Regex filters use JavaScript regular expressions without wrapping slashes.
+                Regex filters use Python regular expressions without wrapping slashes.
               </li>
               <li>
                 Slider filters match saved slider labels and numeric values.
               </li>
               <li>
-                <b>Include skipped</b> lets you add examples that were skipped in the original annotation round.
-                Leave it off if you only want real completed annotations.
+                <b>Allow skipped</b> makes skipped examples selectable for redo. Skipped rows stay visible when it is
+                off, but they cannot be selected.
               </li>
               <li>
-                <b>Include completed</b> shows redo items that have already been saved once. This is useful for review
-                or another correction pass.
+                <b>Allow completed redo</b> makes redo items that have already been saved once selectable for another
+                correction pass. Completed rows stay visible when it is off, but they cannot be selected.
               </li>
               <li>
                 <b>Select visible</b> and <b>Clear visible</b> work only on the rows currently shown after filtering by
@@ -435,6 +435,22 @@
               </li>
             </ul>
 
+            <h6 class="fw-bold">Queue and revision downloads</h6>
+            <ul class="mb-3">
+              <li>
+                <b>Queue JSON</b> and <b>Queue CSV</b> download the current redo queue, including pending, completed,
+                cancelled, reopened, and restored item status.
+              </li>
+              <li>
+                <b>Revisions JSON</b> and <b>Revisions CSV</b> download the archived annotation records created by redo
+                saves and restore actions.
+              </li>
+              <li>
+                The queue is useful for seeing what was assigned for redo. The revisions are useful for auditing what
+                active annotation was replaced and when.
+              </li>
+            </ul>
+
             <h6 class="fw-bold">What the annotator sees</h6>
             <ul class="mb-3">
               <li>The annotator opens the usual campaign link or login flow. No special redo URL is needed.</li>
@@ -443,14 +459,6 @@
               <li>
                 Completed redo items are hidden by default, but they can be shown again for review when needed.
               </li>
-            </ul>
-
-            <h6 class="fw-bold">Good habits for admins</h6>
-            <ul class="mb-0">
-              <li>Use redo for targeted fixes, not as a replacement for normal campaign assignment.</li>
-              <li>Keep instructions short and specific, for example what should be corrected and why.</li>
-              <li>Check the redo queue and revision downloads if you need an audit trail for changes.</li>
-              <li>Remember that the original submission stays available in the revision log, so analysis keeps using the latest active version only.</li>
             </ul>
           </div>
         </div>
@@ -481,12 +489,11 @@
 
   setRedoAdminCollapseButton(false);
 
-  var redoFilterDataCache = new Map();
-  var redoFilterDataLoaded = false;
-  var redoFilterDataLoading = null;
+  var redoFilterOptions = {{ redo_admin.filter_options | tojson }};
+  const REDO_PREVIEW_MATCH_PREFIX = "factgenie_redo_preview_match:";
 
   function redoRowKey(row) {
-    return row.data("redo-key") || JSON.stringify([
+    return row.attr("data-redo-key") || JSON.stringify([
       String(row.data("annotator-id") || ""),
       String(row.data("annotator-group") || ""),
       String(row.data("batch-idx") || ""),
@@ -497,84 +504,109 @@
     ]);
   }
 
-  function loadRedoFilterData() {
-    if (redoFilterDataLoaded) {
-      return Promise.resolve(redoFilterDataCache);
-    }
-    if (redoFilterDataLoading) {
-      return redoFilterDataLoading;
-    }
-    redoFilterDataLoading = new Promise(function (resolve, reject) {
-      $.getJSON(`${url_prefix}/redo/${window.campaign_id}/filter_data`)
-        .done(function (response) {
-          redoFilterDataCache.clear();
-          (response.rows || []).forEach(function (row) {
-            if (!row || !row.row_key) {
-              return;
-            }
-            redoFilterDataCache.set(String(row.row_key), row.filter_data || {});
-          });
-          redoFilterDataLoaded = true;
-          resolve(redoFilterDataCache);
-        })
-        .fail(function (error) {
-          redoFilterDataLoading = null;
-          reject(error);
-        });
+  function redoRowByKey(rowKey) {
+    return $(".redo-row").filter(function () {
+      return String($(this).attr("data-redo-key") || "") === String(rowKey);
     });
-    return redoFilterDataLoading;
+  }
+
+  function updateRedoSkippedState(row, skipped) {
+    const checkbox = row.find(".redo-row-checkbox");
+    const cell = row.find(".redo-skipped-cell");
+    checkbox.data("skipped", skipped === true);
+    cell.empty();
+    if (skipped === true) {
+      cell.append('<span class="badge bg-warning text-dark">skipped</span>');
+    }
+    updateRedoCheckboxAvailability(row);
+  }
+
+  function updateRedoStatusState(row, status) {
+    const checkbox = row.find(".redo-row-checkbox");
+    const cell = row.find(".redo-status-cell");
+    checkbox.data("redo-status", status || "");
+    cell.empty();
+    if (status) {
+      cell.append($("<span>").addClass("badge bg-info text-dark").text(status));
+    }
+    updateRedoCheckboxAvailability(row);
+  }
+
+  function refreshRedoConditionControls() {
+    $(".redo-filter-condition").each(function () {
+      const row = $(this);
+      renderRedoConditionControls(row, redoFilterConditionValues(row));
+    });
   }
 
   $("#redo-admin-body").on("shown.bs.collapse", function () {
     setRedoAdminCollapseButton(true);
-    loadRedoFilterData()
-      .then(function () {
-        filterRedoRows();
-      })
-      .catch(function () {
-        $("#redo-filter-error").text("Could not load redo filter data.");
-      });
+    applyRedoFilters();
   });
   $("#redo-admin-body").on("hidden.bs.collapse", function () {
     setRedoAdminCollapseButton(false);
   });
 
-  function filterRedoRows() {
+  function showInitialRedoRows() {
     const annotatorId = selectedAnnotatorId();
     let visibleCount = 0;
-    const regexErrors = [];
-    const activeConditions = redoActiveConditions();
-    if (!redoFilterDataLoaded && activeConditions.length > 0) {
-      $("#redo-filter-count").text("Loading filter data...");
-      loadRedoFilterData()
-        .then(function () {
-          filterRedoRows();
-        })
-        .catch(function () {
-          $("#redo-filter-error").text("Could not load redo filter data.");
-        });
-      return;
-    }
     $(".redo-row").each(function () {
       const row = $(this);
-      const show = (!annotatorId || row.data("annotator-id") === annotatorId) && rowMatchesRedoFilters(row, regexErrors);
-      $(this).toggle(show);
+      const show = !annotatorId || row.data("annotator-id") === annotatorId;
+      row.data("match-details", []);
+      row.toggle(show);
       if (show) {
         visibleCount += 1;
       }
     });
-    $("#redo-filter-count").text(`${visibleCount} visible item(s)`);
-    $("#redo-filter-error").text(regexErrors.length ? "Invalid regex in one or more conditions." : "");
+    $("#redo-filter-count").text(`${visibleCount} visible item(s). Expand or Apply to load annotation filters.`);
   }
 
-  function normalizeRedoFilterText(value) {
-    return String(value || "").trim().toLocaleLowerCase();
+  function applyRedoFilterResponse(response) {
+    if (response.filter_options) {
+      redoFilterOptions.categories = response.filter_options.categories || redoFilterOptions.categories || [];
+      redoFilterOptions.sliders = response.filter_options.sliders || redoFilterOptions.sliders || [];
+      refreshRedoConditionControls();
+    }
+    const visibleKeys = new Set();
+    (response.rows || []).forEach(function (item) {
+      if (!item || !item.row_key) {
+        return;
+      }
+      const rowKey = String(item.row_key);
+      visibleKeys.add(rowKey);
+      const row = redoRowByKey(rowKey);
+      updateRedoSkippedState(row, item.skipped === true);
+      updateRedoStatusState(row, item.redo_status || "");
+      row.data("match-details", item.match_details || []);
+    });
+    $(".redo-row").each(function () {
+      const row = $(this);
+      const isVisible = visibleKeys.has(redoRowKey(row));
+      if (!isVisible) {
+        row.find(".redo-row-checkbox").prop("checked", false);
+        row.data("match-details", []);
+      }
+      row.toggle(isVisible);
+    });
+    $("#redo-filter-count").text(`${response.visible_count || visibleKeys.size} visible item(s)`);
   }
 
-  const redoFilterOptions = {{ redo_admin.filter_options | tojson }};
+  function updateRedoCheckboxAvailability(row) {
+    const checkbox = row.find(".redo-row-checkbox");
+    const skippedDisabled = checkbox.data("skipped") === true && !$("#redo-include-skipped").prop("checked");
+    const completedDisabled = checkbox.data("redo-status") === "completed" && !$("#redo-include-completed").prop("checked");
+    const disabled = skippedDisabled || completedDisabled;
+    if (disabled) {
+      checkbox.prop("checked", false);
+    }
+    checkbox.prop("disabled", disabled);
+  }
 
-  function redoFilterData(row) {
-    return redoFilterDataCache.get(redoRowKey(row)) || {};
+  function updateAllRedoCheckboxAvailability() {
+    $(".redo-row").each(function () {
+      updateRedoCheckboxAvailability($(this));
+    });
   }
 
   function redoFilterTextOperators(field) {
@@ -671,7 +703,6 @@
     $("#redo-filter-conditions").append(row);
     row.find(".redo-condition-field").val(condition?.field || "span_category");
     renderRedoConditionControls(row, condition || {});
-    filterRedoRows();
   }
 
   function renderRedoConditionControls(row, condition) {
@@ -726,183 +757,100 @@
     row.find(".redo-condition-value").prop("disabled", ["missing", "not_missing"].includes(opSelect.val()));
   }
 
-  function redoTextMatches(values, op, query, regexErrors) {
-    const texts = (Array.isArray(values) ? values : [values]).map(function (value) {
-      return String(value || "");
-    });
-    const presentTexts = texts.filter(function (value) {
-      return value.trim() !== "";
-    });
-    if (op === "missing") {
-      return presentTexts.length === 0;
-    }
-    if (op === "not_missing") {
-      return presentTexts.length > 0;
-    }
-
-    const normalizedQuery = normalizeRedoFilterText(query);
-    if (!normalizedQuery && !["regex", "not_regex"].includes(op)) {
-      return true;
-    }
-    if (op === "regex" || op === "not_regex") {
-      let regex;
-      try {
-        regex = new RegExp(String(query || ""), "i");
-      } catch (error) {
-        regexErrors.push(error);
-        return false;
-      }
-      const hasMatch = presentTexts.some(function (text) {
-        return regex.test(text);
-      });
-      return op === "regex" ? hasMatch : !hasMatch;
-    }
-
-    const normalizedTexts = texts.map(normalizeRedoFilterText);
-    if (op === "contains") {
-      return normalizedTexts.some(function (text) {
-        return text.includes(normalizedQuery);
-      });
-    }
-    if (op === "not_contains") {
-      return normalizedTexts.every(function (text) {
-        return !text.includes(normalizedQuery);
-      });
-    }
-    if (op === "eq") {
-      return normalizedTexts.some(function (text) {
-        return text === normalizedQuery;
-      });
-    }
-    if (op === "neq") {
-      return normalizedTexts.every(function (text) {
-        return text !== normalizedQuery;
-      });
-    }
-    return true;
-  }
-
-  function redoSliderMatches(sliders, condition) {
-    const matchingSliders = (sliders || []).filter(function (slider) {
-      return slider.label === condition.sliderLabel;
-    });
-    if (condition.op === "missing") {
-      return matchingSliders.length === 0 || matchingSliders.some(function (slider) {
-        return slider.missing === true;
-      });
-    }
-    if (condition.op === "not_missing") {
-      return matchingSliders.some(function (slider) {
-        return slider.missing !== true;
-      });
-    }
-    const query = Number(condition.value);
-    if (Number.isNaN(query)) {
-      return true;
-    }
-    return matchingSliders.some(function (slider) {
-      const value = Number(slider.numeric_value);
-      if (Number.isNaN(value)) {
-        return false;
-      }
-      if (condition.op === "eq") return value === query;
-      if (condition.op === "neq") return value !== query;
-      if (condition.op === "gt") return value > query;
-      if (condition.op === "gte") return value >= query;
-      if (condition.op === "lt") return value < query;
-      if (condition.op === "lte") return value <= query;
-      return true;
-    });
-  }
-
-  function redoSpanConditionMatches(span, condition, regexErrors) {
-    if (condition.field === "span_category") {
-      return redoTextMatches(span.category, condition.op, condition.value, regexErrors);
-    }
-    if (condition.field === "span_reason") {
-      return redoTextMatches(span.reason, condition.op, condition.value, regexErrors);
-    }
-    if (condition.field === "span_text") {
-      return redoTextMatches(span.text, condition.op, condition.value, regexErrors);
-    }
-    return true;
-  }
-
-  function redoRowConditionMatches(data, condition, regexErrors) {
-    if (condition.field === "question") {
-      return redoTextMatches(data.question_texts || [], condition.op, condition.value, regexErrors);
-    }
-    if (condition.field === "output") {
-      return redoTextMatches(data.output_texts || [], condition.op, condition.value, regexErrors);
-    }
-    if (condition.field === "any_text") {
-      return redoTextMatches(data.any_texts || [], condition.op, condition.value, regexErrors);
-    }
-    if (condition.field === "slider") {
-      return redoSliderMatches(data.sliders || [], condition);
-    }
-    return true;
-  }
-
-  function rowMatchesRedoFilters(row, regexErrors) {
-    const conditions = redoActiveConditions();
-    if (!conditions.length) {
-      return true;
-    }
-    const data = redoFilterData(row);
-    const mode = $("#redo-filter-match-mode").val();
-    const spanConditions = conditions.filter(function (condition) {
-      return ["span_category", "span_reason", "span_text"].includes(condition.field);
-    });
-    const rowConditions = conditions.filter(function (condition) {
-      return !["span_category", "span_reason", "span_text"].includes(condition.field);
-    });
-
-    if (mode === "any") {
-      return conditions.some(function (condition) {
-        if (["span_category", "span_reason", "span_text"].includes(condition.field)) {
-          return (data.spans || []).some(function (span) {
-            return redoSpanConditionMatches(span, condition, regexErrors);
-          });
-        }
-        return redoRowConditionMatches(data, condition, regexErrors);
-      });
-    }
-
-    const spanMatches = !spanConditions.length || (data.spans || []).some(function (span) {
-      return spanConditions.every(function (condition) {
-        return redoSpanConditionMatches(span, condition, regexErrors);
-      });
-    });
-    return spanMatches && rowConditions.every(function (condition) {
-      return redoRowConditionMatches(data, condition, regexErrors);
-    });
-  }
-
   function resetRedoFilters() {
     $("#redo-filter-match-mode").val("all");
     $("#redo-filter-conditions").empty();
     addRedoFilterCondition();
-    filterRedoRows();
+    applyRedoFilters();
   }
 
-  $("#redo-annotator-select, #redo-filter-match-mode").on("change", filterRedoRows);
+  function applyRedoFilters() {
+    $("#redo-filter-error").text("");
+    $("#redo-filter-count").text("Loading annotation filters...");
+    $.ajax({
+      url: `${url_prefix}/redo/${window.campaign_id}/filter`,
+      method: "POST",
+      contentType: "application/json",
+      data: JSON.stringify({
+        annotatorId: selectedAnnotatorId(),
+        includeSkipped: $("#redo-include-skipped").prop("checked"),
+        includeCompleted: $("#redo-include-completed").prop("checked"),
+        filters: {
+          mode: $("#redo-filter-match-mode").val(),
+          conditions: redoActiveConditions(),
+        },
+      }),
+    })
+      .done(function (response) {
+        if (response.success === false) {
+          $("#redo-filter-error").text(response.message || response.error || "Could not apply redo filters.");
+          $("#redo-filter-count").text("0 visible item(s)");
+          $(".redo-row").hide();
+          return;
+        }
+        applyRedoFilterResponse(response);
+      })
+      .fail(function () {
+        $("#redo-filter-error").text("Could not apply redo filters.");
+      });
+  }
+
+  $("#redo-annotator-select").on("change", applyRedoFilters);
+  $("#redo-include-skipped").on("change", function () {
+    updateAllRedoCheckboxAvailability();
+    applyRedoFilters();
+  });
+  $("#redo-include-completed").on("change", function () {
+    updateAllRedoCheckboxAvailability();
+    applyRedoFilters();
+  });
   $("#redo-filter-conditions").on("change", ".redo-condition-field", function () {
     renderRedoConditionControls($(this).closest(".redo-filter-condition"), redoFilterConditionValues($(this).closest(".redo-filter-condition")));
-    filterRedoRows();
   });
   $("#redo-filter-conditions").on("change", ".redo-condition-op", function () {
     const row = $(this).closest(".redo-filter-condition");
     row.find(".redo-condition-value").prop("disabled", ["missing", "not_missing"].includes($(this).val()));
-    filterRedoRows();
   });
-  $("#redo-filter-conditions").on("input change", ".redo-condition-value, .redo-condition-slider-label", filterRedoRows);
+  $("#redo-filter-conditions").on("keydown", ".redo-condition-value", function (event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      applyRedoFilters();
+    }
+  });
   $("#redo-filter-conditions").on("click", ".redo-remove-condition", function () {
     $(this).closest(".redo-filter-condition").remove();
-    filterRedoRows();
+  });
+  $("#redo-items-table").on("click", ".redo-preview-link", function () {
+    const link = this;
+    const row = $(link).closest(".redo-row");
+    const matchDetails = row.data("match-details") || [];
+    if (!matchDetails.length) {
+      return;
+    }
+    try {
+      const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const payload = {
+        created_at: new Date().toISOString(),
+        match_details: matchDetails,
+      };
+      window.localStorage.setItem(`${REDO_PREVIEW_MATCH_PREFIX}${token}`, JSON.stringify(payload));
+      const url = new URL(link.href, window.location.origin);
+      const firstDetail = matchDetails[0] || {};
+      const annotatorId = firstDetail.annotator_id || firstDetail.annotator_alias || row.data("annotator-id") || "";
+      if (firstDetail.setup_id) {
+        url.searchParams.set("setup_id", firstDetail.setup_id);
+      }
+      if (annotatorId) {
+        url.searchParams.set("ann_campaign", annotatorId);
+      }
+      url.searchParams.set("redo_preview_match", token);
+      link.href = url.toString();
+    } catch (error) {
+      console.warn("Could not prepare redo preview highlights.", error);
+    }
   });
   addRedoFilterCondition();
-  filterRedoRows();
+  showInitialRedoRows();
 
   function selectVisibleRedoRows(checked) {
     $(".redo-row:visible .redo-row-checkbox").each(function () {
@@ -935,10 +883,10 @@
     });
     const messages = [];
     if (skippedCount > 0) {
-      messages.push(`${skippedCount} selected skipped example(s) are ignored because Include skipped is off.`);
+      messages.push(`${skippedCount} selected skipped example(s) are ignored because Allow skipped is off.`);
     }
     if (completedCount > 0) {
-      messages.push(`${completedCount} selected completed redo item(s) are ignored because Include completed is off.`);
+      messages.push(`${completedCount} selected completed redo item(s) are ignored because Allow completed redo is off.`);
     }
     if (messages.length > 0) {
       messages.push("Turn on the matching checkbox to add them to the redo queue.");
@@ -1010,6 +958,7 @@
         items: items,
         selector: selector,
         includeSkipped: $("#redo-include-skipped").prop("checked"),
+        includeCompleted: $("#redo-include-completed").prop("checked"),
         instruction: $("#redo-shared-instruction").val(),
       }),
       success: function (response) {
