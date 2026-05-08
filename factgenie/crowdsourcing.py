@@ -400,6 +400,7 @@ def get_redo_annotation_set(app, campaign, db, annotator_id, include_completed=F
                 "example_idx": int(item["example_idx"]),
                 "batch_idx": int(item["batch_idx"]),
                 "annotator_group": int(item.get("annotator_group", 0)),
+                "output": active_record.get("output", ""),
                 "annotations": active_record.get("annotations", []),
                 "flags": active_record.get("flags", []),
                 "options": active_record.get("options", []),

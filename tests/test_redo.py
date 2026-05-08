@@ -1013,6 +1013,7 @@ def test_get_annotator_batch_serves_redo_prefill_then_falls_back(monkeypatch, tm
 
     assert context["is_redo"] is True
     assert annotation_set[0]["redo_id"] == add_result["added"][0]["redo_id"]
+    assert annotation_set[0]["output"] == "old output"
     assert annotation_set[0]["annotations"][0]["text"] == "old"
     assert annotation_set[0]["textFields"][0]["value"] == "old note"
 
@@ -1046,8 +1047,41 @@ def test_get_annotator_batch_can_review_completed_redo_items(monkeypatch, tmp_pa
     assert context["is_redo"] is True
     assert context["show_completed"] is True
     assert annotation_set[0]["redo_id"] == add_result["added"][0]["redo_id"]
+    assert annotation_set[0]["output"] == "old output"
     assert annotation_set[0]["redo_status"] == redo.STATUS_COMPLETED
     assert annotation_set[0]["annotations"][0]["text"] == "saved"
+
+
+def test_get_example_data_with_missing_setup_output_returns_placeholder(monkeypatch):
+    class DummyDataset:
+        splits = ["test"]
+
+        def get_example(self, split, example_idx):
+            assert split == "test"
+            assert example_idx == 0
+            return {"question": "Q"}
+
+        def render(self, example):
+            return "<div>Example</div>"
+
+    app = SimpleNamespace(
+        db={"datasets_obj": {"dataset-a": DummyDataset()}},
+        config={"host_prefix": ""},
+    )
+
+    monkeypatch.setattr(workflows, "get_output_for_setup", lambda *args, **kwargs: None)
+    monkeypatch.setattr(workflows, "get_annotations", lambda *args, **kwargs: [])
+
+    example_data = workflows.get_example_data(app, "dataset-a", "test", 0, "missing-setup")
+
+    assert example_data["html"] == "<div>Example</div>"
+    assert example_data["generated_outputs"] == [
+        {
+            "setup_id": "missing-setup",
+            "output": "",
+            "annotations": [],
+        }
+    ]
 
 
 def test_full_campaign_export_excludes_redo_artifacts(monkeypatch, tmp_path):

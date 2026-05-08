@@ -429,8 +429,26 @@ function fetchAnnotation(dataset, split, setup_id, example_idx, annotation_idx) 
                 $("#examplearea").html(data.html);
             }
 
-            // we have always only a single generated output here
-            data.generated_outputs = data.generated_outputs[0];
+            // We normally have a single generated output here. Redo items can
+            // outlive the current output index, so fall back to the saved redo
+            // record's text when the original setup output is no longer present.
+            const fallbackOutput = annotation_set[annotation_idx]?.output || "";
+            const generatedOutputs = Array.isArray(data.generated_outputs) ? data.generated_outputs : [];
+            let generatedOutput = generatedOutputs[0] || null;
+            if ((!generatedOutput || generatedOutput.output === undefined || generatedOutput.output === null) && fallbackOutput) {
+                generatedOutput = {
+                    ...(generatedOutput || {}),
+                    output: fallbackOutput,
+                    setup_id: generatedOutput?.setup_id || setup_id,
+                };
+            }
+            if (!generatedOutput) {
+                generatedOutput = {
+                    setup_id: setup_id,
+                    output: fallbackOutput,
+                };
+            }
+            data.generated_outputs = generatedOutput;
             examples_cached[annotation_idx] = data;
             resolve();
         }).fail(function () {
@@ -598,6 +616,14 @@ function loadAnnotations() {
             console.error("One or more requests failed.");
             // Log the error
             console.error(e);
+            $("#hideOverlayBtn")
+                .attr("disabled", false)
+                .removeClass("btn-primary")
+                .addClass("btn-danger")
+                .text("Failed to load examples");
+            $("#redo-instruction-box")
+                .text("Some annotation examples could not be loaded. Please refresh the page. If the problem continues, contact the campaign administrator.")
+                .show();
 
         })
         .finally(() => {
