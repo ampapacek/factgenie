@@ -615,6 +615,55 @@ def test_normal_submit_rejects_redo_payload(monkeypatch, tmp_path):
     assert "Save current item" in payload["error"]
 
 
+def test_normal_submit_rejects_preview_payload_before_save(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    make_campaign(tmp_path)
+    app_mod.app.config.update(login={"active": False}, host_prefix="")
+
+    def fail_if_save_called(*args, **kwargs):
+        raise AssertionError("preview submit should be rejected before save_annotations is called")
+
+    monkeypatch.setattr(crowdsourcing, "save_annotations", fail_if_save_called)
+
+    response = app_mod.app.test_client().post(
+        "/submit_annotations",
+        json={
+            "campaign_id": "redo-test",
+            "annotator_id": app_mod.PREVIEW_STUDY_ID,
+            "annotation_set": [{"batch_idx": 0, "annotations": [], "flags": [], "options": [], "sliders": []}],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is False
+    assert "read-only" in payload["error"]
+
+
+def test_save_annotations_rejects_preview_annotator(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    monkeypatch.setattr(workflows, "load_campaign", lambda app, campaign_id: campaign)
+    app = SimpleNamespace(db={"lock": threading.Lock()})
+
+    flask_app = Flask(__name__)
+    with flask_app.app_context():
+        response = crowdsourcing.save_annotations(
+            app,
+            "redo-test",
+            [{"batch_idx": 0, "annotations": [], "flags": [], "options": [], "sliders": [], "textFields": []}],
+            app_mod.PREVIEW_STUDY_ID,
+        )
+
+    payload = response.get_json()
+    assert payload["success"] is False
+    assert "read-only" in payload["error"]
+
+    campaign.load_db()
+    assert campaign.db.loc[0, "status"] == ExampleStatus.FINISHED
+    assert campaign.db.loc[0, "annotator_id"] == "ann-a"
+
+
 def test_archive_replace_archives_duplicates_and_active_index_skips_revisions(monkeypatch, tmp_path):
     configure_campaign_dir(monkeypatch, tmp_path)
     make_campaign(tmp_path)
