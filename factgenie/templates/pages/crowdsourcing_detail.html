@@ -314,7 +314,7 @@
                         <td>{{ e.example_idx }}</td>
                         <td>{{ e.annotator_group }}</td>
                         <td><a
-                            href="{{ host_prefix }}/browse?dataset={{ e.dataset }}&split={{ e.split }}&example_idx={{ e.example_idx }}&setup_id={{ e.setup_id }}"
+                            href="{{ host_prefix }}/browse?dataset={{ e.dataset }}&split={{ e.split }}&example_idx={{ e.example_idx }}&setup_id={{ e.setup_id }}&ann_campaign={{ batch.annotator_id | urlencode }}"
                             class="blue-link" target="_blank">
                             <i class="fa fa-external-link"></a></td>
                       </tr>
@@ -510,6 +510,29 @@
     });
   }
 
+  function refreshRedoPreviewLink(row) {
+    const link = row.find(".redo-preview-link");
+    if (!link.length) {
+      return;
+    }
+    try {
+      const url = new URL(link.attr("href"), window.location.origin);
+      const annotatorId = row.data("annotator-id") || "";
+      if (annotatorId) {
+        url.searchParams.set("ann_campaign", annotatorId);
+      }
+      link.attr("href", url.toString());
+    } catch (error) {
+      console.warn("Could not prepare redo preview link.", error);
+    }
+  }
+
+  function refreshRedoPreviewLinks() {
+    $(".redo-row").each(function () {
+      refreshRedoPreviewLink($(this));
+    });
+  }
+
   function updateRedoSkippedState(row, skipped) {
     const checkbox = row.find(".redo-row-checkbox");
     const cell = row.find(".redo-skipped-cell");
@@ -552,6 +575,7 @@
     let visibleCount = 0;
     $(".redo-row").each(function () {
       const row = $(this);
+      refreshRedoPreviewLink(row);
       const show = !annotatorId || row.data("annotator-id") === annotatorId;
       row.data("match-details", []);
       row.toggle(show);
@@ -576,6 +600,7 @@
       const rowKey = String(item.row_key);
       visibleKeys.add(rowKey);
       const row = redoRowByKey(rowKey);
+      refreshRedoPreviewLink(row);
       updateRedoSkippedState(row, item.skipped === true);
       updateRedoStatusState(row, item.redo_status || "");
       row.data("match-details", item.match_details || []);
@@ -851,6 +876,7 @@
     }
   });
   addRedoFilterCondition();
+  refreshRedoPreviewLinks();
   showInitialRedoRows();
 
   function selectVisibleRedoRows(checked) {
