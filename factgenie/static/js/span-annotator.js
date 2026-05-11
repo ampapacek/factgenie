@@ -733,6 +733,13 @@ class SpanAnnotator {
         return { presetSet, remainingText: remaining.join(" ") };
     }
 
+    _formatReasonForDisplay(reason) {
+        return String(reason || "")
+            .replace(/\[\[([^[\]]+)\]\]/g, (_, label) => String(label || "").trim())
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
     _normalizeReasonPresets(presets) {
         if (!Array.isArray(presets)) {
             return [];
@@ -859,7 +866,7 @@ class SpanAnnotator {
 
                 const tooltipText = validSpanAnnotations.map(ann => {
                     const name = this._annotationTypeFor(ann).name;
-                    const note = ann.reason || ann.note;
+                    const note = this._formatReasonForDisplay(ann.reason || ann.note);
                     return note ? `${name} (${note})` : name;
                 }).join(', ');
 
