@@ -211,12 +211,17 @@ class HumanCampaign(Campaign):
     def get_overview(self):
         self.load_db()
         df = self.db.copy()
-        # replace NaN with empty string
-        df = df.where(pd.notnull(df), "")
 
         # Group by batch_idx and annotator_group
         if "batch_idx" not in df.columns:
             df["batch_idx"] = df["example_idx"]
+
+        # Keep timestamps numeric while aggregating. Replacing missing values
+        # with "" before min/max makes pandas compare strings with floats when
+        # a batch mixes finished and unfinished setup rows.
+        for col in ["start", "end"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
 
         grouped = df.groupby(["batch_idx"])
 
@@ -241,7 +246,10 @@ class HumanCampaign(Campaign):
             end=pd.NamedAgg(column="end", aggfunc="max"),
         ).reset_index()
 
-        for col in ["status", "annotator_id", "start", "end"]:
+        # replace NaN with empty string for rendering after numeric aggregation
+        overview_df = overview_df.where(pd.notnull(overview_df), "")
+
+        for col in ["status", "annotator_id"]:
             overview_df[col] = overview_df[col].astype(df[col].dtype)
 
         return overview_df.to_dict(orient="records")

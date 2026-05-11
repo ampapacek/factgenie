@@ -1,4 +1,4 @@
-<body class="body">
+<body class="body{% if auth_only %} auth-only{% endif %}">
   <nav class="navbar navbar-light bg-annotate">
     <div class="container navbar-left">
       <a class="navbar-brand" href="#">
@@ -12,6 +12,12 @@
       <div class="navblock">
 
         <ul class="pagination" style="margin-left: 10px;">
+          <li class="page-item me-2" id="redo-mode-nav-badge" style="display: none;">
+            <span class="badge text-bg-warning">Redo mode</span>
+          </li>
+          <li class="page-item me-2" id="redo-show-completed-item" style="display: none;">
+            <a class="btn btn-sm btn-outline-secondary" id="redo-show-completed-link" href="#">Show saved items</a>
+          </li>
           <li class="page-item">
             <button type="button" class="btn btn-sm btn-success" id="submit-annotations-btn"
               onclick="submitAnnotations();" style="display: none;">👉️ Submit annotations</button>
@@ -55,6 +61,10 @@
                 </div>
               </div>
             </div>
+            <div class="alert alert-info mt-3" id="redo-instruction-box" style="display: none;"></div>
+            <div class="alert alert-warning mt-3" id="redo-mode-banner" style="display: none;">
+              Save current item saves and replaces the original annotation. Use Show saved items at the top of the page to load saved annotations if you want to edit them again.
+            </div>
             <div id='output-content'>
               <div class="annotation-categories-sticky">
                 <div class="d-flex flex-wrap gap-1 align-items-center" role="group"
@@ -97,11 +107,27 @@
               {{ sliders | safe }}
 
               {{ text_fields | safe }}
+              <div class="alert alert-info mt-3" id="redo-empty-fallback-message" style="display: none;">
+                No redo items remain. Continue with normal assignment.
+              </div>
               <div class="d-flex align-items-center justify-content-center" id="submit-annotation-box">
-                <div class="btn-group" role="group">
-                  <button type="button" class="btn btn-sm btn-success" onclick="markAnnotationAsComplete();">✅ Mark
-                    example as
-                    complete</button>
+                <div>
+                  <div class="small text-muted text-center mb-2" id="redo-action-help" style="display: none;">
+                    Use <b>Keep annotation</b> if nothing changed. Use <b>Save current item</b> if you edited the annotation.
+                    <br>
+                    The skip flag is unchecked by default in redo mode, but you can turn it back on if needed.
+                  </div>
+                  <div class="btn-group" role="group">
+                    <button type="button" class="btn btn-sm btn-success" id="mark-annotation-complete-btn"
+                      onclick="markAnnotationAsComplete();">✅ Mark
+                      example as
+                      complete</button>
+                    <button type="button" class="btn btn-sm btn-outline-success" id="redo-keep-current-btn"
+                      onclick="keepCurrentRedoItem();" style="display: none;">Keep annotation</button>
+                    <button type="button" class="btn btn-sm btn-success" id="redo-save-current-btn"
+                      onclick="saveCurrentRedoItem();" style="display: none;">Save current item</button>
+                  </div>
+                  <div class="small text-muted text-center mt-2" id="redo-action-status" style="display: none;"></div>
                 </div>
               </div>
             </div>

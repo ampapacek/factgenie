@@ -253,6 +253,26 @@ function setCampaignHiddenFromRegularUsers(campaignId, hiddenFromRegularUsers) {
     });
 }
 
+function setCampaignPseudonymizeAnnotators(campaignId, pseudonymizeAnnotators) {
+    $.post({
+        url: `${url_prefix}/set_campaign_pseudonymize_annotators`,
+        contentType: 'application/json',
+        data: JSON.stringify({
+            campaignId: campaignId,
+            pseudonymizeAnnotators: pseudonymizeAnnotators
+        }),
+        success: function (response) {
+            console.log(response);
+
+            if (response.success !== true) {
+                alert(response.error);
+            } else {
+                location.reload();
+            }
+        }
+    });
+}
+
 
 
 function uploadDataset() {

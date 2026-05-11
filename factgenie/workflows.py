@@ -105,9 +105,11 @@ def get_example_data(app, dataset_id, split, example_idx, setup_id=None):
         raise ValueError("Example cannot be rendered")
 
     if setup_id:
-        generated_outputs = [
-            get_output_for_setup(dataset_id, split, example_idx, setup_id, app=app, force_reload=False)
-        ]
+        setup_output = get_output_for_setup(dataset_id, split, example_idx, setup_id, app=app, force_reload=False)
+        if setup_output is None:
+            generated_outputs = [{"setup_id": slugify(setup_id), "output": ""}]
+        else:
+            generated_outputs = [setup_output]
     else:
         generated_outputs = get_outputs(dataset_id, split, example_idx, app=app, force_reload=False)
 
@@ -258,24 +260,28 @@ def load_annotations_from_record(line, jsonl_file, metadata, split_spans=False):
 def get_annotation_files():
     """Get dictionary of annotation JSONL files and their modification times"""
     files_dict = {}
-    for jsonl_file in Path(CAMPAIGN_DIR).rglob("*.jsonl"):
-        campaign_dir = jsonl_file.parent.parent
-
-        # find metadata for the campaign
-        metadata_path = campaign_dir / "metadata.json"
-        if not metadata_path.exists():
+    for campaign_dir in Path(CAMPAIGN_DIR).iterdir():
+        files_dir = campaign_dir / "files"
+        if not files_dir.exists():
             continue
 
-        with open(metadata_path) as f:
-            metadata = json.load(f)
+        for jsonl_file in files_dir.glob("*.jsonl"):
 
-        if metadata["mode"] == CampaignMode.HIDDEN or metadata["mode"] == CampaignMode.LLM_GEN:
-            continue
+            # find metadata for the campaign
+            metadata_path = campaign_dir / "metadata.json"
+            if not metadata_path.exists():
+                continue
 
-        files_dict[str(jsonl_file)] = {
-            "mtime": jsonl_file.stat().st_mtime,
-            "metadata": metadata,
-        }
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+
+            if metadata["mode"] == CampaignMode.HIDDEN or metadata["mode"] == CampaignMode.LLM_GEN:
+                continue
+
+            files_dict[str(jsonl_file)] = {
+                "mtime": jsonl_file.stat().st_mtime,
+                "metadata": metadata,
+            }
 
     return files_dict
 
@@ -437,11 +443,15 @@ def export_campaign_outputs(campaign_id):
     zip_buffer = BytesIO()
 
     with zipfile.ZipFile(zip_buffer, "w") as zip_file:
-        for root, _dirs, files in os.walk(os.path.join(CAMPAIGN_DIR, campaign_id)):
+        campaign_dir = os.path.join(CAMPAIGN_DIR, campaign_id)
+        for root, dirs, files in os.walk(campaign_dir):
+            dirs[:] = [d for d in dirs if not (d == "revisions" and os.path.basename(root) == "files")]
             for file in files:
+                if file == "redo_queue.json":
+                    continue
                 zip_file.write(
                     os.path.join(root, file),
-                    os.path.relpath(os.path.join(root, file), os.path.join(CAMPAIGN_DIR, campaign_id)),
+                    os.path.relpath(os.path.join(root, file), campaign_dir),
                 )
 
     # Set response headers for download
@@ -644,6 +654,16 @@ def set_campaign_hidden_from_regular_users(app, campaign_id, hidden_from_regular
         raise ValueError(f"Unknown campaign {campaign_id}")
 
     campaign.metadata["hidden_from_regular_users"] = hidden_from_regular_users
+    campaign.update_metadata()
+
+
+def set_campaign_pseudonymize_annotators(app, campaign_id, pseudonymize_annotators):
+    campaign = load_campaign(app, campaign_id=campaign_id)
+
+    if campaign is None:
+        raise ValueError(f"Unknown campaign {campaign_id}")
+
+    campaign.metadata.setdefault("config", {})["pseudonymize_annotators"] = bool(pseudonymize_annotators)
     campaign.update_metadata()
 
 
@@ -973,7 +993,9 @@ def save_record(mode, campaign, row, result):
     dataset_id = str(row["dataset"])
     split = str(row["split"])
     example_idx = int(row["example_idx"])
-    annotator_id = str(row["annotator_id"])
+    annotator_id = str(row["annotator_id"]).strip()
+    if annotator_id.lower() in {"nan", "<na>"}:
+        annotator_id = ""
 
     # save the output
     record = {

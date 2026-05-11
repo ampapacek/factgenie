@@ -136,7 +136,7 @@ class SpanAnnotator {
     // used to add annotations externally
     addAnnotations(objectId, annotations) {
         const doc = this.documents.get(objectId);
-        doc.annotations = annotations;
+        doc.annotations = this._sanitizeAnnotations(objectId, annotations);
         this._renderAnnotations(objectId);
     }
 
@@ -156,6 +156,41 @@ class SpanAnnotator {
 
     _stringLength(text) {
         return Array.from(String(text)).length;
+    }
+
+    _annotationTypeFor(ann) {
+        const typeIndex = parseInt(ann?.type, 10);
+        if (Number.isNaN(typeIndex) || typeIndex < 0) {
+            return null;
+        }
+        return this.annotationTypes?.[typeIndex] || null;
+    }
+
+    _sanitizeAnnotations(objectId, annotations) {
+        if (!Array.isArray(annotations)) {
+            return [];
+        }
+
+        return annotations.filter((ann, index) => {
+            const annotationType = this._annotationTypeFor(ann);
+            if (annotationType) {
+                return true;
+            }
+            console.warn(
+                `[FactGenie spans] Skipping annotation with unknown type for ${objectId}:`,
+                {
+                    annotationIndex: index,
+                    type: ann?.type,
+                    text: ann?.text,
+                    start: ann?.start,
+                    availableTypes: this.annotationTypes?.map((item, idx) => ({
+                        index: idx,
+                        name: item?.name || "",
+                    })) || [],
+                }
+            );
+            return false;
+        });
     }
 
     _createSpans(text) {
@@ -698,6 +733,13 @@ class SpanAnnotator {
         return { presetSet, remainingText: remaining.join(" ") };
     }
 
+    _formatReasonForDisplay(reason) {
+        return String(reason || "")
+            .replace(/\[\[([^[\]]+)\]\]/g, (_, label) => String(label || "").trim())
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
     _normalizeReasonPresets(presets) {
         if (!Array.isArray(presets)) {
             return [];
@@ -779,17 +821,18 @@ class SpanAnnotator {
 
             const spanAnnotations = doc.annotations.filter(a =>
                 position >= a.start && position < a.start + this._stringLength(a.text));
+            const validSpanAnnotations = spanAnnotations.filter((ann) => this._annotationTypeFor(ann));
 
             // Reset styling
             $span.attr('style', '');
             $span.removeAttr('data-bs-toggle data-bs-placement title data-bs-original-title');
             $('.whitespace', $span).removeClass('whitespace-hidden');
 
-            if (spanAnnotations.length > 0) {
+            if (validSpanAnnotations.length > 0) {
                 const content = String($span.data('content'));
-                const isLastInAnyAnnotation = spanAnnotations.some(ann =>
+                const isLastInAnyAnnotation = validSpanAnnotations.some(ann =>
                     position + this._stringLength(content) >= ann.start + this._stringLength(ann.text));
-                const hasMultipleAnnotations = spanAnnotations.length > 1;
+                const hasMultipleAnnotations = validSpanAnnotations.length > 1;
 
                 if (isLastInAnyAnnotation && !hasMultipleAnnotations) {
                     // add right padding to the last span in the annotation
@@ -803,9 +846,9 @@ class SpanAnnotator {
                     }
                 }
 
-                const gradients = spanAnnotations.map((ann, i) => {
+                const gradients = validSpanAnnotations.map((ann, i) => {
                     const offset = i * 3;
-                    const color = this.annotationTypes[ann.type].color;
+                    const color = this._annotationTypeFor(ann).color;
                     return `linear-gradient(0deg, ${color} ${4 + offset}px, transparent ${4 + offset}px)`;
                 });
 
@@ -813,17 +856,17 @@ class SpanAnnotator {
                     'background': gradients.join(', '),
                     'background-position': '0 100%',
                     'line-height': '8px',
-                    'padding-bottom': `${3 + (spanAnnotations.length - 1) * 3}px`,
-                    'color': this.annotationTypes[spanAnnotations[spanAnnotations.length - 1].type].color,
+                    'padding-bottom': `${3 + (validSpanAnnotations.length - 1) * 3}px`,
+                    'color': this._annotationTypeFor(validSpanAnnotations[validSpanAnnotations.length - 1]).color,
                     'font-weight': 'bold'
                 });
 
                 // const note = annotation.reason || annotation.note;
                 // const tooltip_text = note ? `${error_name} (${note})` : error_name;
 
-                const tooltipText = spanAnnotations.map(ann => {
-                    const name = this.annotationTypes[ann.type].name;
-                    const note = ann.reason || ann.note;
+                const tooltipText = validSpanAnnotations.map(ann => {
+                    const name = this._annotationTypeFor(ann).name;
+                    const note = this._formatReasonForDisplay(ann.reason || ann.note);
                     return note ? `${name} (${note})` : name;
                 }).join(', ');
 
