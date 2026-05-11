@@ -239,7 +239,7 @@
               </td>
               <td class="redo-status-cell">{% if item.redo_status %}<span class="badge bg-info text-dark">{{ item.redo_status }}</span>{% endif %}</td>
               <td>
-                <a href="{{ host_prefix }}/browse?dataset={{ item.dataset }}&split={{ item.split }}&example_idx={{ item.example_idx }}&setup_id={{ item.setup_id }}"
+                <a href="{{ host_prefix }}/browse?dataset={{ item.dataset }}&split={{ item.split }}&example_idx={{ item.example_idx }}&setup_id={{ item.setup_id }}&ann_campaign={{ item.annotator_id | urlencode }}"
                   class="blue-link redo-preview-link" target="_blank"><i class="fa fa-external-link"></i></a>
               </td>
             </tr>
@@ -314,7 +314,7 @@
                         <td>{{ e.example_idx }}</td>
                         <td>{{ e.annotator_group }}</td>
                         <td><a
-                            href="{{ host_prefix }}/browse?dataset={{ e.dataset }}&split={{ e.split }}&example_idx={{ e.example_idx }}&setup_id={{ e.setup_id }}"
+                            href="{{ host_prefix }}/browse?dataset={{ e.dataset }}&split={{ e.split }}&example_idx={{ e.example_idx }}&setup_id={{ e.setup_id }}&ann_campaign={{ batch.annotator_id | urlencode }}"
                             class="blue-link" target="_blank">
                             <i class="fa fa-external-link"></a></td>
                       </tr>
@@ -510,6 +510,29 @@
     });
   }
 
+  function refreshRedoPreviewLink(row) {
+    const link = row.find(".redo-preview-link");
+    if (!link.length) {
+      return;
+    }
+    try {
+      const url = new URL(link.attr("href"), window.location.origin);
+      const annotatorId = row.data("annotator-id") || "";
+      if (annotatorId) {
+        url.searchParams.set("ann_campaign", annotatorId);
+      }
+      link.attr("href", url.toString());
+    } catch (error) {
+      console.warn("Could not prepare redo preview link.", error);
+    }
+  }
+
+  function refreshRedoPreviewLinks() {
+    $(".redo-row").each(function () {
+      refreshRedoPreviewLink($(this));
+    });
+  }
+
   function updateRedoSkippedState(row, skipped) {
     const checkbox = row.find(".redo-row-checkbox");
     const cell = row.find(".redo-skipped-cell");
@@ -552,6 +575,7 @@
     let visibleCount = 0;
     $(".redo-row").each(function () {
       const row = $(this);
+      refreshRedoPreviewLink(row);
       const show = !annotatorId || row.data("annotator-id") === annotatorId;
       row.data("match-details", []);
       row.toggle(show);
@@ -576,6 +600,7 @@
       const rowKey = String(item.row_key);
       visibleKeys.add(rowKey);
       const row = redoRowByKey(rowKey);
+      refreshRedoPreviewLink(row);
       updateRedoSkippedState(row, item.skipped === true);
       updateRedoStatusState(row, item.redo_status || "");
       row.data("match-details", item.match_details || []);
@@ -824,16 +849,7 @@
     const link = this;
     const row = $(link).closest(".redo-row");
     const matchDetails = row.data("match-details") || [];
-    if (!matchDetails.length) {
-      return;
-    }
     try {
-      const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const payload = {
-        created_at: new Date().toISOString(),
-        match_details: matchDetails,
-      };
-      window.localStorage.setItem(`${REDO_PREVIEW_MATCH_PREFIX}${token}`, JSON.stringify(payload));
       const url = new URL(link.href, window.location.origin);
       const firstDetail = matchDetails[0] || {};
       const annotatorId = firstDetail.annotator_id || firstDetail.annotator_alias || row.data("annotator-id") || "";
@@ -843,13 +859,24 @@
       if (annotatorId) {
         url.searchParams.set("ann_campaign", annotatorId);
       }
-      url.searchParams.set("redo_preview_match", token);
+      if (matchDetails.length) {
+        const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const payload = {
+          created_at: new Date().toISOString(),
+          match_details: matchDetails,
+        };
+        window.localStorage.setItem(`${REDO_PREVIEW_MATCH_PREFIX}${token}`, JSON.stringify(payload));
+        url.searchParams.set("redo_preview_match", token);
+      } else {
+        url.searchParams.delete("redo_preview_match");
+      }
       link.href = url.toString();
     } catch (error) {
       console.warn("Could not prepare redo preview highlights.", error);
     }
   });
   addRedoFilterCondition();
+  refreshRedoPreviewLinks();
   showInitialRedoRows();
 
   function selectVisibleRedoRows(checked) {

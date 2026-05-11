@@ -539,6 +539,39 @@ function setActiveAnnotatorButtons(annIds) {
     });
 }
 
+function resolveSelectableAnnotatorId(value, availableSet) {
+    const requested = String(value || "").trim();
+    if (!requested) {
+        return null;
+    }
+    if (availableSet.has(requested)) {
+        return requested;
+    }
+    const requestedKey = normalizeAnnotatorKey(requested);
+    for (const [annId, info] of currentAnnInfo.entries()) {
+        if (!availableSet.has(annId)) {
+            continue;
+        }
+        const campaignId = String(info?.campaign_id || "").trim();
+        const candidates = [annId];
+        if (info?.annotator_id) {
+            candidates.push(String(info.annotator_id).trim());
+            if (campaignId) {
+                candidates.push(generateAnnotatorKey(campaignId, info.annotator_id));
+            }
+        }
+        getAnnotatorNames(info).forEach((name) => candidates.push(name));
+        getAnnotatorAliases(info).forEach((alias) => candidates.push(alias));
+        if (candidates.some((candidate) => {
+            const candidateText = String(candidate || "").trim();
+            return candidateText === requested || normalizeAnnotatorKey(candidateText) === requestedKey;
+        })) {
+            return annId;
+        }
+    }
+    return null;
+}
+
 function currentExampleCanShowAnnotatorNames() {
     if ($("#toggle-annotator-names-btn").length === 0) {
         return false;
@@ -1577,8 +1610,9 @@ function showSelectedCampaigns() {
     }
 
     // if window.highlight_ann_campaign is set, select the corresponding campaign
-    if (window.highlight_ann_campaign && availableSet.has(window.highlight_ann_campaign)) {
-        selected_campaigns = [window.highlight_ann_campaign];
+    const highlightedAnnId = resolveSelectableAnnotatorId(window.highlight_ann_campaign, availableSet);
+    if (highlightedAnnId) {
+        selected_campaigns = [highlightedAnnId];
         setActiveAnnotatorButtons(selected_campaigns);
         return;
     }
