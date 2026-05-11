@@ -239,7 +239,7 @@
               </td>
               <td class="redo-status-cell">{% if item.redo_status %}<span class="badge bg-info text-dark">{{ item.redo_status }}</span>{% endif %}</td>
               <td>
-                <a href="{{ host_prefix }}/browse?dataset={{ item.dataset }}&split={{ item.split }}&example_idx={{ item.example_idx }}&setup_id={{ item.setup_id }}"
+                <a href="{{ host_prefix }}/browse?dataset={{ item.dataset }}&split={{ item.split }}&example_idx={{ item.example_idx }}&setup_id={{ item.setup_id }}&ann_campaign={{ item.annotator_id | urlencode }}"
                   class="blue-link redo-preview-link" target="_blank"><i class="fa fa-external-link"></i></a>
               </td>
             </tr>
@@ -824,16 +824,7 @@
     const link = this;
     const row = $(link).closest(".redo-row");
     const matchDetails = row.data("match-details") || [];
-    if (!matchDetails.length) {
-      return;
-    }
     try {
-      const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const payload = {
-        created_at: new Date().toISOString(),
-        match_details: matchDetails,
-      };
-      window.localStorage.setItem(`${REDO_PREVIEW_MATCH_PREFIX}${token}`, JSON.stringify(payload));
       const url = new URL(link.href, window.location.origin);
       const firstDetail = matchDetails[0] || {};
       const annotatorId = firstDetail.annotator_id || firstDetail.annotator_alias || row.data("annotator-id") || "";
@@ -843,7 +834,17 @@
       if (annotatorId) {
         url.searchParams.set("ann_campaign", annotatorId);
       }
-      url.searchParams.set("redo_preview_match", token);
+      if (matchDetails.length) {
+        const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const payload = {
+          created_at: new Date().toISOString(),
+          match_details: matchDetails,
+        };
+        window.localStorage.setItem(`${REDO_PREVIEW_MATCH_PREFIX}${token}`, JSON.stringify(payload));
+        url.searchParams.set("redo_preview_match", token);
+      } else {
+        url.searchParams.delete("redo_preview_match");
+      }
       link.href = url.toString();
     } catch (error) {
       console.warn("Could not prepare redo preview highlights.", error);
