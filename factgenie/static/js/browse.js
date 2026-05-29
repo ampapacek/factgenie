@@ -1844,7 +1844,25 @@ $("#badgesSwitch").on("change", function () {
     updateDisplayedAnnotations();
 });
 
+function shouldIgnoreBrowseShortcut(event) {
+    const target = $(event.target);
+    if (!target.length) {
+        return false;
+    }
+    if (target.closest("#browse-filter-builder").length) {
+        return true;
+    }
+    if (target.closest("input, textarea, select, button, a, [contenteditable='true'], [role='button']").length) {
+        return true;
+    }
+    return false;
+}
+
 $(document).keydown(function (event) {
+    if (shouldIgnoreBrowseShortcut(event)) {
+        return;
+    }
+
     const key = event.key;
 
     if (key === "ArrowRight") {
