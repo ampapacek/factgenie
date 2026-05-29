@@ -19,8 +19,36 @@ class DummyDataset:
         return {"question": questions[example_idx]}
 
 
+class WP1Dataset:
+    def get_example(self, split, example_idx):
+        examples = {
+            0: {
+                "question": (
+                    "<h4>Otázka</h4>"
+                    "<div>Kdo byl Masaryk?</div>"
+                    "<h4>Nalezené relevantní dokumenty</h4>"
+                    "<ol>"
+                    "<li><details><summary>Rozbalit text dokumentu</summary>"
+                    "<div>Archivní dokument uvádí zdroj pouze ve source datech.</div>"
+                    "</details></li>"
+                    "<li><details><summary>Rozbalit text dokumentu</summary>"
+                    "<div>Unique source B lives in the second source item.</div>"
+                    "</details></li>"
+                    "</ol>"
+                )
+            },
+            1: {"question": "Plain fallback text mentions archiv without section labels."},
+            2: {"question": "Otázka\nSamostatná otázka bez zdrojové části."},
+        }
+        return examples[example_idx]
+
+
 def make_app():
     return SimpleNamespace(db={"datasets_obj": {"demo": DummyDataset()}})
+
+
+def make_wp1_app():
+    return SimpleNamespace(db={"datasets_obj": {"wp1": WP1Dataset()}})
 
 
 def condition(field, op, value="", slider_label="", span_group=""):
@@ -144,6 +172,18 @@ def sample_tables(pseudonymize_annotators=False):
     return {"outputs": outputs, "submissions": submissions, "spans": spans, "assignments": assignments, "rows": rows}
 
 
+def wp1_tables():
+    outputs = pd.DataFrame(
+        [
+            {"dataset": "wp1", "split": "test", "setup_id": "rag-generated", "example_idx": 0, "output": "Answer 0"},
+            {"dataset": "wp1", "split": "test", "setup_id": "rag-generated", "example_idx": 1, "output": "Answer 1"},
+            {"dataset": "wp1", "split": "test", "setup_id": "rag-generated", "example_idx": 2, "output": "Answer 2"},
+        ]
+    )
+    rows = querying._build_example_rows(make_wp1_app(), outputs, pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+    return {"outputs": outputs, "submissions": pd.DataFrame(), "spans": pd.DataFrame(), "assignments": pd.DataFrame(), "rows": rows}
+
+
 def test_query_tables_are_question_centric_and_extract_annotations():
     tables = sample_tables()
 
@@ -166,6 +206,39 @@ def test_question_and_output_text_filters_are_separate():
     assert question_rows["example_idx"].tolist() == [1]
     assert output_rows.empty
     assert answer_rows["example_idx"].tolist() == [1]
+
+
+def test_wp1_question_filter_ignores_detected_source_data_section():
+    tables = wp1_tables()
+
+    question_rows = filter_rows(tables, [condition("question", "contains", "Masaryk")])
+    source_only_question_rows = filter_rows(tables, [condition("question", "contains", "Archivní")])
+    source_rows = filter_rows(tables, [condition("source_data", "contains", "Archivní")])
+    second_source_rows = filter_rows(tables, [condition("source_data", "contains", "Unique source B")])
+    fallback_rows = filter_rows(tables, [condition("question", "contains", "fallback")])
+
+    assert question_rows["example_idx"].tolist() == [0]
+    assert source_only_question_rows["example_idx"].tolist() == []
+    assert source_rows["example_idx"].tolist() == [0]
+    assert second_source_rows["example_idx"].tolist() == [0]
+    assert fallback_rows["example_idx"].tolist() == [1]
+    assert source_rows.loc[0, "match_details"][0]["target"] == "source_data"
+    assert source_rows.loc[0, "match_details"][0]["source_index"] == 1
+    assert second_source_rows.loc[0, "match_details"][0]["source_index"] == 2
+
+
+def test_source_data_field_is_advertised_only_when_detected():
+    tables = wp1_tables()
+    with_source = querying.schema_payload(tables)
+    without_source = querying.schema_payload(
+        {
+            **tables,
+            "rows": tables["rows"][tables["rows"]["example_idx"] == 2],
+        }
+    )
+
+    assert with_source["source_data_available"] is True
+    assert without_source["source_data_available"] is False
 
 
 def test_span_filters_use_same_span_for_match_all():

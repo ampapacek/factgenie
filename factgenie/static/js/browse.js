@@ -848,6 +848,7 @@ function detailLabel(detail) {
         span_reason: "Span reason",
         span_text: "Span text",
         question: "Question",
+        source_data: "Source data",
         output: "Answer",
         any_text: "Any text",
         slider: "Slider",
@@ -874,6 +875,11 @@ function detailLabel(detail) {
         const spanText = shortenMatchText(detail.span_text || detail.matched_text || detail.reason || "", 60);
         const category = detail.category ? `${detail.category}: ` : "";
         return `Span ${category}${spanText || "(empty)"}${setup}${who}`;
+    }
+    if (detail.target === "source_data") {
+        const sourceNumber = detail.source_index ? ` ${detail.source_index}` : "";
+        const value = detail.matched_text || detail.value || "";
+        return `Source data${sourceNumber} ${op}${value ? ` ${shortenMatchText(value, 60)}` : ""}`;
     }
     const value = detail.slider_label
         ? `${detail.slider_label}${detail.value ? ` ${detail.value}` : ""}`
@@ -977,6 +983,20 @@ function markTextNodes(container, text) {
     return marked;
 }
 
+function expandBrowseSourceDataDetails(detail) {
+    const sourceIndex = Number(detail.source_index);
+    let sourceItem = $();
+    if (Number.isFinite(sourceIndex) && sourceIndex > 0) {
+        sourceItem = $("#examplearea ol li").eq(sourceIndex - 1);
+    }
+    if (!sourceItem.length) {
+        sourceItem = $("#examplearea");
+    }
+    sourceItem.find("details").each(function () {
+        this.open = true;
+    });
+}
+
 function markAnnotatableRange(box, start, length) {
     if (start === null || start === undefined || String(start).trim() === "") {
         return false;
@@ -1054,6 +1074,9 @@ function applyBrowseMatchHighlights() {
                 return String($(this).data("slider-label") || "") === String(detail.slider_label || detail.sliderLabel || "");
             }).addClass("browse-match-slider");
             box.addClass("browse-match-box border border-primary border-2");
+        } else if (detail.target === "source_data") {
+            expandBrowseSourceDataDetails(detail);
+            markTextNodes($("#examplearea"), detail.matched_text || detail.value);
         } else if (detail.target === "question") {
             markTextNodes($("#examplearea"), detail.matched_text || detail.value);
         } else if (detail.target === "output") {
@@ -1262,7 +1285,7 @@ function browseTextOperators(field) {
 
 function browseFieldOptions() {
     // Visible Browse labels intentionally differ from backend field names.
-    return [
+    const fields = [
         ["setup", "Answer source"],
         ["annotation_state", "Annotation state"],
         ["annotator", "Annotator"],
@@ -1270,10 +1293,12 @@ function browseFieldOptions() {
         ["span_reason", "Span reason"],
         ["span_text", "Span text"],
         ["question", "Question"],
-        ["output", "Answer"],
-        ["any_text", "Any text"],
-        ["slider", "Slider"],
     ];
+    if (browseFilterSchema.source_data_available) {
+        fields.push(["source_data", "Source data"]);
+    }
+    fields.push(["output", "Answer"], ["any_text", "Any text"], ["slider", "Slider"]);
+    return fields;
 }
 
 function browseConditionValues(row) {

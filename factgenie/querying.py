@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+from html import unescape
 from collections import defaultdict
 
 import pandas as pd
@@ -45,6 +46,9 @@ ROW_COLUMNS = [
 
 INTERNAL_ROW_COLUMNS = [
     "question_texts",
+    "source_data_texts",
+    "source_data_items",
+    "has_source_data",
     "output_items",
     "submissions",
     "spans",
@@ -77,6 +81,7 @@ TEXT_FIELDS = {
     "span_reason",
     "span_text",
     "question",
+    "source_data",
     "output",
     "any_text",
 }
@@ -195,6 +200,49 @@ def _normalize_example_text(example):
         except TypeError:
             return str(example)
     return str(example)
+
+
+def _plain_section_text(text):
+    text = unescape(str(text or ""))
+    text = re.sub(r"(?i)<\s*(br|/p|/div|/section|/article|/li|/h[1-6])\b[^>]*>", "\n", text)
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n\s+", "\n", text)
+    return text.strip()
+
+
+def _section_label_pattern(label):
+    return re.compile(rf"(?im)(?:^|\n)\s*(?:#+\s*)?(?:\*\*)?{re.escape(label)}(?:\*\*)?\s*:?\s*")
+
+
+def _split_question_and_source_data(text):
+    plain_text = _plain_section_text(text)
+    if not plain_text:
+        return "", [], False
+
+    question_match = _section_label_pattern("Otázka").search(plain_text)
+    source_match = _section_label_pattern("Nalezené relevantní dokumenty").search(plain_text)
+    source_text = plain_text[source_match.end() :].strip() if source_match else ""
+    source_items = _source_data_items(text, source_text) if source_text else []
+
+    if question_match:
+        question_end = source_match.start() if source_match and source_match.start() > question_match.end() else len(plain_text)
+        question_text = plain_text[question_match.end() : question_end].strip()
+        return question_text, source_items, bool(source_items)
+
+    return str(text or ""), source_items, bool(source_items)
+
+
+def _source_data_items(raw_text, fallback_text):
+    items = []
+    for index, match in enumerate(re.finditer(r"(?is)<li\b[^>]*>(.*?)</li>", str(raw_text or "")), start=1):
+        item_text = _plain_section_text(match.group(1))
+        if item_text:
+            items.append({"source_index": index, "text": item_text})
+    if items:
+        return items
+    fallback_text = str(fallback_text or "").strip()
+    return [{"source_index": 1, "text": fallback_text}] if fallback_text else []
 
 
 def _field_text(items):
@@ -431,12 +479,17 @@ def _build_example_rows(app, outputs, submissions, spans, assignments):
     for key, out_group in output_groups.items():
         dataset, split, example_idx = key
         question = ""
+        source_data_items = []
+        has_source_data = False
         dataset_obj = app.db.get("datasets_obj", {}).get(dataset) if hasattr(app, "db") else None
         if dataset_obj is not None:
             try:
-                question = _normalize_example_text(dataset_obj.get_example(split, int(example_idx)))
+                example_text = _normalize_example_text(dataset_obj.get_example(split, int(example_idx)))
+                question, source_data_items, has_source_data = _split_question_and_source_data(example_text)
             except Exception:
                 question = ""
+                source_data_items = []
+                has_source_data = False
 
         sub_group = submission_groups.get(key, pd.DataFrame())
         span_group = span_groups.get(key, pd.DataFrame())
@@ -475,6 +528,8 @@ def _build_example_rows(app, outputs, submissions, spans, assignments):
 
         sliders = []
         any_texts = [question]
+        source_data_texts = [item["text"] for item in source_data_items if item.get("text")]
+        any_texts.extend(source_data_texts)
         for item in output_items:
             any_texts.append(item["text"])
         submissions_list = []
@@ -527,6 +582,9 @@ def _build_example_rows(app, outputs, submissions, spans, assignments):
                 "split": split,
                 "example_idx": int(example_idx),
                 "question_texts": [question],
+                "source_data_texts": source_data_texts,
+                "source_data_items": source_data_items,
+                "has_source_data": has_source_data,
                 "question_preview": _preview(question),
                 "output_items": output_items,
                 "setups": ", ".join(setup_ids),
@@ -617,6 +675,7 @@ def schema_payload(tables, authenticated=False):
         "categories": sorted(spans["category_name"].dropna().astype(str).unique().tolist()) if not spans.empty else [],
         "slider_labels": sorted(slider_labels),
         "annotation_states": ["done", "skipped", "mixed", "empty", "assigned", "todo"],
+        "source_data_available": bool(not rows.empty and rows.get("has_source_data", pd.Series(dtype=bool)).fillna(False).any()),
     }
 
 
@@ -843,6 +902,21 @@ def condition_matches_row(row, condition, authenticated, regex_cache):
         matched = text_matches(values, condition["op"], condition.get("value"), regex_cache)
         detail = condition_detail(condition, "question", {}, authenticated, matched_text_for_values(values, condition, regex_cache), text=next((v for v in values if v), ""))
         return matched, metadata_from_details([detail]) if matched else {}
+    if field == "source_data":
+        details = []
+        for item in _safe_list(row.get("source_data_items")):
+            if text_matches(item.get("text"), condition["op"], condition.get("value"), regex_cache):
+                details.append(
+                    condition_detail(
+                        condition,
+                        "source_data",
+                        item,
+                        authenticated,
+                        matched_text_for_value(item.get("text"), condition, regex_cache),
+                        text=item.get("text", ""),
+                    )
+                )
+        return bool(details), metadata_from_details(details) if details else {}
     if field == "output":
         details = []
         for item in _safe_list(row.get("output_items")):
@@ -1041,7 +1115,9 @@ def condition_detail(condition, target, item, authenticated, matched_text="", te
         )
     elif target == "slider":
         detail.update({"slider_label": item.get("label", condition.get("sliderLabel", "")), "slider_value": item.get("value", "")})
-    elif text:
+    elif target == "source_data":
+        detail.update({"source_index": item.get("source_index", "")})
+    if text:
         detail["text"] = text
     return detail
 
