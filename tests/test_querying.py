@@ -19,14 +19,44 @@ class DummyDataset:
         return {"question": questions[example_idx]}
 
 
+class WP1Dataset:
+    def get_example(self, split, example_idx):
+        examples = {
+            0: {
+                "question": (
+                    "<h4>Otázka</h4>"
+                    "<div>Kdo byl Masaryk?</div>"
+                    "<h4>Nalezené relevantní dokumenty</h4>"
+                    "<ol>"
+                    "<li><details><summary>Rozbalit text dokumentu</summary>"
+                    "<div>Archivní dokument uvádí zdroj pouze ve source datech.</div>"
+                    "</details></li>"
+                    "<li><details><summary>Rozbalit text dokumentu</summary>"
+                    "<div>Unique source B lives in the second source item.</div>"
+                    "</details></li>"
+                    "</ol>"
+                )
+            },
+            1: {"question": "Plain fallback text mentions archiv without section labels."},
+            2: {"question": "Otázka\nSamostatná otázka bez zdrojové části."},
+        }
+        return examples[example_idx]
+
+
 def make_app():
     return SimpleNamespace(db={"datasets_obj": {"demo": DummyDataset()}})
 
 
-def condition(field, op, value="", slider_label=""):
+def make_wp1_app():
+    return SimpleNamespace(db={"datasets_obj": {"wp1": WP1Dataset()}})
+
+
+def condition(field, op, value="", slider_label="", span_group=""):
     data = {"field": field, "op": op, "value": value}
     if slider_label:
         data["sliderLabel"] = slider_label
+    if span_group:
+        data["spanGroup"] = span_group
     return data
 
 
@@ -142,6 +172,18 @@ def sample_tables(pseudonymize_annotators=False):
     return {"outputs": outputs, "submissions": submissions, "spans": spans, "assignments": assignments, "rows": rows}
 
 
+def wp1_tables():
+    outputs = pd.DataFrame(
+        [
+            {"dataset": "wp1", "split": "test", "setup_id": "rag-generated", "example_idx": 0, "output": "Answer 0"},
+            {"dataset": "wp1", "split": "test", "setup_id": "rag-generated", "example_idx": 1, "output": "Answer 1"},
+            {"dataset": "wp1", "split": "test", "setup_id": "rag-generated", "example_idx": 2, "output": "Answer 2"},
+        ]
+    )
+    rows = querying._build_example_rows(make_wp1_app(), outputs, pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+    return {"outputs": outputs, "submissions": pd.DataFrame(), "spans": pd.DataFrame(), "assignments": pd.DataFrame(), "rows": rows}
+
+
 def test_query_tables_are_question_centric_and_extract_annotations():
     tables = sample_tables()
 
@@ -166,6 +208,39 @@ def test_question_and_output_text_filters_are_separate():
     assert answer_rows["example_idx"].tolist() == [1]
 
 
+def test_wp1_question_filter_ignores_detected_source_data_section():
+    tables = wp1_tables()
+
+    question_rows = filter_rows(tables, [condition("question", "contains", "Masaryk")])
+    source_only_question_rows = filter_rows(tables, [condition("question", "contains", "Archivní")])
+    source_rows = filter_rows(tables, [condition("source_data", "contains", "Archivní")])
+    second_source_rows = filter_rows(tables, [condition("source_data", "contains", "Unique source B")])
+    fallback_rows = filter_rows(tables, [condition("question", "contains", "fallback")])
+
+    assert question_rows["example_idx"].tolist() == [0]
+    assert source_only_question_rows["example_idx"].tolist() == []
+    assert source_rows["example_idx"].tolist() == [0]
+    assert second_source_rows["example_idx"].tolist() == [0]
+    assert fallback_rows["example_idx"].tolist() == [1]
+    assert source_rows.loc[0, "match_details"][0]["target"] == "source_data"
+    assert source_rows.loc[0, "match_details"][0]["source_index"] == 1
+    assert second_source_rows.loc[0, "match_details"][0]["source_index"] == 2
+
+
+def test_source_data_field_is_advertised_only_when_detected():
+    tables = wp1_tables()
+    with_source = querying.schema_payload(tables)
+    without_source = querying.schema_payload(
+        {
+            **tables,
+            "rows": tables["rows"][tables["rows"]["example_idx"] == 2],
+        }
+    )
+
+    assert with_source["source_data_available"] is True
+    assert without_source["source_data_available"] is False
+
+
 def test_span_filters_use_same_span_for_match_all():
     tables = sample_tables()
 
@@ -186,6 +261,31 @@ def test_span_filters_use_same_span_for_match_all():
 
     assert same_span["example_idx"].tolist() == [0]
     assert crossed_spans.empty
+
+
+def test_span_groups_can_match_different_spans_in_same_submission():
+    tables = sample_tables()
+
+    same_group = filter_rows(
+        tables,
+        [
+            condition("span_category", "eq", "Chybí"),
+            condition("span_category", "eq", "Nesrozumitelné"),
+        ],
+    )
+    different_groups = filter_rows(
+        tables,
+        [
+            condition("span_category", "eq", "Chybí", span_group="1"),
+            condition("span_category", "eq", "Nesrozumitelné", span_group="2"),
+        ],
+    )
+
+    assert same_group.empty
+    assert different_groups["example_idx"].tolist() == [0]
+    details = different_groups.loc[0, "match_details"]
+    assert {detail["spanGroup"] for detail in details if detail["target"] == "span"} == {"1", "2"}
+    assert {detail["span_text"] for detail in details if detail["target"] == "span"} == {"Alpha", "castle"}
 
 
 def test_annotation_filters_use_same_submission_for_match_all():
@@ -285,6 +385,36 @@ def test_filter_returns_condition_level_match_details():
     assert slider_detail["campaign_id"] == "camp"
     assert slider_detail["slider_label"] == "Tón"
     assert slider_detail["slider_value"] == 4
+
+
+def test_summary_counts_distinct_span_occurrences_not_condition_details():
+    tables = sample_tables()
+
+    rows = filter_rows(
+        tables,
+        [
+            condition("span_category", "eq", "Chybí"),
+            condition("span_text", "contains", "Alpha"),
+        ],
+    )
+    payload = querying.table_payload(rows)
+
+    assert payload["summary"]["total"] == 1
+    assert payload["summary"]["matched_occurrence_count"] == 2
+    assert payload["summary"]["occurrence_unit"] == "span"
+    assert payload["summary"]["occurrence_unit_label"] == "span"
+    assert payload["summary"]["occurrence_unit_plural"] == "spans"
+
+
+def test_summary_counts_source_data_occurrences():
+    rows = filter_rows(wp1_tables(), [condition("source_data", "contains", "source")])
+    payload = querying.table_payload(rows)
+
+    assert payload["summary"]["total"] == 1
+    assert payload["summary"]["matched_occurrence_count"] == 2
+    assert payload["summary"]["occurrence_unit"] == "source_data"
+    assert payload["summary"]["occurrence_unit_label"] == "source data item"
+    assert payload["summary"]["occurrence_unit_plural"] == "source data items"
 
 
 def test_match_all_returns_all_matching_spans_and_annotators():
@@ -392,6 +522,9 @@ def test_schema_payload_is_scoped_and_public_uses_aliases_only():
     public_schema = querying.schema_payload(tables, authenticated=False)
     private_schema = querying.schema_payload(tables, authenticated=True)
 
+    assert public_schema["result_unit"] == "question"
+    assert public_schema["result_unit_label"] == "question"
+    assert public_schema["result_unit_plural"] == "questions"
     assert public_schema["datasets"] == ["demo"]
     assert public_schema["splits"] == ["test"]
     assert public_schema["setups"] == ["plain", "rag-generated"]
@@ -482,7 +615,12 @@ def test_query_filter_route_returns_scoped_rows_and_handles_regex_error():
 
     data = response.get_json()
     assert data["success"] is True
+    assert data["result_unit"] == "question"
+    assert data["result_unit_label"] == "question"
+    assert data["result_unit_plural"] == "questions"
     assert data["summary"]["total"] == 2
+    assert data["summary"]["matched_occurrence_count"] == 3
+    assert data["summary"]["occurrence_unit"] == "span"
     assert [row["example_idx"] for row in data["rows"]] == [0, 1]
 
     error = regex_response.get_json()
@@ -498,6 +636,9 @@ def test_query_schema_route_scopes_to_selected_dataset_and_split():
 
     data = response.get_json()
     assert data["success"] is True
+    assert data["result_unit"] == "question"
+    assert data["result_unit_label"] == "question"
+    assert data["result_unit_plural"] == "questions"
     assert data["splits"] == ["test"]
     assert data["setups"] == ["plain", "rag-generated"]
 

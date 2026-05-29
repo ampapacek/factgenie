@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+from html import unescape
 from collections import defaultdict
 
 import pandas as pd
@@ -45,6 +46,9 @@ ROW_COLUMNS = [
 
 INTERNAL_ROW_COLUMNS = [
     "question_texts",
+    "source_data_texts",
+    "source_data_items",
+    "has_source_data",
     "output_items",
     "submissions",
     "spans",
@@ -61,6 +65,25 @@ INTERNAL_ROW_COLUMNS = [
     "has_todo",
 ]
 
+RESULT_UNIT_METADATA = {
+    "result_unit": "question",
+    "result_unit_label": "question",
+    "result_unit_plural": "questions",
+}
+
+OCCURRENCE_LABELS = {
+    "question": ("question", "questions"),
+    "source_data": ("source data item", "source data items"),
+    "output": ("answer", "answers"),
+    "span": ("span", "spans"),
+    "slider": ("slider", "sliders"),
+    "annotation": ("annotation", "annotations"),
+    "setup": ("answer source", "answer sources"),
+    "annotation_state": ("annotation", "annotations"),
+    "annotator": ("annotation", "annotations"),
+    "any_text": ("text block", "text blocks"),
+}
+
 SPAN_FIELDS = {"span_category", "span_reason", "span_text"}
 ANNOTATION_SCOPED_FIELDS = {"annotator", "annotation_state", "slider"} | SPAN_FIELDS
 TEXT_FIELDS = {
@@ -71,6 +94,7 @@ TEXT_FIELDS = {
     "span_reason",
     "span_text",
     "question",
+    "source_data",
     "output",
     "any_text",
 }
@@ -189,6 +213,49 @@ def _normalize_example_text(example):
         except TypeError:
             return str(example)
     return str(example)
+
+
+def _plain_section_text(text):
+    text = unescape(str(text or ""))
+    text = re.sub(r"(?i)<\s*(br|/p|/div|/section|/article|/li|/h[1-6])\b[^>]*>", "\n", text)
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n\s+", "\n", text)
+    return text.strip()
+
+
+def _section_label_pattern(label):
+    return re.compile(rf"(?im)(?:^|\n)\s*(?:#+\s*)?(?:\*\*)?{re.escape(label)}(?:\*\*)?\s*:?\s*")
+
+
+def _split_question_and_source_data(text):
+    plain_text = _plain_section_text(text)
+    if not plain_text:
+        return "", [], False
+
+    question_match = _section_label_pattern("Otázka").search(plain_text)
+    source_match = _section_label_pattern("Nalezené relevantní dokumenty").search(plain_text)
+    source_text = plain_text[source_match.end() :].strip() if source_match else ""
+    source_items = _source_data_items(text, source_text) if source_text else []
+
+    if question_match:
+        question_end = source_match.start() if source_match and source_match.start() > question_match.end() else len(plain_text)
+        question_text = plain_text[question_match.end() : question_end].strip()
+        return question_text, source_items, bool(source_items)
+
+    return str(text or ""), source_items, bool(source_items)
+
+
+def _source_data_items(raw_text, fallback_text):
+    items = []
+    for index, match in enumerate(re.finditer(r"(?is)<li\b[^>]*>(.*?)</li>", str(raw_text or "")), start=1):
+        item_text = _plain_section_text(match.group(1))
+        if item_text:
+            items.append({"source_index": index, "text": item_text})
+    if items:
+        return items
+    fallback_text = str(fallback_text or "").strip()
+    return [{"source_index": 1, "text": fallback_text}] if fallback_text else []
 
 
 def _field_text(items):
@@ -425,12 +492,17 @@ def _build_example_rows(app, outputs, submissions, spans, assignments):
     for key, out_group in output_groups.items():
         dataset, split, example_idx = key
         question = ""
+        source_data_items = []
+        has_source_data = False
         dataset_obj = app.db.get("datasets_obj", {}).get(dataset) if hasattr(app, "db") else None
         if dataset_obj is not None:
             try:
-                question = _normalize_example_text(dataset_obj.get_example(split, int(example_idx)))
+                example_text = _normalize_example_text(dataset_obj.get_example(split, int(example_idx)))
+                question, source_data_items, has_source_data = _split_question_and_source_data(example_text)
             except Exception:
                 question = ""
+                source_data_items = []
+                has_source_data = False
 
         sub_group = submission_groups.get(key, pd.DataFrame())
         span_group = span_groups.get(key, pd.DataFrame())
@@ -469,6 +541,8 @@ def _build_example_rows(app, outputs, submissions, spans, assignments):
 
         sliders = []
         any_texts = [question]
+        source_data_texts = [item["text"] for item in source_data_items if item.get("text")]
+        any_texts.extend(source_data_texts)
         for item in output_items:
             any_texts.append(item["text"])
         submissions_list = []
@@ -521,6 +595,9 @@ def _build_example_rows(app, outputs, submissions, spans, assignments):
                 "split": split,
                 "example_idx": int(example_idx),
                 "question_texts": [question],
+                "source_data_texts": source_data_texts,
+                "source_data_items": source_data_items,
+                "has_source_data": has_source_data,
                 "question_preview": _preview(question),
                 "output_items": output_items,
                 "setups": ", ".join(setup_ids),
@@ -603,6 +680,7 @@ def schema_payload(tables, authenticated=False):
         ]
         annotators.update(visible_ids["annotator_id"].dropna().astype(str).tolist())
     return {
+        **RESULT_UNIT_METADATA,
         "datasets": sorted(rows["dataset"].dropna().astype(str).unique().tolist()) if not rows.empty else [],
         "splits": sorted(rows["split"].dropna().astype(str).unique().tolist()) if not rows.empty else [],
         "setups": sorted({setup for setups in rows.get("setup_ids", []) for setup in _safe_list(setups)}) if not rows.empty else [],
@@ -610,6 +688,7 @@ def schema_payload(tables, authenticated=False):
         "categories": sorted(spans["category_name"].dropna().astype(str).unique().tolist()) if not spans.empty else [],
         "slider_labels": sorted(slider_labels),
         "annotation_states": ["done", "skipped", "mixed", "empty", "assigned", "todo"],
+        "source_data_available": bool(not rows.empty and rows.get("has_source_data", pd.Series(dtype=bool)).fillna(False).any()),
     }
 
 
@@ -665,8 +744,22 @@ def normalize_conditions(conditions):
         value = condition.get("value")
         if op not in ["missing", "not_missing"] and str(value if value is not None else "").strip() == "":
             continue
-        normalized.append({"field": field, "op": op, "value": value})
+        normalized_condition = {"field": field, "op": op, "value": value}
+        if field in SPAN_FIELDS:
+            normalized_condition["spanGroup"] = normalize_span_group(condition.get("spanGroup") or condition.get("span_group"))
+        normalized.append(normalized_condition)
     return normalized
+
+
+def normalize_span_group(value):
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return "1"
+    try:
+        group = int(text)
+    except ValueError:
+        return "1"
+    return str(max(1, group))
 
 
 def row_matches_conditions(row, conditions, mode, authenticated=False):
@@ -719,10 +812,19 @@ def submission_matches_conditions(row, submission, conditions, authenticated, re
 
     if span_conditions:
         span_details = []
-        for span in spans_for_submission(row, submission):
-            if all(span_condition_matches(span, condition, regex_cache) for condition in span_conditions):
-                for condition in span_conditions:
-                    span_details.append(condition_detail(condition, "span", span, authenticated, matched_text_for_span(span, condition, regex_cache)))
+        grouped_conditions = defaultdict(list)
+        for condition in span_conditions:
+            grouped_conditions[condition.get("spanGroup") or "1"].append(condition)
+        spans = spans_for_submission(row, submission)
+        for group_conditions in grouped_conditions.values():
+            group_details = []
+            for span in spans:
+                if all(span_condition_matches(span, condition, regex_cache) for condition in group_conditions):
+                    for condition in group_conditions:
+                        group_details.append(condition_detail(condition, "span", span, authenticated, matched_text_for_span(span, condition, regex_cache)))
+            if not group_details:
+                return False, {}
+            span_details.extend(group_details)
         if not span_details:
             return False, {}
         details.extend(span_details)
@@ -813,6 +915,21 @@ def condition_matches_row(row, condition, authenticated, regex_cache):
         matched = text_matches(values, condition["op"], condition.get("value"), regex_cache)
         detail = condition_detail(condition, "question", {}, authenticated, matched_text_for_values(values, condition, regex_cache), text=next((v for v in values if v), ""))
         return matched, metadata_from_details([detail]) if matched else {}
+    if field == "source_data":
+        details = []
+        for item in _safe_list(row.get("source_data_items")):
+            if text_matches(item.get("text"), condition["op"], condition.get("value"), regex_cache):
+                details.append(
+                    condition_detail(
+                        condition,
+                        "source_data",
+                        item,
+                        authenticated,
+                        matched_text_for_value(item.get("text"), condition, regex_cache),
+                        text=item.get("text", ""),
+                    )
+                )
+        return bool(details), metadata_from_details(details) if details else {}
     if field == "output":
         details = []
         for item in _safe_list(row.get("output_items")):
@@ -989,6 +1106,7 @@ def condition_detail(condition, target, item, authenticated, matched_text="", te
         "field": condition.get("field", ""),
         "op": condition.get("op", ""),
         "value": str(condition.get("value", "") if condition.get("value") is not None else ""),
+        "spanGroup": condition.get("spanGroup", ""),
         "sliderLabel": condition.get("sliderLabel", ""),
         "target": target,
         "campaign_id": item.get("campaign_id", ""),
@@ -1010,7 +1128,9 @@ def condition_detail(condition, target, item, authenticated, matched_text="", te
         )
     elif target == "slider":
         detail.update({"slider_label": item.get("label", condition.get("sliderLabel", "")), "slider_value": item.get("value", "")})
-    elif text:
+    elif target == "source_data":
+        detail.update({"source_index": item.get("source_index", "")})
+    if text:
         detail["text"] = text
     return detail
 
@@ -1076,12 +1196,71 @@ def metadata_for_first_matching_submission_slider(submission, condition):
 
 
 def summarize_rows(rows):
+    occurrence_summary = summarize_matched_occurrences(rows)
     if rows.empty:
-        return {"total": 0, "by_state": []}
+        return {"total": 0, "by_state": [], **occurrence_summary}
     return {
         "total": int(len(rows)),
         "by_state": rows.groupby("annotation_state").size().reset_index(name="count").to_dict(orient="records"),
+        **occurrence_summary,
     }
+
+
+def summarize_matched_occurrences(rows):
+    occurrence_keys = set()
+    occurrence_units = set()
+    if rows is None or rows.empty or "match_details" not in rows.columns:
+        return {
+            "matched_occurrence_count": 0,
+            "occurrence_unit": "occurrence",
+            "occurrence_unit_label": "occurrence",
+            "occurrence_unit_plural": "occurrences",
+        }
+    for row_position, (_, row) in enumerate(rows.iterrows()):
+        for detail in _safe_list(row.get("match_details")):
+            if not isinstance(detail, dict):
+                continue
+            unit = occurrence_unit_for_detail(detail)
+            occurrence_units.add(unit)
+            occurrence_keys.add((row_position, unit, occurrence_identity(detail)))
+    unit = next(iter(occurrence_units)) if len(occurrence_units) == 1 else "occurrence"
+    label, plural = OCCURRENCE_LABELS.get(unit, ("occurrence", "occurrences"))
+    return {
+        "matched_occurrence_count": len(occurrence_keys),
+        "occurrence_unit": unit,
+        "occurrence_unit_label": label,
+        "occurrence_unit_plural": plural,
+    }
+
+
+def occurrence_unit_for_detail(detail):
+    target = str(detail.get("target") or detail.get("field") or "occurrence")
+    if target in ["annotation_state", "annotator"]:
+        return "annotation"
+    return target if target in OCCURRENCE_LABELS else "occurrence"
+
+
+def occurrence_identity(detail):
+    target = str(detail.get("target") or detail.get("field") or "occurrence")
+    base = (
+        detail.get("campaign_id", ""),
+        detail.get("setup_id", ""),
+        detail.get("annotator_id", ""),
+        detail.get("annotator_alias", ""),
+    )
+    if target == "span":
+        return base + (detail.get("start", ""), detail.get("span_text", ""), detail.get("category", ""))
+    if target == "slider":
+        return base + (detail.get("slider_label", ""),)
+    if target == "output":
+        return (detail.get("setup_id", ""), detail.get("text", "") or detail.get("matched_text", ""))
+    if target == "source_data":
+        return (detail.get("source_index", ""), detail.get("text", "") or detail.get("matched_text", ""))
+    if target == "question":
+        return ("question",)
+    if target in ["annotation_state", "annotator", "setup"]:
+        return base + (target,)
+    return (target, detail.get("matched_text", ""), detail.get("value", ""))
 
 
 def table_payload(rows, limit=500, authenticated=False):
@@ -1095,6 +1274,7 @@ def table_payload(rows, limit=500, authenticated=False):
     if limit:
         public_rows = public_rows.head(int(limit))
     return {
+        **RESULT_UNIT_METADATA,
         "columns": [col for col in ROW_COLUMNS if col in public_rows.columns],
         "rows": public_rows.to_dict(orient="records"),
         "summary": summarize_rows(rows),
