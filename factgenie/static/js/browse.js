@@ -13,6 +13,8 @@ var browsePreviewMatchActive = false;
 var browseFilterStale = false;
 var browseResultUnitLabel = "question";
 var browseResultUnitPlural = "questions";
+var browseOccurrenceUnitLabel = "occurrence";
+var browseOccurrenceUnitPlural = "occurrences";
 var currentAnnInfo = new Map();
 var annotatorAliases = new Map();
 var annotatorAliasList = [
@@ -1577,14 +1579,23 @@ function markBrowseFilterStale() {
 function updateBrowseResultUnitMetadata(payload) {
     browseResultUnitLabel = payload?.result_unit_label || browseResultUnitLabel || "question";
     browseResultUnitPlural = payload?.result_unit_plural || browseResultUnitPlural || `${browseResultUnitLabel}s`;
+    browseOccurrenceUnitLabel = payload?.summary?.occurrence_unit_label || payload?.occurrence_unit_label || browseOccurrenceUnitLabel || "occurrence";
+    browseOccurrenceUnitPlural = payload?.summary?.occurrence_unit_plural || payload?.occurrence_unit_plural || browseOccurrenceUnitPlural || `${browseOccurrenceUnitLabel}s`;
 }
 
-function browseMatchedQuestionStatus(count) {
-    if (count === 0) {
+function browseMatchedQuestionStatus(count, occurrenceCount = null) {
+    const numericCount = Number(count || 0);
+    if (numericCount === 0) {
         return `No matched ${browseResultUnitPlural}`;
     }
-    const unit = count === 1 ? browseResultUnitLabel : browseResultUnitPlural;
-    return `${count} matched ${unit}`;
+    const unit = numericCount === 1 ? browseResultUnitLabel : browseResultUnitPlural;
+    let status = `${numericCount} matched ${unit}`;
+    if (occurrenceCount !== null && occurrenceCount !== undefined) {
+        const numericOccurrenceCount = Number(occurrenceCount || 0);
+        const occurrenceUnit = numericOccurrenceCount === 1 ? browseOccurrenceUnitLabel : browseOccurrenceUnitPlural;
+        status += `, ${numericOccurrenceCount} matched ${occurrenceUnit}`;
+    }
+    return status;
 }
 
 function updateBrowseHighlightsToggleLabel() {
@@ -1647,7 +1658,7 @@ function applyBrowseFilters() {
             filteredResults = payload.rows || [];
             filteredQueueActive = filteredResults.length > 0;
             filteredQueueIndex = 0;
-            setBrowseFilterStatus(browseMatchedQuestionStatus(filteredResults.length));
+            setBrowseFilterStatus(browseMatchedQuestionStatus(filteredResults.length, payload.summary?.matched_occurrence_count));
             updateBrowseHighlightsToggleLabel();
             $("#browse-toggle-highlights").toggle(filteredQueueActive);
             if (filteredQueueActive) {

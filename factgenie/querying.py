@@ -71,6 +71,19 @@ RESULT_UNIT_METADATA = {
     "result_unit_plural": "questions",
 }
 
+OCCURRENCE_LABELS = {
+    "question": ("question", "questions"),
+    "source_data": ("source data item", "source data items"),
+    "output": ("answer", "answers"),
+    "span": ("span", "spans"),
+    "slider": ("slider", "sliders"),
+    "annotation": ("annotation", "annotations"),
+    "setup": ("answer source", "answer sources"),
+    "annotation_state": ("annotation", "annotations"),
+    "annotator": ("annotation", "annotations"),
+    "any_text": ("text block", "text blocks"),
+}
+
 SPAN_FIELDS = {"span_category", "span_reason", "span_text"}
 ANNOTATION_SCOPED_FIELDS = {"annotator", "annotation_state", "slider"} | SPAN_FIELDS
 TEXT_FIELDS = {
@@ -1183,12 +1196,71 @@ def metadata_for_first_matching_submission_slider(submission, condition):
 
 
 def summarize_rows(rows):
+    occurrence_summary = summarize_matched_occurrences(rows)
     if rows.empty:
-        return {"total": 0, "by_state": []}
+        return {"total": 0, "by_state": [], **occurrence_summary}
     return {
         "total": int(len(rows)),
         "by_state": rows.groupby("annotation_state").size().reset_index(name="count").to_dict(orient="records"),
+        **occurrence_summary,
     }
+
+
+def summarize_matched_occurrences(rows):
+    occurrence_keys = set()
+    occurrence_units = set()
+    if rows is None or rows.empty or "match_details" not in rows.columns:
+        return {
+            "matched_occurrence_count": 0,
+            "occurrence_unit": "occurrence",
+            "occurrence_unit_label": "occurrence",
+            "occurrence_unit_plural": "occurrences",
+        }
+    for row_position, (_, row) in enumerate(rows.iterrows()):
+        for detail in _safe_list(row.get("match_details")):
+            if not isinstance(detail, dict):
+                continue
+            unit = occurrence_unit_for_detail(detail)
+            occurrence_units.add(unit)
+            occurrence_keys.add((row_position, unit, occurrence_identity(detail)))
+    unit = next(iter(occurrence_units)) if len(occurrence_units) == 1 else "occurrence"
+    label, plural = OCCURRENCE_LABELS.get(unit, ("occurrence", "occurrences"))
+    return {
+        "matched_occurrence_count": len(occurrence_keys),
+        "occurrence_unit": unit,
+        "occurrence_unit_label": label,
+        "occurrence_unit_plural": plural,
+    }
+
+
+def occurrence_unit_for_detail(detail):
+    target = str(detail.get("target") or detail.get("field") or "occurrence")
+    if target in ["annotation_state", "annotator"]:
+        return "annotation"
+    return target if target in OCCURRENCE_LABELS else "occurrence"
+
+
+def occurrence_identity(detail):
+    target = str(detail.get("target") or detail.get("field") or "occurrence")
+    base = (
+        detail.get("campaign_id", ""),
+        detail.get("setup_id", ""),
+        detail.get("annotator_id", ""),
+        detail.get("annotator_alias", ""),
+    )
+    if target == "span":
+        return base + (detail.get("start", ""), detail.get("span_text", ""), detail.get("category", ""))
+    if target == "slider":
+        return base + (detail.get("slider_label", ""),)
+    if target == "output":
+        return (detail.get("setup_id", ""), detail.get("text", "") or detail.get("matched_text", ""))
+    if target == "source_data":
+        return (detail.get("source_index", ""), detail.get("text", "") or detail.get("matched_text", ""))
+    if target == "question":
+        return ("question",)
+    if target in ["annotation_state", "annotator", "setup"]:
+        return base + (target,)
+    return (target, detail.get("matched_text", ""), detail.get("value", ""))
 
 
 def table_payload(rows, limit=500, authenticated=False):

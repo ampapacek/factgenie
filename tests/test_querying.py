@@ -387,6 +387,36 @@ def test_filter_returns_condition_level_match_details():
     assert slider_detail["slider_value"] == 4
 
 
+def test_summary_counts_distinct_span_occurrences_not_condition_details():
+    tables = sample_tables()
+
+    rows = filter_rows(
+        tables,
+        [
+            condition("span_category", "eq", "Chybí"),
+            condition("span_text", "contains", "Alpha"),
+        ],
+    )
+    payload = querying.table_payload(rows)
+
+    assert payload["summary"]["total"] == 1
+    assert payload["summary"]["matched_occurrence_count"] == 2
+    assert payload["summary"]["occurrence_unit"] == "span"
+    assert payload["summary"]["occurrence_unit_label"] == "span"
+    assert payload["summary"]["occurrence_unit_plural"] == "spans"
+
+
+def test_summary_counts_source_data_occurrences():
+    rows = filter_rows(wp1_tables(), [condition("source_data", "contains", "source")])
+    payload = querying.table_payload(rows)
+
+    assert payload["summary"]["total"] == 1
+    assert payload["summary"]["matched_occurrence_count"] == 2
+    assert payload["summary"]["occurrence_unit"] == "source_data"
+    assert payload["summary"]["occurrence_unit_label"] == "source data item"
+    assert payload["summary"]["occurrence_unit_plural"] == "source data items"
+
+
 def test_match_all_returns_all_matching_spans_and_annotators():
     tables = sample_tables()
     row_index = tables["rows"].index[tables["rows"]["example_idx"] == 0][0]
@@ -589,6 +619,8 @@ def test_query_filter_route_returns_scoped_rows_and_handles_regex_error():
     assert data["result_unit_label"] == "question"
     assert data["result_unit_plural"] == "questions"
     assert data["summary"]["total"] == 2
+    assert data["summary"]["matched_occurrence_count"] == 3
+    assert data["summary"]["occurrence_unit"] == "span"
     assert [row["example_idx"] for row in data["rows"]] == [0, 1]
 
     error = regex_response.get_json()
