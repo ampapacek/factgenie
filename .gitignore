@@ -29,6 +29,8 @@ scripts
 notes.txt
 notes.md
 Makefile
+issues.md
+filtering-tasks.md
 
 # ignore changes in the notebook by default (to avoid adding the notebook after each run)
 factgenie/notebooks/inter_annotator_agreement.ipynb
@@ -40,5 +42,4 @@ make_example.txt
 AGENTS.md
 reason_presets.txt
 factgenie/static/img/zavislostni_graf.png
-
 
