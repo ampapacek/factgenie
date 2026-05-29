@@ -672,8 +672,22 @@ def normalize_conditions(conditions):
         value = condition.get("value")
         if op not in ["missing", "not_missing"] and str(value if value is not None else "").strip() == "":
             continue
-        normalized.append({"field": field, "op": op, "value": value})
+        normalized_condition = {"field": field, "op": op, "value": value}
+        if field in SPAN_FIELDS:
+            normalized_condition["spanGroup"] = normalize_span_group(condition.get("spanGroup") or condition.get("span_group"))
+        normalized.append(normalized_condition)
     return normalized
+
+
+def normalize_span_group(value):
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return "1"
+    try:
+        group = int(text)
+    except ValueError:
+        return "1"
+    return str(max(1, group))
 
 
 def row_matches_conditions(row, conditions, mode, authenticated=False):
@@ -726,10 +740,19 @@ def submission_matches_conditions(row, submission, conditions, authenticated, re
 
     if span_conditions:
         span_details = []
-        for span in spans_for_submission(row, submission):
-            if all(span_condition_matches(span, condition, regex_cache) for condition in span_conditions):
-                for condition in span_conditions:
-                    span_details.append(condition_detail(condition, "span", span, authenticated, matched_text_for_span(span, condition, regex_cache)))
+        grouped_conditions = defaultdict(list)
+        for condition in span_conditions:
+            grouped_conditions[condition.get("spanGroup") or "1"].append(condition)
+        spans = spans_for_submission(row, submission)
+        for group_conditions in grouped_conditions.values():
+            group_details = []
+            for span in spans:
+                if all(span_condition_matches(span, condition, regex_cache) for condition in group_conditions):
+                    for condition in group_conditions:
+                        group_details.append(condition_detail(condition, "span", span, authenticated, matched_text_for_span(span, condition, regex_cache)))
+            if not group_details:
+                return False, {}
+            span_details.extend(group_details)
         if not span_details:
             return False, {}
         details.extend(span_details)
@@ -996,6 +1019,7 @@ def condition_detail(condition, target, item, authenticated, matched_text="", te
         "field": condition.get("field", ""),
         "op": condition.get("op", ""),
         "value": str(condition.get("value", "") if condition.get("value") is not None else ""),
+        "spanGroup": condition.get("spanGroup", ""),
         "sliderLabel": condition.get("sliderLabel", ""),
         "target": target,
         "campaign_id": item.get("campaign_id", ""),

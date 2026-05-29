@@ -207,8 +207,10 @@
 
           <h6 class="fw-bold mt-3">Span conditions</h6>
           <ul>
-            <li>With <b>Match all</b>, span conditions are evaluated on the same span. For example, <code>Span category is Chybí</code> and <code>Span reason regex \bNotInTop10\b</code> means: keep questions where there is a <code>Chybí</code> span whose own reason matches <code>NotInTop10</code>.</li>
-            <li>Multiple span-reason conditions also mean the same span must satisfy all of them.</li>
+            <li>Span conditions have a <b>Span group</b>. Conditions in the same group must match the same span.</li>
+            <li>Choose <b>New group</b> when a span condition may be satisfied by a different span in the same annotation.</li>
+            <li>For example, <code>Span category is Chybí</code> in <b>Group 1</b> and <code>Span reason regex \bNotInTop10\b</code> in <b>Group 1</b> means: keep questions where there is a <code>Chybí</code> span whose own reason matches <code>NotInTop10</code>.</li>
+            <li><code>Span category is Chybí</code> in <b>Group 1</b> and <code>Span category is Nesrozumitelné</code> in <b>Group 2</b> means: keep questions with an annotation that contains both categories, possibly on different spans.</li>
             <li>The matching span, reason text, answer text, or slider row is highlighted when possible. You can turn this off with <b>Hide highlights</b> and turn it back on with <b>Show highlights</b>.</li>
           </ul>
 

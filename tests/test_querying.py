@@ -23,10 +23,12 @@ def make_app():
     return SimpleNamespace(db={"datasets_obj": {"demo": DummyDataset()}})
 
 
-def condition(field, op, value="", slider_label=""):
+def condition(field, op, value="", slider_label="", span_group=""):
     data = {"field": field, "op": op, "value": value}
     if slider_label:
         data["sliderLabel"] = slider_label
+    if span_group:
+        data["spanGroup"] = span_group
     return data
 
 
@@ -186,6 +188,31 @@ def test_span_filters_use_same_span_for_match_all():
 
     assert same_span["example_idx"].tolist() == [0]
     assert crossed_spans.empty
+
+
+def test_span_groups_can_match_different_spans_in_same_submission():
+    tables = sample_tables()
+
+    same_group = filter_rows(
+        tables,
+        [
+            condition("span_category", "eq", "Chybí"),
+            condition("span_category", "eq", "Nesrozumitelné"),
+        ],
+    )
+    different_groups = filter_rows(
+        tables,
+        [
+            condition("span_category", "eq", "Chybí", span_group="1"),
+            condition("span_category", "eq", "Nesrozumitelné", span_group="2"),
+        ],
+    )
+
+    assert same_group.empty
+    assert different_groups["example_idx"].tolist() == [0]
+    details = different_groups.loc[0, "match_details"]
+    assert {detail["spanGroup"] for detail in details if detail["target"] == "span"} == {"1", "2"}
+    assert {detail["span_text"] for detail in details if detail["target"] == "span"} == {"Alpha", "castle"}
 
 
 def test_annotation_filters_use_same_submission_for_match_all():

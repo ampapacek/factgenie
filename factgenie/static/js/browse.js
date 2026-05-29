@@ -31,6 +31,8 @@ var annotatorAliasStorageKey = "factgenie_browse_annotator_aliases";
 const DEFAULT_SPLIT_SIZES = [66, 33];
 const SPLIT_STORAGE_KEY = "factgenie:splitSizes";
 const REDO_PREVIEW_MATCH_PREFIX = "factgenie_redo_preview_match:";
+const BROWSE_SPAN_FIELDS = new Set(["span_category", "span_reason", "span_text"]);
+const NEW_SPAN_GROUP_VALUE = "__new__";
 
 function loadSplitSizes() {
     try {
@@ -1280,6 +1282,7 @@ function browseConditionValues(row) {
         op: row.find(".browse-condition-op").val(),
         value: row.find(".browse-condition-value").val(),
         sliderLabel: row.find(".browse-condition-slider-label").val(),
+        spanGroup: row.find(".browse-condition-span-group").val() || "",
     };
 }
 
@@ -1313,6 +1316,7 @@ function addBrowseFilterCondition(condition) {
     $("#browse-filter-conditions").append(row);
     fieldSelect.val(condition?.field || "span_category");
     renderBrowseConditionControls(row, condition || {});
+    refreshBrowseSpanGroupOptions();
 }
 
 function renderBrowseConditionControls(row, condition) {
@@ -1329,6 +1333,7 @@ function renderBrowseConditionControls(row, condition) {
 
     const wrap = row.find(".browse-condition-value-wrap");
     wrap.empty();
+    const isSpanField = BROWSE_SPAN_FIELDS.has(field);
     const selectFields = {
         setup: ["Select answer source...", browseFilterSchema.setups || []],
         annotation_state: ["Select state...", browseFilterSchema.annotation_states || []],
@@ -1342,8 +1347,7 @@ function renderBrowseConditionControls(row, condition) {
         values.forEach(function (value) {
             select.append(escapeBrowseOption(value));
         });
-        wrap.append('<label class="form-label small mb-1">Value</label>');
-        wrap.append(select);
+        appendBrowseValueControl(wrap, select, isSpanField, condition);
         select.val(condition.value || "");
     } else if (field === "slider") {
         const controls = $(`
@@ -1367,11 +1371,73 @@ function renderBrowseConditionControls(row, condition) {
         labelSelect.val(condition.sliderLabel || "");
         controls.find(".browse-condition-value").val(condition.value || "");
     } else {
-        wrap.append('<label class="form-label small mb-1">Value</label>');
-        wrap.append('<input class="form-control form-control-sm browse-condition-value" type="search">');
-        wrap.find(".browse-condition-value").val(condition.value || "");
+        const input = $('<input class="form-control form-control-sm browse-condition-value" type="search">');
+        appendBrowseValueControl(wrap, input, isSpanField, condition);
+        input.val(condition.value || "");
     }
     row.find(".browse-condition-value").prop("disabled", ["missing", "not_missing"].includes(opSelect.val()));
+    refreshBrowseSpanGroupOptions();
+}
+
+function appendBrowseValueControl(wrap, control, includeSpanGroup, condition) {
+    if (!includeSpanGroup) {
+        wrap.append('<label class="form-label small mb-1">Value</label>');
+        wrap.append(control);
+        return;
+    }
+    const controls = $(`
+      <div class="row g-2">
+        <div class="col-md-8 browse-condition-main-value">
+          <label class="form-label small mb-1">Value</label>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small mb-1">Span group</label>
+          <select class="form-select form-select-sm browse-condition-span-group"></select>
+        </div>
+      </div>
+    `);
+    controls.find(".browse-condition-main-value").append(control);
+    controls.find(".browse-condition-span-group").attr("data-current-group", condition.spanGroup || "1");
+    wrap.append(controls);
+}
+
+function browseCurrentSpanGroups() {
+    const groups = new Set(["1"]);
+    $(".browse-condition-span-group").each(function () {
+        const selectedValue = String($(this).val() || "").trim();
+        const value = selectedValue === NEW_SPAN_GROUP_VALUE
+            ? String($(this).attr("data-current-group") || "").trim()
+            : String(selectedValue || $(this).attr("data-current-group") || "").trim();
+        if (/^\d+$/.test(value)) {
+            groups.add(String(Math.max(1, Number(value))));
+        }
+    });
+    return Array.from(groups).map(Number).sort((a, b) => a - b);
+}
+
+function refreshBrowseSpanGroupOptions() {
+    const groups = browseCurrentSpanGroups();
+    $(".browse-condition-span-group").each(function () {
+        const select = $(this);
+        const current = String(select.val() || select.attr("data-current-group") || "1");
+        select.empty();
+        groups.forEach(function (group) {
+            select.append($("<option>").attr("value", String(group)).text(`Group ${group}`));
+        });
+        select.append($("<option>").attr("value", NEW_SPAN_GROUP_VALUE).text("New group"));
+        select.val(groups.map(String).includes(current) ? current : "1");
+        select.attr("data-current-group", select.val());
+    });
+}
+
+function assignNewBrowseSpanGroup(select) {
+    const groups = browseCurrentSpanGroups();
+    const nextGroup = String((groups[groups.length - 1] || 1) + 1);
+    select.attr("data-current-group", nextGroup);
+    select.val(nextGroup);
+    refreshBrowseSpanGroupOptions();
+    select.val(nextGroup);
+    select.attr("data-current-group", nextGroup);
 }
 
 function browseActiveConditions() {
@@ -1777,11 +1843,28 @@ $("#browse-filter-conditions").on("change", ".browse-condition-op", function () 
     markBrowseFilterStale();
 });
 $("#browse-filter-conditions").on("input change", ".browse-condition-value, .browse-condition-slider-label", markBrowseFilterStale);
+$("#browse-filter-conditions").on("change", ".browse-condition-span-group", function () {
+    const select = $(this);
+    if (select.val() === NEW_SPAN_GROUP_VALUE) {
+        assignNewBrowseSpanGroup(select);
+    } else {
+        select.attr("data-current-group", select.val() || "1");
+        refreshBrowseSpanGroupOptions();
+    }
+    markBrowseFilterStale();
+});
+$("#browse-filter-conditions").on("keydown", "input.browse-condition-value, textarea.browse-condition-value", function (event) {
+    if (event.key === "Enter") {
+        event.preventDefault();
+        applyBrowseFilters();
+    }
+});
 $("#browse-filter-conditions").on("click", ".browse-remove-condition", function () {
     $(this).closest(".browse-filter-condition").remove();
     if (!$(".browse-filter-condition").length) {
         addBrowseFilterCondition();
     }
+    refreshBrowseSpanGroupOptions();
     markBrowseFilterStale();
 });
 
