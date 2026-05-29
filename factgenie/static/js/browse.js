@@ -17,6 +17,9 @@ var browseOccurrenceUnitLabel = "occurrence";
 var browseOccurrenceUnitPlural = "occurrences";
 var appliedBrowseFilterMode = "all";
 var browseMatchDetailsExpanded = false;
+var appliedBrowseFilterConditions = [];
+var pendingBrowseFilterRestore = null;
+var suppressBrowseUrlUpdate = false;
 var currentAnnInfo = new Map();
 var annotatorAliases = new Map();
 var annotatorAliasList = [
@@ -229,7 +232,7 @@ function changeSplit() {
     fetchExample(dataset, split, current_example_idx);
 }
 
-function changeExample(dataset, split, example_idx) {
+function changeExample(dataset, split, example_idx, options = {}) {
     $("#dataset-spinner").show();
     $('#dataset-select').val(dataset);
     $('#split-select').empty();
@@ -238,7 +241,7 @@ function changeExample(dataset, split, example_idx) {
     }
     $('#split-select').val(split);
     current_example_idx = example_idx;
-    fetchExample(dataset, split, example_idx);
+    fetchExample(dataset, split, example_idx, options);
 }
 
 
@@ -1401,14 +1404,10 @@ function focusBrowseOccurrence(occurrence, row) {
     }
 }
 
-function fetchExample(dataset, split, example_idx) {
+function fetchExample(dataset, split, example_idx, options = {}) {
     saveSplitSizes();
-    // change the URL so that it shows the permalink
-    const newUrl = `${url_prefix}/browse?dataset=${dataset}&split=${split}&example_idx=${example_idx}`;
-
-    // the check prevents being stuck at the same URL
-    if (!window.location.href.includes(newUrl)) {
-        history.pushState(null, '', newUrl);
+    if (!options.skipUrlUpdate && !suppressBrowseUrlUpdate) {
+        updateBrowseUrl(dataset, split, example_idx, options.replaceUrl);
     }
     $.get(`${url_prefix}/example`, {
         "dataset": dataset,
@@ -1812,7 +1811,21 @@ function loadBrowseFilterSchema() {
         } else {
             addBrowseFilterCondition();
         }
+        restorePendingBrowseFilter();
     });
+}
+
+function restorePendingBrowseFilter() {
+    if (!pendingBrowseFilterRestore) {
+        return;
+    }
+    const restore = pendingBrowseFilterRestore;
+    pendingBrowseFilterRestore = null;
+    $("#browse-filter-match-mode").val(restore.mode || "all");
+    $("#browse-filter-conditions").empty();
+    (restore.conditions || []).forEach(addBrowseFilterCondition);
+    browseFilterStale = false;
+    applyBrowseFilters(Number(restore.example_idx), true);
 }
 
 function clearFilteredQueue() {
@@ -1823,6 +1836,7 @@ function clearFilteredQueue() {
     browseFilterStale = false;
     filteredQueueIndex = 0;
     activeBrowseMatchDetails = [];
+    appliedBrowseFilterConditions = [];
     renderBrowseMatchDetails();
     clearBrowseMatchHighlights();
     $("#browse-filter-count").removeClass("text-danger").text("");
@@ -1870,6 +1884,7 @@ function resetBrowseFilters() {
     $("#browse-filter-conditions").empty();
     addBrowseFilterCondition();
     renderBrowseNavigationState();
+    updateBrowseUrl($('#dataset-select').val(), $('#split-select').val(), current_example_idx);
 }
 
 function setBrowseFilterStatus(message, isError = false) {
@@ -1915,6 +1930,72 @@ function currentQuestionNumber() {
     return Number(current_example_idx) + 1;
 }
 
+function browseShareableFilterState(mode = appliedBrowseFilterMode, conditions = appliedBrowseFilterConditions) {
+    const cleanConditions = (conditions || []).map(function (condition) {
+        return {
+            field: condition.field || "",
+            op: condition.op || "",
+            value: condition.value || "",
+            sliderLabel: condition.sliderLabel || "",
+            spanGroup: condition.spanGroup || "",
+        };
+    }).filter((condition) => condition.field && condition.op);
+    if (!cleanConditions.length) {
+        return "";
+    }
+    return JSON.stringify({
+        mode: mode || "all",
+        conditions: cleanConditions,
+    });
+}
+
+function parseBrowseFilterState(params) {
+    const raw = params.get("filters");
+    if (!raw) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(raw);
+        const conditions = Array.isArray(parsed.conditions) ? parsed.conditions : [];
+        const mode = parsed.mode === "any" ? "any" : "all";
+        if (!conditions.length) {
+            return null;
+        }
+        return { mode, conditions };
+    } catch (error) {
+        console.warn("Could not parse Browse filter URL state.", error);
+        return null;
+    }
+}
+
+function browseUrl(dataset, split, example_idx, options = {}) {
+    const params = new URLSearchParams({
+        dataset,
+        split,
+        example_idx: String(example_idx),
+    });
+    const filterState = options.filterState !== undefined
+        ? options.filterState
+        : browseShareableFilterState();
+    if (filterState) {
+        params.set("filters", filterState);
+    }
+    return `${url_prefix}/browse?${params.toString()}`;
+}
+
+function updateBrowseUrl(dataset, split, example_idx, replace = false) {
+    const nextUrl = browseUrl(dataset, split, example_idx);
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (currentUrl === nextUrl) {
+        return;
+    }
+    if (replace) {
+        history.replaceState(null, "", nextUrl);
+    } else {
+        history.pushState(null, "", nextUrl);
+    }
+}
+
 function renderBrowseNavigationState() {
     if (filteredQueueActive) {
         const position = filteredQueueIndex + 1;
@@ -1932,7 +2013,7 @@ function renderBrowseNavigationState() {
         .attr("title", `Total ${browseResultUnitPlural || "questions"}`);
 }
 
-function applyBrowseFilters() {
+function applyBrowseFilters(targetExampleIdx = null, replaceUrl = false) {
     const dataset = $('#dataset-select').val();
     const split = $('#split-select').val();
     const conditions = browseActiveConditions();
@@ -1943,6 +2024,7 @@ function applyBrowseFilters() {
     }
     browseFilterStale = false;
     appliedBrowseFilterMode = $("#browse-filter-match-mode").val() || "all";
+    appliedBrowseFilterConditions = conditions;
     setBrowseFilterStatus("Finding matched questions...");
     $.ajax({
         url: `${url_prefix}/query/filter`,
@@ -1967,12 +2049,13 @@ function applyBrowseFilters() {
             updateBrowseResultUnitMetadata(payload);
             filteredResults = payload.rows || [];
             filteredQueueActive = filteredResults.length > 0;
-            filteredQueueIndex = 0;
+            const targetIndex = filteredResults.findIndex((row) => Number(row.example_idx) === Number(targetExampleIdx));
+            filteredQueueIndex = targetIndex >= 0 ? targetIndex : 0;
             setBrowseFilterStatus(browseMatchedQuestionStatus(filteredResults.length, payload.summary?.matched_occurrence_count));
             updateBrowseHighlightsToggleLabel();
             $("#browse-toggle-highlights").toggle(filteredQueueActive);
             if (filteredQueueActive) {
-                goToPage(0);
+                goToPage(filteredQueueIndex, { replaceUrl });
             } else {
                 activeBrowseMatchDetails = [];
                 window.highlight_setup_id = null;
@@ -1981,6 +2064,7 @@ function applyBrowseFilters() {
                 renderBrowseMatchDetails();
                 clearBrowseMatchHighlights();
                 renderBrowseNavigationState();
+                updateBrowseUrl(dataset, split, current_example_idx, replaceUrl);
             }
         },
         error: function () {
@@ -1990,7 +2074,7 @@ function applyBrowseFilters() {
     });
 }
 
-function goToPage(page) {
+function goToPage(page, options = {}) {
     if (filteredQueueActive) {
         filteredQueueIndex = Math.min(Math.max(Number(page), 0), filteredResults.length - 1);
         const row = filteredResults[filteredQueueIndex];
@@ -1999,7 +2083,7 @@ function goToPage(page) {
         window.highlight_setup_id = row.match_setup_id || null;
         window.highlight_ann_campaign = row.match_annotator_id || row.match_annotator_alias || null;
         window.highlight_ann_campaigns = matchedAnnotatorIdsFromDetails(activeBrowseMatchDetails);
-        fetchExample(row.dataset, row.split, current_example_idx);
+        fetchExample(row.dataset, row.split, current_example_idx, options);
         renderBrowseMatchDetails();
         renderBrowseNavigationState();
         return;
@@ -2179,7 +2263,9 @@ $("#browse-add-condition").on("click", function () {
     addBrowseFilterCondition();
     markBrowseFilterStale();
 });
-$("#browse-apply-filters").on("click", applyBrowseFilters);
+$("#browse-apply-filters").on("click", function () {
+    applyBrowseFilters();
+});
 $("#browse-reset-filters").on("click", resetBrowseFilters);
 $("#browse-toggle-highlights").on("click", function () {
     browseHighlightsEnabled = !browseHighlightsEnabled;
@@ -2333,13 +2419,25 @@ window.addEventListener('popstate', function (event) {
         const example_idx = params.get('example_idx');
         const setup_id = params.get('setup_id');
         const ann_campaign = params.get('ann_campaign');
+        const filterState = parseBrowseFilterState(params);
 
         if (dataset && split && example_idx) {
             // Set highlight parameters before loading the example
             window.highlight_setup_id = setup_id;
             window.highlight_ann_campaign = ann_campaign;
 
-            changeExample(dataset, split, example_idx);
+            if (filterState) {
+                pendingBrowseFilterRestore = { ...filterState, example_idx };
+            } else {
+                pendingBrowseFilterRestore = null;
+                clearFilteredQueue();
+                $("#browse-filter-match-mode").val("all");
+                $("#browse-filter-conditions").empty();
+            }
+            suppressBrowseUrlUpdate = true;
+            changeExample(dataset, split, example_idx, { skipUrlUpdate: true });
+            suppressBrowseUrlUpdate = false;
+            loadBrowseFilterSchema();
         }
     }
 });
@@ -2352,6 +2450,7 @@ $(document).ready(function () {
     const urlParams = new URLSearchParams(window.location.search);
     const setup_id = urlParams.get('setup_id');
     const ann_campaign = urlParams.get('ann_campaign');
+    const filterState = parseBrowseFilterState(urlParams);
 
     if (setup_id) {
         window.highlight_setup_id = setup_id;
@@ -2363,7 +2462,10 @@ $(document).ready(function () {
 
     if (window.display_example != null) {
         const e = window.display_example;
-        changeExample(e.dataset, e.split, e.example_idx);
+        if (filterState) {
+            pendingBrowseFilterRestore = { ...filterState, example_idx: e.example_idx };
+        }
+        changeExample(e.dataset, e.split, e.example_idx, filterState ? { skipUrlUpdate: true } : { replaceUrl: true });
         loadBrowseFilterSchema();
     }
     else {
