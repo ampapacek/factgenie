@@ -210,7 +210,6 @@ function changeDataset() {
     clearFilteredQueue();
     loadBrowseFilterSchema();
     fetchExample(dataset, split, current_example_idx);
-    $("#page-input").val(current_example_idx);
 }
 
 function changeSplit() {
@@ -221,7 +220,6 @@ function changeSplit() {
     clearFilteredQueue();
     loadBrowseFilterSchema();
     fetchExample(dataset, split, current_example_idx);
-    $("#page-input").val(current_example_idx);
 }
 
 function changeExample(dataset, split, example_idx) {
@@ -234,7 +232,6 @@ function changeExample(dataset, split, example_idx) {
     $('#split-select').val(split);
     current_example_idx = example_idx;
     fetchExample(dataset, split, example_idx);
-    $("#page-input").val(example_idx);
 }
 
 
@@ -1107,7 +1104,7 @@ function fetchExample(dataset, split, example_idx) {
         showRawData(data);
 
         total_examples = datasets[dataset].example_count[split];
-        $("#total-examples").html(total_examples - 1);
+        renderBrowseNavigationState();
 
         window.generated_outputs = data.generated_outputs;
 
@@ -1428,7 +1425,7 @@ function clearFilteredQueue() {
     $("#browse-filter-error").text("");
     $("#browse-toggle-highlights").hide();
     if (wasActive) {
-        $("#page-input").val(current_example_idx);
+        renderBrowseNavigationState();
     }
 }
 
@@ -1468,7 +1465,7 @@ function resetBrowseFilters() {
     $("#browse-filter-match-mode").val("all");
     $("#browse-filter-conditions").empty();
     addBrowseFilterCondition();
-    $("#page-input").val(current_example_idx);
+    renderBrowseNavigationState();
 }
 
 function setBrowseFilterStatus(message, isError = false) {
@@ -1490,6 +1487,27 @@ function browseMatchedQuestionStatus(count) {
 
 function updateBrowseHighlightsToggleLabel() {
     $("#browse-toggle-highlights").text(browseHighlightsEnabled ? "Hide highlights" : "Show highlights");
+}
+
+function currentQuestionNumber() {
+    return Number(current_example_idx) + 1;
+}
+
+function renderBrowseNavigationState() {
+    if (filteredQueueActive) {
+        const position = filteredQueueIndex + 1;
+        const total = filteredResults.length;
+        const resultUnit = browseResultUnitLabel || "question";
+        $("#page-input").val(position);
+        $("#total-examples")
+            .text(`Matched ${resultUnit} ${position} / ${total} · Question no. ${currentQuestionNumber()}`)
+            .attr("title", `Original question number ${currentQuestionNumber()}`);
+        return;
+    }
+    $("#page-input").val(currentQuestionNumber());
+    $("#total-examples")
+        .text(`/ ${total_examples || 0}`)
+        .attr("title", `Total ${browseResultUnitPlural || "questions"}`);
 }
 
 function applyBrowseFilters() {
@@ -1551,7 +1569,7 @@ function goToPage(page) {
         window.highlight_ann_campaigns = matchedAnnotatorIdsFromDetails(activeBrowseMatchDetails);
         fetchExample(row.dataset, row.split, current_example_idx);
         renderBrowseMatchDetails();
-        $("#page-input").val(`${filteredQueueIndex + 1}/${filteredResults.length}`);
+        renderBrowseNavigationState();
         return;
     }
 
@@ -1563,7 +1581,7 @@ function goToPage(page) {
 
     fetchExample(dataset, split, current_example_idx);
 
-    $("#page-input").val(current_example_idx);
+    renderBrowseNavigationState();
 }
 
 function nextBtn() {
@@ -1608,7 +1626,7 @@ function goToBtn() {
         goToPage(Number(raw) - 1);
         return;
     }
-    goToPage($("#page-input").val());
+    goToPage(Number($("#page-input").val()) - 1);
 }
 
 function showRawData(data) {
@@ -1885,7 +1903,6 @@ $(document).ready(function () {
         $("#dataset-select").val(
             $("#dataset-select option:first").val()
         ).trigger("change");
-        $("#page-input").val(current_example_idx);
     }
 
     enableTooltips();
