@@ -15,6 +15,8 @@ var browseResultUnitLabel = "question";
 var browseResultUnitPlural = "questions";
 var browseOccurrenceUnitLabel = "occurrence";
 var browseOccurrenceUnitPlural = "occurrences";
+var appliedBrowseFilterMode = "all";
+var browseMatchDetailsExpanded = false;
 var currentAnnInfo = new Map();
 var annotatorAliases = new Map();
 var annotatorAliasList = [
@@ -909,6 +911,157 @@ function shortenMatchText(text, maxLength) {
     return `${normalized.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
 }
 
+function detailOccurrenceUnit(detail) {
+    const target = String(detail?.target || detail?.field || "occurrence");
+    if (["annotation_state", "annotator"].includes(target)) {
+        return "annotation";
+    }
+    if (["question", "source_data", "output", "setup", "span", "slider"].includes(target)) {
+        return target;
+    }
+    return "occurrence";
+}
+
+function detailOccurrenceTypeLabel(detail) {
+    const labels = {
+        question: "Question",
+        source_data: "Source data",
+        output: "Answer",
+        setup: "Answer source",
+        annotation: "Annotation",
+        annotation_state: "Annotation",
+        annotator: "Annotation",
+        span: "Span",
+        slider: "Slider",
+        occurrence: "Occurrence",
+    };
+    return labels[detailOccurrenceUnit(detail)] || "Occurrence";
+}
+
+function detailOccurrenceIdentity(detail) {
+    const target = String(detail?.target || detail?.field || "occurrence");
+    const base = [
+        String(detail?.campaign_id || ""),
+        String(detail?.setup_id || ""),
+        String(detail?.annotator_id || ""),
+        String(detail?.annotator_alias || ""),
+    ];
+    if (target === "span") {
+        return [target, ...base, String(detail?.start || ""), String(detail?.span_text || ""), String(detail?.category || "")].join("|");
+    }
+    if (target === "slider") {
+        return [target, ...base, String(detail?.slider_label || detail?.sliderLabel || "")].join("|");
+    }
+    if (target === "output") {
+        return [target, String(detail?.setup_id || ""), String(detail?.text || detail?.matched_text || "")].join("|");
+    }
+    if (target === "source_data") {
+        return [target, String(detail?.source_index || ""), String(detail?.text || detail?.matched_text || "")].join("|");
+    }
+    if (target === "question") {
+        return "question";
+    }
+    if (["annotation_state", "annotator", "setup"].includes(target)) {
+        return [target, ...base].join("|");
+    }
+    return [target, String(detail?.matched_text || ""), String(detail?.value || "")].join("|");
+}
+
+function detailCauseLabel(detail) {
+    return detailLabel(detail);
+}
+
+function detailEvidence(detail) {
+    const parts = [];
+    const who = detailAnnotatorLabel(detail).replace(/^ · /, "");
+    if (detail.setup_id) {
+        parts.push(String(detail.setup_id));
+    }
+    if (who) {
+        parts.push(who);
+    }
+    if (detail.target === "span") {
+        if (detail.category) {
+            parts.push(String(detail.category));
+        }
+        const spanText = shortenMatchText(detail.span_text || detail.matched_text || detail.reason || "", 90);
+        if (spanText) {
+            parts.push(spanText);
+        }
+    } else if (detail.target === "slider") {
+        const slider = [detail.slider_label || detail.sliderLabel, detail.slider_value || detail.value].filter(Boolean).join(" ");
+        if (slider) {
+            parts.push(slider);
+        }
+    } else if (detail.target === "source_data") {
+        if (detail.source_index) {
+            parts.push(`item ${detail.source_index}`);
+        }
+        const value = shortenMatchText(detail.matched_text || detail.value || detail.text || "", 90);
+        if (value) {
+            parts.push(value);
+        }
+    } else {
+        const value = shortenMatchText(detail.matched_text || detail.value || detail.text || "", 90);
+        if (value) {
+            parts.push(value);
+        }
+    }
+    return parts.join(" · ");
+}
+
+function browseMatchedOccurrences(details) {
+    const occurrences = [];
+    const byKey = new Map();
+    (details || []).forEach(function (detail) {
+        if (!detail || typeof detail !== "object") {
+            return;
+        }
+        const key = detailOccurrenceIdentity(detail);
+        let occurrence = byKey.get(key);
+        if (!occurrence) {
+            occurrence = {
+                key,
+                unit: detailOccurrenceUnit(detail),
+                typeLabel: detailOccurrenceTypeLabel(detail),
+                label: detailLabel(detail),
+                evidence: detailEvidence(detail),
+                details: [],
+                causes: [],
+            };
+            byKey.set(key, occurrence);
+            occurrences.push(occurrence);
+        }
+        occurrence.details.push(detail);
+        const cause = detailCauseLabel(detail);
+        if (cause && !occurrence.causes.includes(cause)) {
+            occurrence.causes.push(cause);
+        }
+        if (!occurrence.evidence) {
+            occurrence.evidence = detailEvidence(detail);
+        }
+    });
+    return occurrences;
+}
+
+function occurrenceCountLabel(occurrences) {
+    const count = occurrences.length;
+    const units = Array.from(new Set(occurrences.map((occurrence) => occurrence.unit)));
+    const labels = {
+        question: ["matched question", "matched questions"],
+        source_data: ["matched source data item", "matched source data items"],
+        output: ["matched answer", "matched answers"],
+        setup: ["matched answer source", "matched answer sources"],
+        annotation: ["matched annotation", "matched annotations"],
+        span: ["matched span", "matched spans"],
+        slider: ["matched slider", "matched sliders"],
+        occurrence: ["matched occurrence", "matched occurrences"],
+    };
+    const unit = units.length === 1 ? units[0] : "occurrence";
+    const [single, plural] = labels[unit] || labels.occurrence;
+    return `${count} ${count === 1 ? single : plural} in this question`;
+}
+
 function renderBrowseMatchDetails() {
     const panel = $("#browse-match-details");
     panel.empty();
@@ -916,14 +1069,50 @@ function renderBrowseMatchDetails() {
         panel.hide();
         return;
     }
-    panel.append($('<div>', { class: "small text-muted mb-1" }).text("Matched occurrences in this question"));
-    const chips = $('<div>');
-    activeBrowseMatchDetails.forEach(function (detail) {
-        const chip = $('<span>', { class: "browse-match-chip", title: detailLabel(detail) });
-        chip.text(detailLabel(detail));
-        chips.append(chip);
+    const occurrences = browseMatchedOccurrences(activeBrowseMatchDetails);
+    const header = $('<div>', { class: "d-flex align-items-center justify-content-between gap-2 mb-1" });
+    header.append($('<div>', { class: "small text-muted fw-semibold" }).text("Matched occurrences in this question"));
+    const headerControls = $('<div>', { class: "d-flex align-items-center gap-2" });
+    headerControls.append($('<div>', { class: "small text-muted" }).text(occurrenceCountLabel(occurrences)));
+    const expandButton = $('<button>', {
+        type: "button",
+        class: "btn btn-sm btn-outline-secondary browse-match-expand-toggle",
+        title: browseMatchDetailsExpanded ? "Make matched occurrences compact" : "Make matched occurrences taller",
+    }).html(browseMatchDetailsExpanded ? '<i class="fa fa-compress"></i>' : '<i class="fa fa-expand"></i>');
+    expandButton.on("click", function () {
+        browseMatchDetailsExpanded = !browseMatchDetailsExpanded;
+        renderBrowseMatchDetails();
     });
-    panel.append(chips).show();
+    headerControls.append(expandButton);
+    header.append(headerControls);
+    panel.append(header);
+
+    const list = $('<div>', { class: "browse-match-occurrence-list", role: "list" });
+    list.toggleClass("browse-match-occurrence-list-expanded", browseMatchDetailsExpanded);
+    occurrences.forEach(function (occurrence, index) {
+        const row = $('<button>', {
+            type: "button",
+            class: "browse-match-occurrence-row",
+            title: occurrence.label,
+            "data-occurrence-index": String(index),
+        });
+        row.append($('<span>', { class: "browse-match-occurrence-number" }).text(String(index + 1)));
+        row.append($('<span>', { class: "browse-match-occurrence-type" }).text(occurrence.typeLabel));
+        const body = $('<span>', { class: "browse-match-occurrence-body" });
+        body.append($('<span>', { class: "browse-match-occurrence-label" }).text(occurrence.label));
+        if (occurrence.evidence && occurrence.evidence !== occurrence.label) {
+            body.append($('<span>', { class: "browse-match-occurrence-evidence" }).text(occurrence.evidence));
+        }
+        if (appliedBrowseFilterMode === "any" && occurrence.causes.length) {
+            body.append($('<span>', { class: "browse-match-occurrence-cause" }).text(`Matched: ${occurrence.causes.join("; ")}`));
+        }
+        row.append(body);
+        row.on("click", function () {
+            focusBrowseOccurrence(occurrence, row);
+        });
+        list.append(row);
+    });
+    panel.append(list).show();
 }
 
 function clearBrowseMatchHighlights() {
@@ -938,6 +1127,8 @@ function clearBrowseMatchHighlights() {
     $(".browse-match-span").removeClass("browse-match-span");
     $(".browse-match-slider").removeClass("browse-match-slider");
     $(".browse-match-box").removeClass("browse-match-box border border-primary border-2");
+    $(".browse-match-focus").removeClass("browse-match-focus");
+    $(".browse-match-focus-inline").removeClass("browse-match-focus-inline");
 }
 
 function markTextNodes(container, text) {
@@ -996,6 +1187,33 @@ function expandBrowseSourceDataDetails(detail) {
     }
     sourceItem.find("details").each(function () {
         this.open = true;
+    });
+}
+
+function browseSourceDataTarget(detail) {
+    const sourceIndex = Number(detail.source_index);
+    if (Number.isFinite(sourceIndex) && sourceIndex > 0) {
+        const sourceItem = $("#examplearea ol li").eq(sourceIndex - 1);
+        if (sourceItem.length) {
+            return sourceItem;
+        }
+    }
+    return $("#examplearea");
+}
+
+function expandBrowseOutputBox(box) {
+    box.each(function () {
+        const card = $(this);
+        const body = card.find(".card-body").first();
+        if (!body.length) {
+            return;
+        }
+        const targetId = body.attr("id");
+        if (targetId && !body.hasClass("show")) {
+            const bsCollapse = new bootstrap.Collapse(body[0], { toggle: false });
+            bsCollapse.show();
+            collapsed_boxes = collapsed_boxes.filter((id) => id !== targetId);
+        }
     });
 }
 
@@ -1058,38 +1276,129 @@ function markAnnotatableText(box, text) {
     return true;
 }
 
+function applyBrowseDetailHighlight(detail) {
+    const box = browseDetailBox(detail);
+    if (detail.target === "span") {
+        const marked = markAnnotatableRange(box, detail.start, String(detail.span_text || "").length);
+        if (!marked) {
+            markAnnotatableText(box, detail.span_text || detail.matched_text);
+        }
+        box.addClass("browse-match-box border border-primary border-2");
+        return {
+            targets: box.find(".browse-match-span").add(box),
+            inlineTargets: box.find(".browse-match-span"),
+        };
+    }
+    if (detail.target === "slider") {
+        const sliders = box.find(".browse-slider-row").filter(function () {
+            return String($(this).data("slider-label") || "") === String(detail.slider_label || detail.sliderLabel || "");
+        }).addClass("browse-match-slider");
+        box.addClass("browse-match-box border border-primary border-2");
+        return { targets: sliders.length ? sliders : box, inlineTargets: $() };
+    }
+    if (detail.target === "source_data") {
+        expandBrowseSourceDataDetails(detail);
+        const target = browseSourceDataTarget(detail);
+        markTextNodes(target, detail.matched_text || detail.value);
+        return {
+            targets: target.find(".browse-match-highlight").add(target),
+            inlineTargets: target.find(".browse-match-highlight"),
+        };
+    }
+    if (detail.target === "question") {
+        markTextNodes($("#examplearea"), detail.matched_text || detail.value);
+        return {
+            targets: $("#examplearea").find(".browse-match-highlight").add("#examplearea"),
+            inlineTargets: $("#examplearea").find(".browse-match-highlight"),
+        };
+    }
+    if (detail.target === "output") {
+        if (!markAnnotatableText(box, detail.matched_text || detail.value)) {
+            markTextNodes(box, detail.matched_text || detail.value);
+        }
+        box.addClass("browse-match-box border border-primary border-2");
+        return {
+            targets: box.find(".browse-match-span, .browse-match-highlight").add(box),
+            inlineTargets: box.find(".browse-match-span, .browse-match-highlight"),
+        };
+    }
+    if (["setup", "annotator", "annotation_state"].includes(detail.target) && box.length) {
+        if (detail.matched_text) {
+            markTextNodes(box, detail.matched_text);
+        }
+        box.addClass("browse-match-box border border-primary border-2");
+        return {
+            targets: box.find(".browse-match-highlight").add(box),
+            inlineTargets: box.find(".browse-match-highlight"),
+        };
+    }
+    if (detail.matched_text) {
+        const target = box.length ? box : $("#examplearea");
+        markTextNodes(target, detail.matched_text);
+        return {
+            targets: target.find(".browse-match-highlight").add(target),
+            inlineTargets: target.find(".browse-match-highlight"),
+        };
+    }
+    if (box.length) {
+        box.addClass("browse-match-box border border-primary border-2");
+        return { targets: box, inlineTargets: $() };
+    }
+    return { targets: $(), inlineTargets: $() };
+}
+
 function applyBrowseMatchHighlights() {
     clearBrowseMatchHighlights();
     if (!browseHighlightsEnabled || !(filteredQueueActive || browsePreviewMatchActive) || !activeBrowseMatchDetails.length) {
         return;
     }
     activeBrowseMatchDetails.forEach(function (detail) {
-        const box = browseDetailBox(detail);
-        if (detail.target === "span") {
-            const marked = markAnnotatableRange(box, detail.start, String(detail.span_text || "").length);
-            if (!marked) {
-                markAnnotatableText(box, detail.span_text || detail.matched_text);
-            }
-            box.addClass("browse-match-box border border-primary border-2");
-        } else if (detail.target === "slider") {
-            box.find(".browse-slider-row").filter(function () {
-                return String($(this).data("slider-label") || "") === String(detail.slider_label || detail.sliderLabel || "");
-            }).addClass("browse-match-slider");
-            box.addClass("browse-match-box border border-primary border-2");
-        } else if (detail.target === "source_data") {
-            expandBrowseSourceDataDetails(detail);
-            markTextNodes($("#examplearea"), detail.matched_text || detail.value);
-        } else if (detail.target === "question") {
-            markTextNodes($("#examplearea"), detail.matched_text || detail.value);
-        } else if (detail.target === "output") {
-            if (!markAnnotatableText(box, detail.matched_text || detail.value)) {
-                markTextNodes(box, detail.matched_text || detail.value);
-            }
-            box.addClass("browse-match-box border border-primary border-2");
-        } else if (detail.matched_text) {
-            markTextNodes(box.length ? box : $("#examplearea"), detail.matched_text);
-        }
+        applyBrowseDetailHighlight(detail);
     });
+}
+
+function focusBrowseOccurrence(occurrence, row) {
+    const availableSet = new Set(getSelectableAnnotatorIds());
+    const occurrenceAnnIds = matchedAnnotatorIdsFromDetails(occurrence.details).filter((annId) => availableSet.has(annId));
+    if (occurrenceAnnIds.length > 0) {
+        const activeAnnIds = $('.btn-ann-select.active').map(function () {
+            return $(this).data('ann');
+        }).get();
+        selected_campaigns = Array.from(new Set([...activeAnnIds, ...occurrenceAnnIds]));
+        setActiveAnnotatorButtons(selected_campaigns);
+        updateDisplayedAnnotations();
+    }
+
+    let focusTargets = $();
+    let inlineFocusTargets = $();
+    clearBrowseMatchHighlights();
+    occurrence.details.forEach(function (detail) {
+        const box = browseDetailBox(detail);
+        if (box.length) {
+            expandBrowseOutputBox(box);
+        }
+        const highlighted = applyBrowseDetailHighlight(detail);
+        focusTargets = focusTargets.add(highlighted.targets);
+        inlineFocusTargets = inlineFocusTargets.add(highlighted.inlineTargets);
+    });
+    if (browseHighlightsEnabled) {
+        activeBrowseMatchDetails.forEach(function (detail) {
+            if (!occurrence.details.includes(detail)) {
+                applyBrowseDetailHighlight(detail);
+            }
+        });
+    }
+    $(".browse-match-occurrence-row").removeClass("active");
+    $(row).addClass("active");
+    const inlineTarget = inlineFocusTargets.filter(":visible").first();
+    const target = inlineTarget.length ? inlineTarget : focusTargets.filter(":visible").first();
+    if (target.length) {
+        target.addClass(inlineTarget.length ? "browse-match-focus-inline" : "browse-match-focus");
+        target[0].scrollIntoView({ behavior: "smooth", block: "center" });
+        setTimeout(function () {
+            target.removeClass("browse-match-focus browse-match-focus-inline");
+        }, 2400);
+    }
 }
 
 function fetchExample(dataset, split, example_idx) {
@@ -1633,6 +1942,7 @@ function applyBrowseFilters() {
         return;
     }
     browseFilterStale = false;
+    appliedBrowseFilterMode = $("#browse-filter-match-mode").val() || "all";
     setBrowseFilterStatus("Finding matched questions...");
     $.ajax({
         url: `${url_prefix}/query/filter`,
