@@ -392,6 +392,9 @@ def test_schema_payload_is_scoped_and_public_uses_aliases_only():
     public_schema = querying.schema_payload(tables, authenticated=False)
     private_schema = querying.schema_payload(tables, authenticated=True)
 
+    assert public_schema["result_unit"] == "question"
+    assert public_schema["result_unit_label"] == "question"
+    assert public_schema["result_unit_plural"] == "questions"
     assert public_schema["datasets"] == ["demo"]
     assert public_schema["splits"] == ["test"]
     assert public_schema["setups"] == ["plain", "rag-generated"]
@@ -482,6 +485,9 @@ def test_query_filter_route_returns_scoped_rows_and_handles_regex_error():
 
     data = response.get_json()
     assert data["success"] is True
+    assert data["result_unit"] == "question"
+    assert data["result_unit_label"] == "question"
+    assert data["result_unit_plural"] == "questions"
     assert data["summary"]["total"] == 2
     assert [row["example_idx"] for row in data["rows"]] == [0, 1]
 
@@ -498,6 +504,9 @@ def test_query_schema_route_scopes_to_selected_dataset_and_split():
 
     data = response.get_json()
     assert data["success"] is True
+    assert data["result_unit"] == "question"
+    assert data["result_unit_label"] == "question"
+    assert data["result_unit_plural"] == "questions"
     assert data["splits"] == ["test"]
     assert data["setups"] == ["plain", "rag-generated"]
 

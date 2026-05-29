@@ -61,6 +61,12 @@ INTERNAL_ROW_COLUMNS = [
     "has_todo",
 ]
 
+RESULT_UNIT_METADATA = {
+    "result_unit": "question",
+    "result_unit_label": "question",
+    "result_unit_plural": "questions",
+}
+
 SPAN_FIELDS = {"span_category", "span_reason", "span_text"}
 ANNOTATION_SCOPED_FIELDS = {"annotator", "annotation_state", "slider"} | SPAN_FIELDS
 TEXT_FIELDS = {
@@ -603,6 +609,7 @@ def schema_payload(tables, authenticated=False):
         ]
         annotators.update(visible_ids["annotator_id"].dropna().astype(str).tolist())
     return {
+        **RESULT_UNIT_METADATA,
         "datasets": sorted(rows["dataset"].dropna().astype(str).unique().tolist()) if not rows.empty else [],
         "splits": sorted(rows["split"].dropna().astype(str).unique().tolist()) if not rows.empty else [],
         "setups": sorted({setup for setups in rows.get("setup_ids", []) for setup in _safe_list(setups)}) if not rows.empty else [],
@@ -1095,6 +1102,7 @@ def table_payload(rows, limit=500, authenticated=False):
     if limit:
         public_rows = public_rows.head(int(limit))
     return {
+        **RESULT_UNIT_METADATA,
         "columns": [col for col in ROW_COLUMNS if col in public_rows.columns],
         "rows": public_rows.to_dict(orient="records"),
         "summary": summarize_rows(rows),

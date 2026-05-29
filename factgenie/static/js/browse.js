@@ -10,6 +10,8 @@ var filteredQueueIndex = 0;
 var activeBrowseMatchDetails = [];
 var browseHighlightsEnabled = true;
 var browsePreviewMatchActive = false;
+var browseResultUnitLabel = "question";
+var browseResultUnitPlural = "questions";
 var currentAnnInfo = new Map();
 var annotatorAliases = new Map();
 var annotatorAliasList = [
@@ -1400,6 +1402,7 @@ function loadBrowseFilterSchema() {
             return;
         }
         browseFilterSchema = schema;
+        updateBrowseResultUnitMetadata(schema);
         const conditions = $(".browse-filter-condition").map(function () {
             return browseConditionValues($(this));
         }).get();
@@ -1472,11 +1475,17 @@ function setBrowseFilterStatus(message, isError = false) {
     $("#browse-filter-count").toggleClass("text-danger", isError).text(message || "");
 }
 
+function updateBrowseResultUnitMetadata(payload) {
+    browseResultUnitLabel = payload?.result_unit_label || browseResultUnitLabel || "question";
+    browseResultUnitPlural = payload?.result_unit_plural || browseResultUnitPlural || `${browseResultUnitLabel}s`;
+}
+
 function browseMatchedQuestionStatus(count) {
     if (count === 0) {
-        return "No matched questions";
+        return `No matched ${browseResultUnitPlural}`;
     }
-    return `${count} matched question${count === 1 ? "" : "s"}`;
+    const unit = count === 1 ? browseResultUnitLabel : browseResultUnitPlural;
+    return `${count} matched ${unit}`;
 }
 
 function updateBrowseHighlightsToggleLabel() {
@@ -1513,6 +1522,7 @@ function applyBrowseFilters() {
                 setBrowseFilterStatus("Filter failed.", true);
                 return;
             }
+            updateBrowseResultUnitMetadata(payload);
             filteredResults = payload.rows || [];
             filteredQueueActive = filteredResults.length > 0;
             filteredQueueIndex = 0;
