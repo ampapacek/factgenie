@@ -10,6 +10,7 @@ var filteredQueueIndex = 0;
 var activeBrowseMatchDetails = [];
 var browseHighlightsEnabled = true;
 var browsePreviewMatchActive = false;
+var browseFilterStale = false;
 var browseResultUnitLabel = "question";
 var browseResultUnitPlural = "questions";
 var currentAnnInfo = new Map();
@@ -1417,6 +1418,7 @@ function clearFilteredQueue() {
     filteredResults = [];
     filteredQueueActive = false;
     browsePreviewMatchActive = false;
+    browseFilterStale = false;
     filteredQueueIndex = 0;
     activeBrowseMatchDetails = [];
     renderBrowseMatchDetails();
@@ -1472,6 +1474,15 @@ function setBrowseFilterStatus(message, isError = false) {
     $("#browse-filter-count").toggleClass("text-danger", isError).text(message || "");
 }
 
+function markBrowseFilterStale() {
+    if (!filteredQueueActive) {
+        clearFilteredQueue();
+        return;
+    }
+    browseFilterStale = true;
+    setBrowseFilterStatus("Unsaved filter changes");
+}
+
 function updateBrowseResultUnitMetadata(payload) {
     browseResultUnitLabel = payload?.result_unit_label || browseResultUnitLabel || "question";
     browseResultUnitPlural = payload?.result_unit_plural || browseResultUnitPlural || `${browseResultUnitLabel}s`;
@@ -1519,6 +1530,7 @@ function applyBrowseFilters() {
         resetBrowseFilters();
         return;
     }
+    browseFilterStale = false;
     setBrowseFilterStatus("Finding matched questions...");
     $.ajax({
         url: `${url_prefix}/query/filter`,
@@ -1742,9 +1754,10 @@ $('#page-input').keypress(function (event) {
 
 $("#dataset-select").on("change", changeDataset);
 $("#split-select").on("change", changeSplit);
-$("#browse-filter-match-mode").on("change", clearFilteredQueue);
+$("#browse-filter-match-mode").on("change", markBrowseFilterStale);
 $("#browse-add-condition").on("click", function () {
     addBrowseFilterCondition();
+    markBrowseFilterStale();
 });
 $("#browse-apply-filters").on("click", applyBrowseFilters);
 $("#browse-reset-filters").on("click", resetBrowseFilters);
@@ -1756,20 +1769,20 @@ $("#browse-toggle-highlights").on("click", function () {
 $("#browse-filter-conditions").on("change", ".browse-condition-field", function () {
     const row = $(this).closest(".browse-filter-condition");
     renderBrowseConditionControls(row, browseConditionValues(row));
-    clearFilteredQueue();
+    markBrowseFilterStale();
 });
 $("#browse-filter-conditions").on("change", ".browse-condition-op", function () {
     const row = $(this).closest(".browse-filter-condition");
     row.find(".browse-condition-value").prop("disabled", ["missing", "not_missing"].includes($(this).val()));
-    clearFilteredQueue();
+    markBrowseFilterStale();
 });
-$("#browse-filter-conditions").on("input change", ".browse-condition-value, .browse-condition-slider-label", clearFilteredQueue);
+$("#browse-filter-conditions").on("input change", ".browse-condition-value, .browse-condition-slider-label", markBrowseFilterStale);
 $("#browse-filter-conditions").on("click", ".browse-remove-condition", function () {
     $(this).closest(".browse-filter-condition").remove();
     if (!$(".browse-filter-condition").length) {
         addBrowseFilterCondition();
     }
-    clearFilteredQueue();
+    markBrowseFilterStale();
 });
 
 // Handle permalink button clicks
