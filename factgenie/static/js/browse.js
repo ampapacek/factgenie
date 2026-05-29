@@ -1627,6 +1627,14 @@ function applyBrowseFilters() {
             $("#browse-toggle-highlights").toggle(filteredQueueActive);
             if (filteredQueueActive) {
                 goToPage(0);
+            } else {
+                activeBrowseMatchDetails = [];
+                window.highlight_setup_id = null;
+                window.highlight_ann_campaign = null;
+                window.highlight_ann_campaigns = [];
+                renderBrowseMatchDetails();
+                clearBrowseMatchHighlights();
+                renderBrowseNavigationState();
             }
         },
         error: function () {
