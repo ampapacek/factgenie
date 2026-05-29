@@ -837,15 +837,16 @@ function browseDetailBox(detail) {
 }
 
 function detailLabel(detail) {
+    // Visible Browse labels intentionally differ from backend field names.
     const fieldLabels = {
-        setup: "Setup",
+        setup: "Answer source",
         annotation_state: "State",
         annotator: "Annotator",
         span_category: "Span category",
         span_reason: "Span reason",
         span_text: "Span text",
         question: "Question",
-        output: "Output",
+        output: "Answer",
         any_text: "Any text",
         slider: "Slider",
     };
@@ -905,7 +906,7 @@ function renderBrowseMatchDetails() {
         panel.hide();
         return;
     }
-    panel.append($('<div>', { class: "small text-muted mb-1" }).text("Matched filters"));
+    panel.append($('<div>', { class: "small text-muted mb-1" }).text("Matched occurrences in this question"));
     const chips = $('<div>');
     activeBrowseMatchDetails.forEach(function (detail) {
         const chip = $('<span>', { class: "browse-match-chip", title: detailLabel(detail) });
@@ -1258,15 +1259,16 @@ function browseTextOperators(field) {
 }
 
 function browseFieldOptions() {
+    // Visible Browse labels intentionally differ from backend field names.
     return [
-        ["setup", "Setup"],
+        ["setup", "Answer source"],
         ["annotation_state", "Annotation state"],
         ["annotator", "Annotator"],
         ["span_category", "Span category"],
         ["span_reason", "Span reason"],
         ["span_text", "Span text"],
         ["question", "Question"],
-        ["output", "Output"],
+        ["output", "Answer"],
         ["any_text", "Any text"],
         ["slider", "Slider"],
     ];
@@ -1328,7 +1330,7 @@ function renderBrowseConditionControls(row, condition) {
     const wrap = row.find(".browse-condition-value-wrap");
     wrap.empty();
     const selectFields = {
-        setup: ["Select setup...", browseFilterSchema.setups || []],
+        setup: ["Select answer source...", browseFilterSchema.setups || []],
         annotation_state: ["Select state...", browseFilterSchema.annotation_states || []],
         annotator: ["Select annotator...", browseFilterSchema.annotators || []],
         span_category: ["Select category...", browseFilterSchema.categories || []],
@@ -1449,6 +1451,7 @@ function loadRedoPreviewMatch(params) {
         if (!window.highlight_ann_campaign) {
             window.highlight_ann_campaign = firstDetail.annotator_id || firstDetail.annotator_alias || null;
         }
+        updateBrowseHighlightsToggleLabel();
         $("#browse-toggle-highlights").show();
         renderBrowseMatchDetails();
         window.localStorage.removeItem(storageKey);
@@ -1469,6 +1472,17 @@ function setBrowseFilterStatus(message, isError = false) {
     $("#browse-filter-count").toggleClass("text-danger", isError).text(message || "");
 }
 
+function browseMatchedQuestionStatus(count) {
+    if (count === 0) {
+        return "No matched questions";
+    }
+    return `${count} matched question${count === 1 ? "" : "s"}`;
+}
+
+function updateBrowseHighlightsToggleLabel() {
+    $("#browse-toggle-highlights").text(browseHighlightsEnabled ? "Hide highlights" : "Show highlights");
+}
+
 function applyBrowseFilters() {
     const dataset = $('#dataset-select').val();
     const split = $('#split-select').val();
@@ -1478,7 +1492,7 @@ function applyBrowseFilters() {
         resetBrowseFilters();
         return;
     }
-    setBrowseFilterStatus("Finding matches...");
+    setBrowseFilterStatus("Finding matched questions...");
     $.ajax({
         url: `${url_prefix}/query/filter`,
         method: "POST",
@@ -1502,7 +1516,8 @@ function applyBrowseFilters() {
             filteredResults = payload.rows || [];
             filteredQueueActive = filteredResults.length > 0;
             filteredQueueIndex = 0;
-            setBrowseFilterStatus(`${filteredResults.length} match${filteredResults.length === 1 ? "" : "es"}`);
+            setBrowseFilterStatus(browseMatchedQuestionStatus(filteredResults.length));
+            updateBrowseHighlightsToggleLabel();
             $("#browse-toggle-highlights").toggle(filteredQueueActive);
             if (filteredQueueActive) {
                 goToPage(0);
@@ -1707,7 +1722,7 @@ $("#browse-apply-filters").on("click", applyBrowseFilters);
 $("#browse-reset-filters").on("click", resetBrowseFilters);
 $("#browse-toggle-highlights").on("click", function () {
     browseHighlightsEnabled = !browseHighlightsEnabled;
-    $(this).text(browseHighlightsEnabled ? "Disable highlights" : "Enable highlights");
+    updateBrowseHighlightsToggleLabel();
     applyBrowseMatchHighlights();
 });
 $("#browse-filter-conditions").on("change", ".browse-condition-field", function () {

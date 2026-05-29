@@ -126,7 +126,7 @@
             <i class="fa fa-question-circle"></i> Help
           </button>
           <button type="button" class="btn btn-sm btn-outline-secondary" id="browse-toggle-highlights" style="display: none;">
-            Disable highlights
+            Hide highlights
           </button>
           <button type="button" class="btn btn-sm btn-outline-secondary" id="browse-add-condition">
             <i class="fa fa-plus"></i> Add condition
@@ -197,16 +197,17 @@
           <h6 class="fw-bold">Basic behavior</h6>
           <ul>
             <li>Filters apply only to the currently selected dataset and split.</li>
-            <li><b>Match all</b> keeps examples where all conditions are true. <b>Match any</b> keeps examples where at least one condition is true.</li>
-            <li>Each matching question appears once in navigation, even if several outputs, annotators, spans, or sliders match.</li>
+            <li><b>Match all</b> keeps questions where all conditions are true. <b>Match any</b> keeps questions where at least one condition is true.</li>
+            <li>Each matched question appears once in navigation, even if several answers, annotators, spans, or sliders match.</li>
             <li>Text matching is case-insensitive: <code>top10</code>, <code>Top10</code>, and <code>TOP10</code> match the same text.</li>
+            <li>The result count shows matched questions. Details inside the active question are shown as matched occurrences.</li>
           </ul>
 
           <h6 class="fw-bold mt-3">Span conditions</h6>
           <ul>
-            <li>With <b>Match all</b>, span conditions are evaluated on the same span. For example, <code>Span category is Chybí</code> and <code>Span reason regex \bNotInTop10\b</code> means: keep rows where there is a <code>Chybí</code> span whose own reason matches <code>NotInTop10</code>.</li>
+            <li>With <b>Match all</b>, span conditions are evaluated on the same span. For example, <code>Span category is Chybí</code> and <code>Span reason regex \bNotInTop10\b</code> means: keep questions where there is a <code>Chybí</code> span whose own reason matches <code>NotInTop10</code>.</li>
             <li>Multiple span-reason conditions also mean the same span must satisfy all of them.</li>
-            <li>The matching span, reason text, output text, or slider row is highlighted when possible. You can turn this off with <b>Disable highlights</b>.</li>
+            <li>The matching span, reason text, answer text, or slider row is highlighted when possible. You can turn this off with <b>Hide highlights</b> and turn it back on with <b>Show highlights</b>.</li>
           </ul>
 
           <h6 class="fw-bold mt-3">Example: NotInTop10 and InSeafile on the same span</h6>
@@ -240,7 +241,7 @@
       <div class="modal-content">
         <div class="modal-header">
           <h5 class="modal-title" id="note-modal-label"><code><span id="setup-name-placeholder"></span></code>
-            Setup
+            Answer source
             details</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
