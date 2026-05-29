@@ -199,10 +199,10 @@ def generate_sliders(sliders):
         sliders_segment += f"""
             <div class="form-group crowdsourcing-slider mb-4">
                 <label for="slider-{i}"><b>{slider["label"]}</b></label>
-                <input type="range" class="form-range slider-crowdsourcing" id="slider-crowdsourcing-{i}" min="{slider["min"]}" max="{slider["max"]}" step="{slider["step"]}">
+                <input type="range" class="form-range slider-crowdsourcing" id="slider-crowdsourcing-{i}" min="{slider["min"]}" max="{slider["max"]}" step="{slider["step"]}" value="{slider["min"]}">
                 <div class="d-flex justify-content-between">
                     <div class="text-muted small"><span>{slider["min"]}</span></div>
-                    <div><span id="slider-crowdsourcing-{i}-value" class="slider-crowdsourcing-value" data-default-value="?"></span></div>
+                    <div><span id="slider-crowdsourcing-{i}-value" class="slider-crowdsourcing-value" data-default-value="{slider["min"]}"></span></div>
                     <div class="text-muted small"><span>{slider["max"]}</span></div>
                 </div>
             </div>
