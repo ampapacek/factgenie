@@ -1619,7 +1619,7 @@ def submit_annotations():
 
     logger.info(f"Received annotations for {campaign_id} by {annotator_id}")
     if crowdsourcing.is_preview_annotator(annotator_id):
-        return utils.error("Preview mode is read-only. Preview annotations are not saved.")
+        return crowdsourcing.preview_submission_response(app, campaign_id)
     if any(annotation.get("redo_id") for annotation in annotation_set):
         return utils.error("Redo annotations must be saved with Save current item.")
 

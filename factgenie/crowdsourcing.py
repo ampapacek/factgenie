@@ -711,6 +711,19 @@ def keep_redo_annotation(app, campaign_id, redo_id, annotator_id):
     )
 
 
+def preview_submission_response(app, campaign_id):
+    campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    final_message_html = markdown.markdown(campaign.metadata["config"].get("final_message", "Thank you."))
+    preview_message = (
+        '<div class="alert alert-info mt-3" role="alert">'
+        "<p>This is a preview. In a real annotation session, submitting would save the annotations and show the final "
+        "message above.</p>"
+        "<p><b>No annotations were saved.</b> Preview mode is read-only.</p>"
+        "</div>"
+    )
+    return utils.success(message=final_message_html + preview_message)
+
+
 def save_annotations(app, campaign_id, annotation_set, annotator_id, is_backup_import=False):
     if is_preview_annotator(annotator_id) and not is_backup_import:
         logger.info(f"Rejected preview annotation submit for {campaign_id}")
