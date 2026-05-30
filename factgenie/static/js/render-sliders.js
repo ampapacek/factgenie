@@ -6,7 +6,7 @@ $(document).ready(function () {
         const valueDisplayId = `${sliderId}-value`;
 
         // Set initial value
-        $(`#${valueDisplayId}`).text($(`#${valueDisplayId}`).data('default-value'));
+        $(`#${valueDisplayId}`).text($(this).val());
 
         // Update value on slider change
         $(this).on('input change', function () {

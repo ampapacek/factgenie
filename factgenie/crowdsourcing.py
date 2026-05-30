@@ -199,10 +199,10 @@ def generate_sliders(sliders):
         sliders_segment += f"""
             <div class="form-group crowdsourcing-slider mb-4">
                 <label for="slider-{i}"><b>{slider["label"]}</b></label>
-                <input type="range" class="form-range slider-crowdsourcing" id="slider-crowdsourcing-{i}" min="{slider["min"]}" max="{slider["max"]}" step="{slider["step"]}">
+                <input type="range" class="form-range slider-crowdsourcing" id="slider-crowdsourcing-{i}" min="{slider["min"]}" max="{slider["max"]}" step="{slider["step"]}" value="{slider["min"]}">
                 <div class="d-flex justify-content-between">
                     <div class="text-muted small"><span>{slider["min"]}</span></div>
-                    <div><span id="slider-crowdsourcing-{i}-value" class="slider-crowdsourcing-value" data-default-value="?"></span></div>
+                    <div><span id="slider-crowdsourcing-{i}-value" class="slider-crowdsourcing-value" data-default-value="{slider["min"]}"></span></div>
                     <div class="text-muted small"><span>{slider["max"]}</span></div>
                 </div>
             </div>
@@ -422,6 +422,15 @@ def get_examples_for_batch(db, batch_idx):
     return annotator_batch
 
 
+def select_preview_batch(db):
+    if db.empty or "batch_idx" not in db:
+        raise ValueError("No available batches")
+    batch_ids = sorted(db["batch_idx"].dropna().unique())
+    if not batch_ids:
+        raise ValueError("No available batches")
+    return batch_ids[0]
+
+
 def get_redo_annotation_set(app, campaign, db, annotator_id, include_completed=False):
     items = redo.list_items_for_annotator(campaign.campaign_id, annotator_id, include_completed=include_completed)
     annotation_set = []
@@ -491,9 +500,12 @@ def get_annotator_batch(app, campaign, service_ids, batch_idx=None, include_comp
             redo_context["empty_redo_fallback"] = True
 
         if batch_idx is None or batch_idx == "":
-            # usual case: an annotator opened the annotation page, we need to select the batch
             try:
-                batch_idx = select_batch(db, seed, annotator_id)
+                if annotator_id == PREVIEW_STUDY_ID:
+                    batch_idx = select_preview_batch(db)
+                else:
+                    # usual case: an annotator opened the annotation page, we need to select the batch
+                    batch_idx = select_batch(db, seed, annotator_id)
             except ValueError as e:
                 logger.info(str(e))
                 # no available batches
@@ -697,6 +709,19 @@ def keep_redo_annotation(app, campaign_id, redo_id, annotator_id):
         final_message=final_message_html,
         remaining_pending=redo.pending_count(campaign_id, annotator_id),
     )
+
+
+def preview_submission_response(app, campaign_id):
+    campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    final_message_html = markdown.markdown(campaign.metadata["config"].get("final_message", "Thank you."))
+    preview_message = (
+        '<div class="alert alert-info mt-3" role="alert">'
+        "<p>This is a preview. In a real annotation session, submitting would save the annotations and show the final "
+        "message above.</p>"
+        "<p><b>No annotations were saved.</b> Preview mode is read-only.</p>"
+        "</div>"
+    )
+    return utils.success(message=final_message_html + preview_message)
 
 
 def save_annotations(app, campaign_id, annotation_set, annotator_id, is_backup_import=False):

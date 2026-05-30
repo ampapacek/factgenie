@@ -126,7 +126,7 @@
             <i class="fa fa-question-circle"></i> Help
           </button>
           <button type="button" class="btn btn-sm btn-outline-secondary" id="browse-toggle-highlights" style="display: none;">
-            Disable highlights
+            Hide highlights
           </button>
           <button type="button" class="btn btn-sm btn-outline-secondary" id="browse-add-condition">
             <i class="fa fa-plus"></i> Add condition
@@ -197,16 +197,32 @@
           <h6 class="fw-bold">Basic behavior</h6>
           <ul>
             <li>Filters apply only to the currently selected dataset and split.</li>
-            <li><b>Match all</b> keeps examples where all conditions are true. <b>Match any</b> keeps examples where at least one condition is true.</li>
-            <li>Each matching question appears once in navigation, even if several outputs, annotators, spans, or sliders match.</li>
+            <li><b>Match all</b> keeps questions where all conditions are true. <b>Match any</b> keeps questions where at least one condition is true.</li>
+            <li>Each matched question appears once in navigation, even if several answers, annotators, spans, or sliders match.</li>
             <li>Text matching is case-insensitive: <code>top10</code>, <code>Top10</code>, and <code>TOP10</code> match the same text.</li>
+            <li>The result count shows matched questions and matched occurrences. Details inside the active question show the occurrences that explain the match.</li>
+            <li>The matched-occurrence list is clickable. Click an occurrence to reveal the relevant answer or annotator, scroll to the match, and briefly pulse the exact target.</li>
+            <li>Use the expand button in the matched-occurrence panel when you want a taller list.</li>
+            <li>In <b>Match any</b>, occurrence rows show the condition or conditions that caused that occurrence to match. In <b>Match all</b>, rows stay compact because each listed occurrence already satisfies the whole filter.</li>
+            <li>While filters are active, navigation moves through matched questions. The navigation bar shows the matched-question position separately from the original question number.</li>
+            <li>After you apply filters, the browser URL includes the applied filter state and current question so the view can be shared or reopened.</li>
+            <li>Editing filters keeps the last applied results visible and marks them as <b>Unsaved filter changes</b> until you apply or reset.</li>
+            <li>Applying a filter with no results shows <b>No matched questions</b>, clears matched-occurrence highlights, and returns navigation to all questions.</li>
+          </ul>
+
+          <h6 class="fw-bold mt-3">Question and source data</h6>
+          <ul>
+            <li><b>Question</b> searches only the text under <code>Otázka</code> when that section is detected. Otherwise it falls back to the whole example text.</li>
+            <li><b>Source data</b> searches the <code>Nalezené relevantní dokumenty</code> section and is shown only when that section is detected for the selected dataset and split.</li>
           </ul>
 
           <h6 class="fw-bold mt-3">Span conditions</h6>
           <ul>
-            <li>With <b>Match all</b>, span conditions are evaluated on the same span. For example, <code>Span category is Chybí</code> and <code>Span reason regex \bNotInTop10\b</code> means: keep rows where there is a <code>Chybí</code> span whose own reason matches <code>NotInTop10</code>.</li>
-            <li>Multiple span-reason conditions also mean the same span must satisfy all of them.</li>
-            <li>The matching span, reason text, output text, or slider row is highlighted when possible. You can turn this off with <b>Disable highlights</b>.</li>
+            <li>Span conditions have a <b>Span group</b>. Conditions in the same group must match the same span.</li>
+            <li>Choose <b>New group</b> when a span condition may be satisfied by a different span in the same annotation.</li>
+            <li>For example, <code>Span category is Chybí</code> in <b>Group 1</b> and <code>Span reason regex \bNotInTop10\b</code> in <b>Group 1</b> means: keep questions where there is a <code>Chybí</code> span whose own reason matches <code>NotInTop10</code>.</li>
+            <li><code>Span category is Chybí</code> in <b>Group 1</b> and <code>Span category is Nesrozumitelné</code> in <b>Group 2</b> means: keep questions with an annotation that contains both categories, possibly on different spans.</li>
+            <li>The matching span, reason text, answer text, or slider row is highlighted when possible. You can turn this off with <b>Hide highlights</b> and turn it back on with <b>Show highlights</b>.</li>
           </ul>
 
           <h6 class="fw-bold mt-3">Example: NotInTop10 and InSeafile on the same span</h6>
@@ -240,7 +256,7 @@
       <div class="modal-content">
         <div class="modal-header">
           <h5 class="modal-title" id="note-modal-label"><code><span id="setup-name-placeholder"></span></code>
-            Setup
+            Answer source
             details</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>

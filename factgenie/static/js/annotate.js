@@ -319,7 +319,8 @@ function clearExampleLevelFields() {
         $(this).val($(this).attr('min') || 0);
     });
     $(".slider-crowdsourcing-value").each(function () {
-        $(this).text($(this).attr('data-default-value'));
+        const sliderId = $(this).attr("id").replace(/-value$/, "");
+        $(this).text($(`#${sliderId}`).val());
     });
 
     // clear the values in free-text fields
@@ -372,13 +373,6 @@ function collectSliders() {
     const sliders = [];
 
     $(".crowdsourcing-slider").each(function (x) {
-        const myId = $(this).find("input[type='range']").attr('id');
-        const sliderValueId = `${myId}-value`;
-
-        if ($(`#${sliderValueId}`).text() == $(`#${sliderValueId}`).attr('data-default-value')) {
-            return;
-        }
-
         const label = $(this).find("label").text();
         const value = $(this).find("input[type='range']").val();
         const min = $(this).find("input[type='range']").attr('min');
@@ -783,14 +777,6 @@ function validateCurrentAnnotationComplete() {
             return false;
         }
 
-        // check whether no .slider-crowdsourcing-value contains its data-default-value
-        const allSlidersFilled = $(".slider-crowdsourcing-value")
-            .filter(function () { return $(this).text() == $(this).attr('data-default-value'); }).length == 0;
-
-        if (!allSlidersFilled) {
-            alert("Please set all the sliders before saving this annotation.");
-            return false;
-        }
     }
     return true;
 }

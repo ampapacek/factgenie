@@ -576,6 +576,90 @@ def test_preview_batch_link_bypasses_local_auth_page(monkeypatch, tmp_path):
     assert response.get_data(as_text=True) == "preview-shell"
 
 
+def test_campaign_preview_link_uses_preview_annotator_without_forcing_batch(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    campaign.metadata["config"]["service"] = "local"
+    app_mod.app.config.update(login={"active": False}, host_prefix="")
+
+    monkeypatch.setattr(workflows, "load_campaign", lambda app, campaign_id: campaign)
+    monkeypatch.setattr(workflows, "refresh_indexes", lambda app: None)
+    monkeypatch.setattr(crowdsourcing, "ensure_crowdsourcing_page_current", lambda *args, **kwargs: None)
+    captured = {}
+
+    def fake_get_annotator_batch(app, campaign, service_ids, batch_idx=None, **kwargs):
+        captured["service_ids"] = service_ids
+        captured["batch_idx"] = batch_idx
+        return (
+            [{"dataset": "dataset-a", "split": "test", "setup_id": "setup-a", "example_idx": 0, "batch_idx": 0}],
+            {"mode": "normal", "is_redo": False, "empty_redo_fallback": False, "show_completed": False},
+        )
+
+    monkeypatch.setattr(crowdsourcing, "get_annotator_batch", fake_get_annotator_batch)
+    monkeypatch.setattr(app_mod.utils, "render_from_folder", lambda *args, **kwargs: "preview-shell")
+
+    client = app_mod.app.test_client()
+    response = client.get("/annotate/redo-test?annotatorId=factgenie_preview")
+
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "preview-shell"
+    assert captured["service_ids"]["annotator_id"] == "factgenie_preview"
+    assert captured["batch_idx"] is None
+
+
+def test_campaign_preview_templates_link_to_preview_annotator():
+    list_template = Path("factgenie/templates/pages/crowdsourcing.html").read_text(encoding="utf-8")
+    detail_template = Path("factgenie/templates/pages/crowdsourcing_detail.html").read_text(encoding="utf-8")
+
+    assert "/annotate/{{ campaign.metadata.id }}?annotatorId=factgenie_preview" in list_template
+    assert "/annotate/{{ metadata.id }}?annotatorId=factgenie_preview" in detail_template
+    assert "/annotate/{{ metadata.id }}?annotatorId=factgenie_preview&batch_idx={{ batch.batch_idx }}" in detail_template
+
+
+def test_preview_annotator_without_batch_gets_first_batch_regardless_of_status(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    db_path = tmp_path / "redo-test" / "db.csv"
+    db = pd.read_csv(db_path)
+    db = pd.concat(
+        [
+            db,
+            pd.DataFrame(
+                [
+                    {
+                        "dataset": "dataset-a",
+                        "split": "test",
+                        "setup_id": "setup-a",
+                        "example_idx": 1,
+                        "batch_idx": 1,
+                        "annotator_group": 0,
+                        "annotator_id": "ann-b",
+                        "status": ExampleStatus.ASSIGNED,
+                        "start": 30,
+                        "end": "",
+                    }
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+    db.to_csv(db_path, index=False)
+
+    annotation_set, redo_context = crowdsourcing.get_annotator_batch(
+        SimpleNamespace(db={"lock": threading.Lock()}),
+        campaign,
+        {"annotator_id": "factgenie_preview"},
+        return_context=True,
+    )
+
+    assert redo_context["is_redo"] is False
+    assert annotation_set
+    assert {item["batch_idx"] for item in annotation_set} == {0}
+    campaign.load_db()
+    assert list(campaign.db["status"]) == [ExampleStatus.FINISHED, ExampleStatus.ASSIGNED]
+    assert list(campaign.db["annotator_id"]) == ["ann-a", "ann-b"]
+
+
 def test_build_auth_redirect_template_points_to_annotation_route():
     assert app_mod._build_auth_redirect_template("", "redo-test") == "/annotate/redo-test?annotatorId=__ANNOTATOR__"
 
@@ -642,15 +726,16 @@ def test_normal_submit_rejects_redo_payload(monkeypatch, tmp_path):
     assert "Save current item" in payload["error"]
 
 
-def test_normal_submit_rejects_preview_payload_before_save(monkeypatch, tmp_path):
+def test_normal_submit_returns_preview_completion_before_save(monkeypatch, tmp_path):
     configure_campaign_dir(monkeypatch, tmp_path)
-    make_campaign(tmp_path)
+    campaign = make_campaign(tmp_path)
     app_mod.app.config.update(login={"active": False}, host_prefix="")
 
     def fail_if_save_called(*args, **kwargs):
-        raise AssertionError("preview submit should be rejected before save_annotations is called")
+        raise AssertionError("preview submit should complete before save_annotations is called")
 
     monkeypatch.setattr(crowdsourcing, "save_annotations", fail_if_save_called)
+    monkeypatch.setattr(workflows, "load_campaign", lambda app, campaign_id: campaign)
 
     response = app_mod.app.test_client().post(
         "/submit_annotations",
@@ -663,8 +748,10 @@ def test_normal_submit_rejects_preview_payload_before_save(monkeypatch, tmp_path
 
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["success"] is False
-    assert "read-only" in payload["error"]
+    assert payload["success"] is True
+    assert "Thanks." in payload["message"]
+    assert "No annotations were saved" in payload["message"]
+    assert "read-only" in payload["message"]
 
 
 def test_save_annotations_rejects_preview_annotator(monkeypatch, tmp_path):
