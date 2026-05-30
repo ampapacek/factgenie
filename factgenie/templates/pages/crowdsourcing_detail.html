@@ -925,16 +925,20 @@
   function gatherSelectedRedoRows(selector) {
     const rows = [];
     const seen = new Set();
+    const selectedRowKeys = new Set();
     $(".redo-row-checkbox:checked").each(function () {
       const checkbox = $(this);
       if (!shouldUseRedoCheckbox(checkbox)) {
         return;
       }
+      const tableRow = checkbox.closest(".redo-row");
+      selectedRowKeys.add(redoRowKey(tableRow));
       const batchKey = `${checkbox.data("annotator-id")}|${checkbox.data("batch-idx")}`;
       if (selector === "batch" && seen.has(batchKey)) {
         return;
       }
       seen.add(batchKey);
+      const matchDetails = tableRow.data("match-details") || [];
       rows.push({
         annotator_id: checkbox.data("annotator-id"),
         annotator_group: checkbox.data("annotator-group"),
@@ -943,6 +947,8 @@
         split: checkbox.data("split"),
         setup_id: checkbox.data("setup-id"),
         example_idx: checkbox.data("example-idx"),
+        match_details: matchDetails,
+        match_source: matchDetails.length ? "filtered_selection" : "manual_selection",
       });
     });
     if (selector !== "batch") {
@@ -955,10 +961,13 @@
       if (!shouldUseRedoCheckbox(checkbox)) {
         return;
       }
+      const tableRow = checkbox.closest(".redo-row");
       const batchKey = `${checkbox.data("annotator-id")}|${checkbox.data("batch-idx")}`;
       if (!selectedBatches.has(batchKey)) {
         return;
       }
+      const matchDetails = tableRow.data("match-details") || [];
+      const directSelection = selectedRowKeys.has(redoRowKey(tableRow));
       batchRows.push({
         annotator_id: checkbox.data("annotator-id"),
         annotator_group: checkbox.data("annotator-group"),
@@ -967,6 +976,10 @@
         split: checkbox.data("split"),
         setup_id: checkbox.data("setup-id"),
         example_idx: checkbox.data("example-idx"),
+        match_details: matchDetails,
+        match_source: matchDetails.length
+          ? "filtered_selection"
+          : (directSelection ? "manual_selection" : "batch_context"),
       });
     });
     return batchRows;

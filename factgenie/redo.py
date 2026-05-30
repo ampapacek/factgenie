@@ -131,7 +131,15 @@ def row_to_item(campaign_id, row, annotator_id=None, source=None, instruction=No
         "completed_count": 0,
         "instruction": instruction,
         "source": source or {"type": "manual", "selector": "example"},
+        "match_details": normalized_match_details(row.get("match_details")),
+        "match_source": str(row.get("match_source") or ""),
     }
+
+
+def normalized_match_details(value):
+    if not isinstance(value, list):
+        return []
+    return [dict(detail) for detail in value if isinstance(detail, dict)]
 
 
 def find_item(queue, redo_id):
@@ -167,6 +175,8 @@ def add_items(campaign_id, rows, created_by="admin", instruction=None, source=No
         if existing:
             existing["instruction"] = instruction
             existing["source"] = source or existing.get("source") or {"type": "manual", "selector": "example"}
+            existing["match_details"] = normalized_match_details(row.get("match_details"))
+            existing["match_source"] = str(row.get("match_source") or "")
             if existing.get("status") == STATUS_COMPLETED:
                 existing["status"] = STATUS_PENDING
                 existing["reopened_at"] = utc_now()
