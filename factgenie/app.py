@@ -620,7 +620,22 @@ def _attach_annotation_aliases(example_data):
     if not isinstance(generated_outputs, list):
         return
 
-    alias_cache = {}
+    campaign_annotators = {}
+    for output in generated_outputs:
+        annotations = output.get("annotations", [])
+        if not isinstance(annotations, list):
+            continue
+        for annotation in annotations:
+            campaign_id = annotation.get("campaign_id")
+            annotator_id = _normalize_annotator_id(annotation.get("annotator_id"))
+            if not campaign_id or not annotator_id:
+                continue
+            campaign_annotators.setdefault(campaign_id, set()).add(annotator_id)
+
+    alias_cache = {
+        campaign_id: querying.alias_map_for_annotators(campaign_id, annotator_ids)
+        for campaign_id, annotator_ids in campaign_annotators.items()
+    }
     for output in generated_outputs:
         annotations = output.get("annotations", [])
         if not isinstance(annotations, list):
@@ -631,11 +646,9 @@ def _attach_annotation_aliases(example_data):
             if not campaign_id or not annotator_id:
                 continue
 
-            if campaign_id not in alias_cache:
-                alias_cache[campaign_id] = _annotator_alias_map(campaign_id)
-
             alias = alias_cache[campaign_id].get(annotator_id.lower()) or querying._fallback_alias(campaign_id, annotator_id)
             annotation["annotator_alias"] = alias
+            annotation["expose_annotator_id"] = not _campaign_pseudonymizes_annotators(campaign_id)
 
 
 def _sanitize_example_annotator_ids(example_data, is_authenticated):
