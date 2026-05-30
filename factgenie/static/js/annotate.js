@@ -330,6 +330,229 @@ function clearExampleLevelFields() {
 }
 
 
+function clearRedoMatchHighlights() {
+    $("#redo-match-box").hide().empty();
+    $(".browse-match-highlight").each(function () {
+        const node = $(this);
+        if (node.is("mark")) {
+            node.replaceWith(document.createTextNode(node.text()));
+        } else {
+            node.removeClass("browse-match-highlight");
+        }
+    });
+    $(".browse-match-span").removeClass("browse-match-span");
+    $(".browse-match-slider").removeClass("browse-match-slider");
+    $(".browse-match-focus, .browse-match-focus-inline").removeClass("browse-match-focus browse-match-focus-inline");
+}
+
+function markRedoTextNodes(container, text) {
+    const needle = String(text || "");
+    if (!needle) {
+        return false;
+    }
+    const element = $(container).get(0);
+    if (!element) {
+        return false;
+    }
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+        acceptNode: function (node) {
+            if (!node.nodeValue || !node.nodeValue.trim()) {
+                return NodeFilter.FILTER_REJECT;
+            }
+            if ($(node.parentElement).closest("mark, script, style").length) {
+                return NodeFilter.FILTER_REJECT;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+        }
+    });
+    const nodes = [];
+    while (walker.nextNode()) {
+        nodes.push(walker.currentNode);
+    }
+    let marked = false;
+    nodes.forEach(function (node) {
+        let current = node;
+        while (current && current.nodeType === Node.TEXT_NODE) {
+            const index = current.nodeValue.toLowerCase().indexOf(needle.toLowerCase());
+            if (index < 0) {
+                break;
+            }
+            const after = current.splitText(index);
+            const rest = after.splitText(needle.length);
+            const mark = document.createElement("mark");
+            mark.className = "browse-match-highlight";
+            mark.textContent = after.nodeValue;
+            after.parentNode.replaceChild(mark, after);
+            current = rest;
+            marked = true;
+        }
+    });
+    return marked;
+}
+
+function markRedoAnnotatableRange(box, start, length) {
+    if (start === null || start === undefined || String(start).trim() === "") {
+        return false;
+    }
+    const numericStart = Number(start);
+    const numericLength = Number(length);
+    if (!Number.isFinite(numericStart) || !Number.isFinite(numericLength) || numericLength <= 0) {
+        return false;
+    }
+    const end = numericStart + numericLength;
+    let marked = false;
+    box.find(".annotatable").each(function () {
+        const span = $(this);
+        const idx = Number(span.data("index"));
+        const contentLength = String(span.data("content") || "").length;
+        if (Number.isFinite(idx) && idx < end && idx + Math.max(contentLength, 1) > numericStart) {
+            span.addClass("browse-match-span");
+            marked = true;
+        }
+    });
+    return marked;
+}
+
+function markRedoAnnotatableText(box, text) {
+    const needle = String(text || "");
+    if (!needle) {
+        return false;
+    }
+    let fullText = "";
+    const spans = [];
+    box.find(".annotatable").each(function () {
+        const span = $(this);
+        const chunk = String(span.data("content") || "");
+        spans.push({ span, start: fullText.length, end: fullText.length + chunk.length });
+        fullText += chunk + String(span.data("whitespace") || "");
+    });
+    const ranges = [];
+    const haystack = fullText.toLowerCase();
+    const loweredNeedle = needle.toLowerCase();
+    let searchFrom = 0;
+    while (searchFrom <= haystack.length) {
+        const index = haystack.indexOf(loweredNeedle, searchFrom);
+        if (index < 0) {
+            break;
+        }
+        ranges.push({ start: index, end: index + needle.length });
+        searchFrom = index + Math.max(needle.length, 1);
+    }
+    if (!ranges.length) {
+        return false;
+    }
+    spans.forEach(function (item) {
+        if (ranges.some((range) => item.start < range.end && item.end > range.start)) {
+            item.span.addClass("browse-match-span");
+        }
+    });
+    return true;
+}
+
+function redoMatchLabel(detail) {
+    const fieldLabels = {
+        question: "question",
+        output: "answer",
+        span_text: "span text",
+        span_reason: "span reason",
+        span_category: "span category",
+        slider: "slider",
+        any_text: "text",
+    };
+    return fieldLabels[detail.field] || fieldLabels[detail.target] || detail.target || "match";
+}
+
+function redoMatchEvidence(detail) {
+    return detail.matched_text || detail.span_text || detail.reason || detail.text || detail.value || detail.slider_value || "";
+}
+
+function applyRedoMatchDetail(detail) {
+    const outputBox = $(`#out-text-${current_example_idx}`);
+    if (detail.target === "question") {
+        return markRedoTextNodes($("#examplearea"), detail.matched_text || detail.value);
+    }
+    if (detail.target === "output") {
+        if (markRedoAnnotatableText(outputBox, detail.matched_text || detail.value)) {
+            return true;
+        }
+        return markRedoTextNodes(outputBox, detail.matched_text || detail.value);
+    }
+    if (detail.target === "span") {
+        const marked = markRedoAnnotatableRange(outputBox, detail.start, String(detail.span_text || "").length);
+        if (marked) {
+            return true;
+        }
+        return markRedoAnnotatableText(outputBox, detail.span_text || detail.matched_text);
+    }
+    if (detail.target === "slider") {
+        const label = String(detail.slider_label || detail.sliderLabel || "");
+        const rows = $(".crowdsourcing-slider").filter(function () {
+            return String($(this).find("label").first().text() || "").trim() === label;
+        });
+        rows.addClass("browse-match-slider");
+        return rows.length > 0;
+    }
+    const text = detail.matched_text || detail.value;
+    if (text) {
+        return markRedoTextNodes(outputBox, text) || markRedoTextNodes($("#examplearea"), text);
+    }
+    return false;
+}
+
+function showRedoMatchGuidance(details, matchSource, highlightedCount) {
+    const box = $("#redo-match-box");
+    box.empty();
+    if (matchSource === "batch_context" && !details.length) {
+        box
+            .removeClass("alert-warning")
+            .addClass("alert-secondary")
+            .text("This item was included with a selected batch. No direct filter match was stored for this answer.");
+        box.show();
+        return;
+    }
+    if (!details.length) {
+        box.hide();
+        return;
+    }
+
+    box.removeClass("alert-secondary").addClass("alert-warning");
+    box.append($("<div>").append($("<b>").text("Matched filter content")));
+    const list = $("<ul>", { class: "mb-0 ps-3" });
+    details.slice(0, 4).forEach(function (detail) {
+        const evidence = redoMatchEvidence(detail);
+        const text = evidence
+            ? `${redoMatchLabel(detail)}: ${evidence}`
+            : redoMatchLabel(detail);
+        list.append($("<li>").text(text));
+    });
+    if (details.length > 4) {
+        list.append($("<li>").text(`${details.length - 4} more match(es)`));
+    }
+    box.append(list);
+    if (highlightedCount === 0) {
+        box.append($("<div>", { class: "small mt-2" }).text("The match metadata is stored, but no visible text or control could be highlighted on this page."));
+    }
+    box.show();
+}
+
+function applyRedoMatchHighlights() {
+    clearRedoMatchHighlights();
+    if (redo_context.is_redo !== true || !annotation_set[current_example_idx]) {
+        return;
+    }
+    const current = annotation_set[current_example_idx];
+    const details = Array.isArray(current.redo_match_details) ? current.redo_match_details : [];
+    const matchSource = current.redo_match_source || "";
+    let highlightedCount = 0;
+    details.forEach(function (detail) {
+        if (detail && applyRedoMatchDetail(detail)) {
+            highlightedCount += 1;
+        }
+    });
+    showRedoMatchGuidance(details, matchSource, highlightedCount);
+}
+
+
 function collectFlags() {
     const flags = [];
     $(".crowdsourcing-flag").each(function () {
@@ -573,6 +796,7 @@ function goToAnnotation(example_idx) {
 
     updateRedoActionStatus();
     updatePerExampleActionStatus();
+    applyRedoMatchHighlights();
 }
 
 function goToPage(page) {

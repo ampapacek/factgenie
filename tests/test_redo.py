@@ -228,6 +228,77 @@ def test_queue_duplicate_reuse_and_pending_mode(monkeypatch, tmp_path):
     assert redo.counts_by_annotator("redo-test")["ann-a"][redo.STATUS_PENDING] == 1
 
 
+def test_queue_item_stores_match_metadata(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    make_campaign(tmp_path)
+    row = {
+        **queue_row(),
+        "match_details": [
+            {
+                "target": "span",
+                "field": "span_text",
+                "setup_id": "setup-a",
+                "matched_text": "old",
+                "start": 0,
+            }
+        ],
+        "match_source": "filtered_selection",
+    }
+
+    item = redo.add_items("redo-test", [row])["added"][0]
+
+    assert item["match_details"] == row["match_details"]
+    assert item["match_source"] == "filtered_selection"
+
+
+def test_readding_redo_item_updates_match_metadata(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    make_campaign(tmp_path)
+    first = redo.add_items(
+        "redo-test",
+        [
+            {
+                **queue_row(),
+                "match_details": [{"target": "question", "matched_text": "first"}],
+                "match_source": "filtered_selection",
+            }
+        ],
+    )["added"][0]
+    redo.mark_completed("redo-test", first["redo_id"], "ann-a")
+
+    redo.add_items(
+        "redo-test",
+        [
+            {
+                **queue_row(),
+                "match_details": [{"target": "slider", "slider_label": "Tone", "slider_value": 3}],
+                "match_source": "filtered_selection",
+            }
+        ],
+        created_by="admin-b",
+    )
+    item = redo.find_item(redo.load_queue("redo-test"), first["redo_id"])
+
+    assert item["status"] == redo.STATUS_PENDING
+    assert item["match_details"] == [{"target": "slider", "slider_label": "Tone", "slider_value": 3}]
+    assert item["match_source"] == "filtered_selection"
+
+
+def test_redo_annotation_set_serves_match_metadata(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    match_details = [{"target": "output", "matched_text": "old output", "setup_id": "setup-a"}]
+    redo.add_items(
+        "redo-test",
+        [{**queue_row(), "match_details": match_details, "match_source": "filtered_selection"}],
+    )
+
+    annotation_set = crowdsourcing.get_redo_annotation_set(None, campaign, campaign.db, "ann-a")
+
+    assert annotation_set[0]["redo_match_details"] == match_details
+    assert annotation_set[0]["redo_match_source"] == "filtered_selection"
+
+
 def test_admin_overview_exposes_span_filter_data_for_category_and_reasons(monkeypatch, tmp_path):
     configure_campaign_dir(monkeypatch, tmp_path)
     campaign = make_campaign(tmp_path)

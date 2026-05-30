@@ -512,6 +512,8 @@ def get_redo_annotation_set(app, campaign, db, annotator_id, include_completed=F
                 "redo_id": item["redo_id"],
                 "redo_status": item.get("status", redo.STATUS_PENDING),
                 "redo_instruction": item.get("instruction"),
+                "redo_match_details": redo.normalized_match_details(item.get("match_details")),
+                "redo_match_source": item.get("match_source", ""),
             }
         )
 
