@@ -186,12 +186,15 @@ class HumanCampaign(Campaign):
                 self.clear_output_by_idx(db_index)
 
     def get_stats(self):
-        # if there is no batch_idx in the db, return the stats for the whole db
-        if "batch_idx" not in self.db.columns:
-            batch_stats = self.db.groupby(["example_idx"]).first()
-        else:
-            # group by batch_idx, keep the first row of each group
-            batch_stats = self.db.groupby(["batch_idx"]).first()
+        overview = self.get_overview()
+        if not overview:
+            return {
+                "total": 0,
+                "assigned": 0,
+                "finished": 0,
+                "free": 0,
+            }
+        batch_stats = pd.DataFrame(overview)
 
         return {
             "total": len(batch_stats),
@@ -207,6 +210,24 @@ class HumanCampaign(Campaign):
         for _, example in examples_for_batch.iterrows():
             db_index = example.name
             self.clear_output_by_idx(db_index)
+
+    @staticmethod
+    def _batch_status(statuses):
+        normalized = [str(status) for status in statuses if pd.notnull(status) and str(status)]
+        if not normalized:
+            return ExampleStatus.FREE
+        if all(status == ExampleStatus.FINISHED for status in normalized):
+            return ExampleStatus.FINISHED
+        if any(status in {ExampleStatus.ASSIGNED, ExampleStatus.FINISHED} for status in normalized):
+            return ExampleStatus.ASSIGNED
+        return ExampleStatus.FREE
+
+    @staticmethod
+    def _first_non_empty(values):
+        for value in values:
+            if pd.notnull(value) and str(value):
+                return value
+        return ""
 
     def get_overview(self):
         self.load_db()
@@ -236,12 +257,16 @@ class HumanCampaign(Campaign):
                         "setup_id": df.at[idx, "setup_id"],
                         "example_idx": df.at[idx, "example_idx"],
                         "annotator_group": df.at[idx, "annotator_group"],
+                        "status": df.at[idx, "status"],
                     }
                 ).tolist(),
             ),
             example_cnt=pd.NamedAgg(column="example_idx", aggfunc="count"),
-            status=pd.NamedAgg(column="status", aggfunc="first"),
-            annotator_id=pd.NamedAgg(column="annotator_id", aggfunc="first"),
+            finished_cnt=pd.NamedAgg(column="status", aggfunc=lambda x: int((x == ExampleStatus.FINISHED).sum())),
+            assigned_cnt=pd.NamedAgg(column="status", aggfunc=lambda x: int((x == ExampleStatus.ASSIGNED).sum())),
+            free_cnt=pd.NamedAgg(column="status", aggfunc=lambda x: int((x == ExampleStatus.FREE).sum())),
+            status=pd.NamedAgg(column="status", aggfunc=self._batch_status),
+            annotator_id=pd.NamedAgg(column="annotator_id", aggfunc=self._first_non_empty),
             start=pd.NamedAgg(column="start", aggfunc="min"),
             end=pd.NamedAgg(column="end", aggfunc="max"),
         ).reset_index()

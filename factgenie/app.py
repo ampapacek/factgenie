@@ -448,12 +448,14 @@ def annotate(campaign_id):
         }
     else:
         show_completed_redo = request.args.get("show_completed_redo") == "1" or request.args.get("redo_review") == "1"
+        show_saved_examples = request.args.get("show_saved_items") == "1" or request.args.get("saved_review") == "1"
         annotation_set, redo_context = crowdsourcing.get_annotator_batch(
             app,
             campaign,
             service_ids,
             batch_idx=batch_idx,
             include_completed_redo=show_completed_redo,
+            include_saved_examples=show_saved_examples,
             return_context=True,
         )
 
@@ -1081,6 +1083,17 @@ def redo_keep_item():
     )
 
 
+@app.route("/save_annotation_item", methods=["POST"])
+def save_annotation_item():
+    data = request.get_json() or {}
+    return crowdsourcing.save_annotation_item(
+        app,
+        data.get("campaign_id"),
+        data.get("annotation"),
+        data.get("annotator_id"),
+    )
+
+
 @app.route("/crowdsourcing/create", methods=["POST"])
 @login_required
 def crowdsourcing_create():
@@ -1622,6 +1635,10 @@ def submit_annotations():
         return crowdsourcing.preview_submission_response(app, campaign_id)
     if any(annotation.get("redo_id") for annotation in annotation_set):
         return utils.error("Redo annotations must be saved with Save current item.")
+
+    campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    if crowdsourcing.is_per_example_save_campaign(campaign):
+        return crowdsourcing.save_per_example_annotations(app, campaign_id, annotation_set, annotator_id)
 
     return crowdsourcing.save_annotations(app, campaign_id, annotation_set, annotator_id)
 

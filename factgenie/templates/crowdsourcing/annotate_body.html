@@ -166,6 +166,32 @@
     </div>
   </div>
 
+  <div class="modal fade" id="per-example-finish-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Finish this batch?</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>
+            All remaining examples in this batch will be saved now.
+          </p>
+          <p>
+            Examples with no annotation will be marked as skipped when a skip checkbox is available.
+          </p>
+          <p class="mb-0">
+            After this, the batch is submitted and you cannot go back to continue it as unfinished.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Go back</button>
+          <button type="button" class="btn btn-success" id="per-example-finish-confirm-btn">Save all and finish</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="overlay-start" class="overlay">
     <div id="overlay-start-content" class="overlay-content">
       <div id="overlay-start-hidden-message" {% if not annotator_preferences.hide_instructions_next_time %}style="display: none;"{% endif %}>

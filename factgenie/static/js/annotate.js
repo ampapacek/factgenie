@@ -3,9 +3,11 @@ const annotator_id = window.annotator_id;
 const metadata = window.metadata;
 const redo_context = window.redo_context || {};
 const INVALID_ANNOTATOR_IDS = ["", "FILL_YOUR_NAME_HERE", null, undefined];
+const perExampleSaveMode = metadata?.config?.save_mode === "per_example";
 
 var current_example_idx = 0;
 var redoFinalMessage = "";
+var perExampleFinalMessage = "";
 var annotation_set = window.annotation_set;
 
 const total_examples = annotation_set.length;
@@ -570,6 +572,7 @@ function goToAnnotation(example_idx) {
     }
 
     updateRedoActionStatus();
+    updatePerExampleActionStatus();
 }
 
 function goToPage(page) {
@@ -610,6 +613,7 @@ function normalizeNewlines(text) {
 function loadAnnotations() {
     $("#dataset-spinner").show();
     initializeRedoControls();
+    initializePerExampleControls();
 
     const promises = [];
     const annotation_span_categories = metadata.config.annotation_span_categories;
@@ -660,9 +664,22 @@ function loadAnnotations() {
                 }
                 spanAnnotator.setCurrentAnnotationType(0);
                 addPageLink(annotation_idx);
+                if (perExampleSaveMode && annotation_set[annotation_idx].per_example_saved === true) {
+                    $(`#page-link-${annotation_idx}`).removeClass("bg-incomplete").addClass("bg-complete");
+                }
             }
 
-            const firstLoadedIndex = loadedIndexes[0];
+            initializePerExampleSavedVisibility();
+
+            const visibleIndexes = visiblePerExampleIndexes();
+            if (perExampleSaveMode && redo_context.show_saved !== true && visibleIndexes.length === 0) {
+                $("#hideOverlayBtn").attr("disabled", false);
+                $("#hideOverlayBtn").html("View the annotation page");
+                finishPerExampleAnnotations();
+                return;
+            }
+
+            const firstLoadedIndex = visibleIndexes[0] ?? loadedIndexes[0];
             current_example_idx = firstLoadedIndex;
             goToAnnotation(firstLoadedIndex);
 
@@ -727,6 +744,44 @@ function initializeRedoControls() {
     }
 }
 
+function submitButtonText() {
+    return perExampleSaveMode ? "Finish / save remaining" : "👉️ Submit Annotations";
+}
+
+function initializePerExampleControls() {
+    if (!perExampleSaveMode || redo_context.is_redo === true) {
+        return;
+    }
+    $("#submit-annotations-btn").show().text(submitButtonText());
+    $("#redo-show-completed-item").show();
+    $("#redo-mode-banner")
+        .removeClass("alert-warning")
+        .addClass("alert-info")
+        .text("Each example is saved when you mark it complete. Use Show saved items to review and edit saved examples.")
+        .show();
+    $("#redo-action-status").hide().text("");
+
+    const url = new URL(window.location.href);
+    $("#redo-show-completed-link").off("click");
+    if (redo_context.show_saved === true) {
+        setPerExampleSavedItemsToggle(false);
+    } else {
+        $("#redo-show-completed-link").text("Show saved items");
+        url.searchParams.set("show_saved_items", "1");
+        url.searchParams.set("saved_review", "1");
+        $("#redo-show-completed-link").attr("href", url.toString());
+    }
+}
+
+function setPerExampleActionStatus(message, level = "muted") {
+    if (!perExampleSaveMode || redo_context.is_redo === true) {
+        return;
+    }
+    const status = $("#redo-action-status");
+    status.removeClass("text-muted text-success text-danger text-warning");
+    status.addClass(`text-${level}`).text(message).show();
+}
+
 function setRedoActionStatus(message, level = "muted") {
     if (redo_context.is_redo !== true) {
         return;
@@ -748,6 +803,17 @@ function updateRedoActionStatus() {
     $("#redo-action-status").hide().text("");
 }
 
+function updatePerExampleActionStatus() {
+    if (!perExampleSaveMode || redo_context.is_redo === true || !annotation_set[current_example_idx]) {
+        return;
+    }
+    if (annotation_set[current_example_idx].per_example_saved === true) {
+        setPerExampleActionStatus("This example is saved. You can edit it and mark it complete again to replace the saved annotation.", "success");
+        return;
+    }
+    $("#redo-action-status").hide().text("");
+}
+
 function isSkipAnnotationSelected() {
     const skipMarkers = ["skip", "přeskoč"];
     let skipSelected = false;
@@ -760,6 +826,79 @@ function isSkipAnnotationSelected() {
         }
     });
     return skipSelected;
+}
+
+function isSkipFlagLabel(label) {
+    const normalized = (label || "").trim().toLowerCase();
+    return normalized.includes("skip") || normalized.includes("přeskoč");
+}
+
+function flagDefinitionsFromTemplate() {
+    const flags = [];
+    $(".crowdsourcing-flag").each(function () {
+        const label = $(this).find("label").text().trim();
+        flags.push({ label: label, value: false });
+    });
+    return flags;
+}
+
+function hasSkipFlagAvailable(annotation) {
+    const flags = Array.isArray(annotation?.flags) && annotation.flags.length > 0
+        ? annotation.flags
+        : flagDefinitionsFromTemplate();
+    return flags.some(flag => isSkipFlagLabel(flag.label));
+}
+
+function markAnnotationSkipped(annotation) {
+    const baseFlags = Array.isArray(annotation.flags) && annotation.flags.length > 0
+        ? annotation.flags
+        : flagDefinitionsFromTemplate();
+    annotation.flags = baseFlags.map(flag => ({
+        ...flag,
+        value: isSkipFlagLabel(flag.label) ? true : !!flag.value,
+    }));
+    annotation.timeLastSaved = Math.floor(Date.now() / 1000);
+}
+
+function hasStoredAnnotationContent(annotation) {
+    if (!annotation) {
+        return false;
+    }
+    if (Array.isArray(annotation.annotations) && annotation.annotations.some(item => (item?.text || "").trim() !== "")) {
+        return true;
+    }
+    if (Array.isArray(annotation.flags) && annotation.flags.some(flag => flag.value === true)) {
+        return true;
+    }
+    if (Array.isArray(annotation.options) && annotation.options.some(option => `${option?.index ?? ""}` !== "")) {
+        return true;
+    }
+    const textFields = Array.isArray(annotation.textFields) ? annotation.textFields : annotation.text_fields;
+    if (Array.isArray(textFields) && textFields.some(field => `${field?.value ?? ""}`.trim() !== "")) {
+        return true;
+    }
+    if (Array.isArray(annotation.sliders)) {
+        return annotation.sliders.some(slider => {
+            const value = Number(slider?.value);
+            const min = Number(slider?.min ?? 0);
+            return !Number.isNaN(value) && !Number.isNaN(min) && value !== min;
+        });
+    }
+    return false;
+}
+
+function preparePerExampleFinishSubmission() {
+    let skippedCount = 0;
+    annotation_set.forEach(annotation => {
+        if (annotation.per_example_saved === true) {
+            return;
+        }
+        if (!hasStoredAnnotationContent(annotation) && hasSkipFlagAvailable(annotation)) {
+            markAnnotationSkipped(annotation);
+            skippedCount += 1;
+        }
+    });
+    return skippedCount;
 }
 
 function validateCurrentAnnotationComplete() {
@@ -784,6 +923,11 @@ function validateCurrentAnnotationComplete() {
 function markAnnotationAsComplete() {
     if (redo_context.is_redo === true) {
         saveCurrentRedoItem();
+        return;
+    }
+
+    if (perExampleSaveMode) {
+        saveCurrentAnnotationItem();
         return;
     }
 
@@ -917,6 +1061,120 @@ function goToNextVisibleRedoItem(finalMessage) {
     goToPage(next);
 }
 
+function visiblePerExampleIndexes() {
+    if (!perExampleSaveMode || redo_context.is_redo === true) {
+        return getLoadedExampleIndexes();
+    }
+    const includeSaved = redo_context.show_saved === true;
+    return annotation_set
+        .map((annotation, index) => ({ annotation, index }))
+        .filter(({ annotation, index }) =>
+            examples_cached[index] &&
+            (includeSaved || annotation.per_example_saved !== true) &&
+            !$(`#page-link-${index}`).closest(".page-item").hasClass("per-example-saved-hidden")
+        )
+        .map(({ index }) => index);
+}
+
+function hideCompletedPerExampleItems() {
+    $(".page-item").has(".page-link.bg-complete").addClass("per-example-saved-hidden").hide();
+    $(".output-element").hide();
+}
+
+function showCompletedPerExampleItems() {
+    $(".per-example-saved-hidden").removeClass("per-example-saved-hidden").show();
+    $(".output-element").show();
+}
+
+function setPerExampleSavedItemsToggle(hidden) {
+    const link = $("#redo-show-completed-link");
+    link.off("click");
+    if (hidden) {
+        link.text("Show saved items");
+        link.attr("href", "#");
+        link.on("click", function (event) {
+            event.preventDefault();
+            showCompletedPerExampleItems();
+            setPerExampleSavedItemsToggle(false);
+        });
+    } else {
+        link.text("Hide saved items");
+        link.attr("href", "#");
+        link.on("click", function (event) {
+            event.preventDefault();
+            handleHidePerExampleSavedItemsClick();
+        });
+    }
+}
+
+function initializePerExampleSavedVisibility() {
+    if (!perExampleSaveMode || redo_context.is_redo === true) {
+        return;
+    }
+    if (redo_context.show_saved === true) {
+        setPerExampleSavedItemsToggle(false);
+        return;
+    }
+    annotation_set.forEach((annotation, index) => {
+        if (annotation.per_example_saved === true) {
+            $(`#page-link-${index}`).closest(".page-item").addClass("per-example-saved-hidden").hide();
+            $(`#out-text-${index}`).hide();
+        }
+    });
+}
+
+function handleHidePerExampleSavedItemsClick() {
+    const current = annotation_set[current_example_idx] || {};
+    hideCompletedPerExampleItems();
+
+    const remaining = visiblePerExampleIndexes();
+    if (remaining.length === 0) {
+        finishPerExampleAnnotations();
+        return;
+    }
+
+    const currentIsHiddenCompleted =
+        current.per_example_saved === true ||
+        $(`#page-link-${current_example_idx}`).closest(".page-item").hasClass("per-example-saved-hidden");
+
+    if (currentIsHiddenCompleted) {
+        goToPage(remaining[0]);
+    }
+
+    setPerExampleSavedItemsToggle(true);
+}
+
+function finishPerExampleAnnotations(finalMessage) {
+    if (finalMessage) {
+        perExampleFinalMessage = finalMessage;
+    }
+    const reviewUrl = new URL(window.location.href);
+    reviewUrl.searchParams.set("show_saved_items", "1");
+    reviewUrl.searchParams.set("saved_review", "1");
+    const message = perExampleFinalMessage || metadata.config.final_message || "Thank you.";
+    $("#final-message").html(`
+        ${message}
+        <p class="mt-4">
+            Your annotations are saved. You can close this page, or review saved examples again if you want to edit them.
+        </p>
+        <a class="btn btn-primary mt-2" href="${reviewUrl.toString()}">Review saved annotations</a>
+    `);
+    $("#overlay-end").show();
+    window.onbeforeunload = null;
+    syncOverlayScrollLock();
+}
+
+function goToNextVisiblePerExampleItem(finalMessage) {
+    const remaining = visiblePerExampleIndexes();
+    if (remaining.length === 0) {
+        finishPerExampleAnnotations(finalMessage);
+        return;
+    }
+
+    const next = remaining.find(index => index > current_example_idx) ?? remaining[0];
+    goToPage(next);
+}
+
 function saveCurrentRedoItem() {
     if (redo_context.is_redo !== true) {
         return;
@@ -1018,6 +1276,59 @@ function keepCurrentRedoItem() {
     });
 }
 
+function saveCurrentAnnotationItem() {
+    if (!perExampleSaveMode || redo_context.is_redo === true) {
+        return;
+    }
+    if (!validateCurrentAnnotationComplete()) {
+        return;
+    }
+    saveCurrentAnnotations(current_example_idx);
+    const current = annotation_set[current_example_idx];
+
+    const submissionData = {
+        campaign_id: metadata.id,
+        annotator_id: annotator_id,
+        annotation: current,
+    };
+
+    $("#mark-annotation-complete-btn").prop("disabled", true).text("Saving...");
+    $("#submit-annotations-btn").prop("disabled", true);
+    setPerExampleActionStatus("Saving this example...", "muted");
+    $.post({
+        url: `${url_prefix}/save_annotation_item`,
+        contentType: 'application/json',
+        data: JSON.stringify(submissionData),
+        timeout: 30000,
+        success: function (response) {
+            if (response.success !== true) {
+                alert(response.error || "Example could not be saved.");
+                $("#mark-annotation-complete-btn").prop("disabled", false).text("✅ Mark example as complete");
+                $("#submit-annotations-btn").prop("disabled", false).text(submitButtonText());
+                setPerExampleActionStatus(response.error || "Example could not be saved.", "danger");
+                return;
+            }
+            perExampleFinalMessage = response.final_message || perExampleFinalMessage;
+            annotation_set[current_example_idx].per_example_saved = true;
+            $(`#page-link-${current_example_idx}`).removeClass("bg-incomplete").addClass("bg-complete");
+            if (redo_context.show_saved !== true) {
+                $(`#page-link-${current_example_idx}`).closest(".page-item").addClass("per-example-saved-hidden").hide();
+                $(`#out-text-${current_example_idx}`).hide();
+            }
+            $("#mark-annotation-complete-btn").prop("disabled", false).text("✅ Mark example as complete");
+            $("#submit-annotations-btn").prop("disabled", false).text(submitButtonText());
+            setPerExampleActionStatus("Saved.", "success");
+            goToNextVisiblePerExampleItem(response.final_message);
+        },
+        error: function () {
+            alert("Example could not be saved.");
+            $("#mark-annotation-complete-btn").prop("disabled", false).text("✅ Mark example as complete");
+            $("#submit-annotations-btn").prop("disabled", false).text(submitButtonText());
+            setPerExampleActionStatus("Example could not be saved.", "danger");
+        }
+    });
+}
+
 function saveCurrentAnnotations(example_idx) {
     const annotations = spanAnnotator.getAnnotations(`p${example_idx}`);
 
@@ -1029,12 +1340,49 @@ function saveCurrentAnnotations(example_idx) {
     annotation_set[example_idx]["timeLastSaved"] = Math.floor(Date.now() / 1000);
 }
 
-function submitAnnotations(campaign_id) {
+function showPerExampleFinishConfirmation() {
+    const modalElement = document.getElementById("per-example-finish-modal");
+    if (!modalElement || typeof bootstrap === "undefined") {
+        if (window.confirm("Save all remaining examples and finish this batch? Empty examples will be marked as skipped when a skip checkbox is available. You cannot go back after finishing.")) {
+            submitAnnotations({ confirmed: true });
+        }
+        return;
+    }
+
+    const modal = new bootstrap.Modal(modalElement);
+    $("#per-example-finish-confirm-btn")
+        .off("click")
+        .on("click", function () {
+            modal.hide();
+            submitAnnotations({ confirmed: true });
+        });
+    modal.show();
+}
+
+function submitAnnotations(campaign_id, options) {
+    let submitOptions = options || {};
+    if (typeof campaign_id === "object" && campaign_id !== null) {
+        submitOptions = campaign_id;
+        campaign_id = undefined;
+    }
     if (redo_context.is_redo === true || annotation_set.some(annotation => annotation.redo_id)) {
         alert("Redo annotations must be saved with Save current item.");
         $("#submit-annotations-btn").hide();
         $("#redo-save-current-btn").show();
         return;
+    }
+
+    if (annotation_set[current_example_idx]) {
+        saveCurrentAnnotations(current_example_idx);
+    }
+
+    if (perExampleSaveMode && submitOptions.confirmed !== true) {
+        showPerExampleFinishConfirmation();
+        return;
+    }
+
+    if (perExampleSaveMode) {
+        preparePerExampleFinishSubmission();
     }
 
     // Save to local storage before attempting submission
@@ -1046,7 +1394,7 @@ function submitAnnotations(campaign_id) {
         annotation_set: annotation_set
     };
 
-    $("#submit-annotations-btn").prop("disabled", true).text("Submitting...");
+    $("#submit-annotations-btn").prop("disabled", true).text(perExampleSaveMode ? "Saving..." : "Submitting...");
 
     $.post({
         url: `${url_prefix}/submit_annotations`,
@@ -1063,6 +1411,11 @@ function submitAnnotations(campaign_id) {
             if (response.success !== true) {
                 handleSubmissionError(response.error, submissionData);
             } else {
+                if (perExampleSaveMode) {
+                    annotation_set.forEach((annotation) => {
+                        annotation.per_example_saved = true;
+                    });
+                }
                 $("#final-message").html(response.message);
                 $("#overlay-end").show();
                 syncOverlayScrollLock();
@@ -1077,7 +1430,7 @@ function submitAnnotations(campaign_id) {
 }
 
 function handleSubmissionError(submissionData) {
-    $("#submit-annotations-btn").prop("disabled", false).text("👉️ Submit Annotations");
+    $("#submit-annotations-btn").prop("disabled", false).text(submitButtonText());
 
     $("#retry-section").show();
     $("#backup-section").show();
@@ -1093,7 +1446,7 @@ function retrySubmission() {
     setTimeout(() => {
         $("#overlay-fail").hide();
         syncOverlayScrollLock();
-        submitAnnotations();
+        submitAnnotations(perExampleSaveMode ? { confirmed: true } : undefined);
         // Re-enable the button in case of another error
         $("#retry-btn").prop("disabled", false).text("🔄 Retry Now");
     }, 800); // 800ms delay
