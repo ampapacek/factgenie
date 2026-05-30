@@ -66,7 +66,7 @@
           </dd>
         </dl>
         <div class="mb-4">
-          <a href="{{ host_prefix }}/annotate/{{ metadata.id }}" class="btn btn-outline-secondary"
+          <a href="{{ host_prefix }}/annotate/{{ metadata.id }}?annotatorId=factgenie_preview" class="btn btn-outline-secondary"
             data-bs-toggle="tooltip" title="Preview the crowdsourcing page">
             <i class="fa fa-eye"></i> Preview page
           </a>
@@ -280,7 +280,7 @@
               <td>{{ batch.start | ctime }}</td>
               <td>{{ batch | elapsed }}</td>
               <td>
-                <a href="{{ host_prefix }}/annotate/{{ metadata.id }}?batch_idx={{ batch.batch_idx }}"
+                <a href="{{ host_prefix }}/annotate/{{ metadata.id }}?annotatorId=factgenie_preview&batch_idx={{ batch.batch_idx }}"
                   class="btn btn-sm btn-outline-secondary" data-bs-toggle="tooltip"
                   title="Preview the crowdsourcing page for the batch">
                   <i class="fa fa-eye"></i>

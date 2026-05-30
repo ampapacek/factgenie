@@ -69,7 +69,7 @@
                 {% include 'include/progress_bar_crowdsourcing.html' %}
               </td>
               <td>
-                <a href="{{ host_prefix }}/annotate/{{ campaign.metadata.id }}" class="btn btn-outline-secondary"
+                <a href="{{ host_prefix }}/annotate/{{ campaign.metadata.id }}?annotatorId=factgenie_preview" class="btn btn-outline-secondary"
                   data-bs-toggle="tooltip" title="Preview the crowdsourcing page">
                   <i class="fa fa-eye"></i>
                 </a>
