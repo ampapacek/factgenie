@@ -163,6 +163,28 @@ def _load_annotator_aliases(campaign_id):
     return aliases
 
 
+def _next_available_alias(used_aliases):
+    index = 0
+    while True:
+        alias = _city_alias_from_index(index)
+        if alias not in used_aliases:
+            return alias
+        index += 1
+
+
+def alias_map_for_annotators(campaign_id, annotator_ids):
+    aliases = _load_annotator_aliases(campaign_id)
+    used_aliases = {alias for alias in aliases.values() if alias}
+    for annotator_id in sorted({normalize_annotator_id(value) for value in annotator_ids if normalize_annotator_id(value)}):
+        key = annotator_id.lower()
+        if key in aliases:
+            continue
+        alias = _next_available_alias(used_aliases)
+        aliases[key] = alias
+        used_aliases.add(alias)
+    return aliases
+
+
 def _fallback_alias(campaign_id, annotator_id):
     key = f"{campaign_id}:{annotator_id}".encode("utf-8", errors="ignore")
     return ANNOTATOR_PSEUDONYM_CITIES[sum(key) % len(ANNOTATOR_PSEUDONYM_CITIES)]
@@ -333,7 +355,16 @@ def _build_submissions(annotation_index, campaign_index):
     if annotation_index.empty:
         return pd.DataFrame(columns=columns)
 
-    alias_cache = {}
+    campaign_annotators = defaultdict(set)
+    for _, row in annotation_index.iterrows():
+        campaign_id = str(row.get("campaign_id", "") or "")
+        annotator_id = normalize_annotator_id(row.get("annotator_id"))
+        if campaign_id and annotator_id:
+            campaign_annotators[campaign_id].add(annotator_id)
+    alias_cache = {
+        campaign_id: alias_map_for_annotators(campaign_id, annotator_ids)
+        for campaign_id, annotator_ids in campaign_annotators.items()
+    }
     records = []
     for _, row in annotation_index.iterrows():
         campaign_id = str(row.get("campaign_id", "") or "")
@@ -344,8 +375,6 @@ def _build_submissions(annotation_index, campaign_index):
         annotator_group = row.get("annotator_group", 0)
         alias = ""
         if annotator_id:
-            if campaign_id not in alias_cache:
-                alias_cache[campaign_id] = _load_annotator_aliases(campaign_id)
             alias = alias_cache[campaign_id].get(annotator_id.lower()) or _fallback_alias(campaign_id, annotator_id)
         else:
             alias = f"group {annotator_group}"

@@ -169,6 +169,17 @@
                 </div>
               </div>
               <div class="form-group mt-4">
+                <label for="saveMode">Save behavior</label>
+                <div class="mb-2">
+                  <small class="form-text text-muted">Whether annotators submit the whole batch at the end or save each
+                    example as soon as it is marked complete.</small>
+                </div>
+                <select class="form-select" id="saveMode" name="saveMode">
+                  <option value="batch">Save whole batch at the end</option>
+                  <option value="per_example">Save each example immediately</option>
+                </select>
+              </div>
+              <div class="form-group mt-4">
                 <label for="pseudonymizeAnnotators">Pseudonymize annotators in Browse and Analyze</label>
                 <div class="mb-2">
                   <small class="form-text text-muted">When enabled, Browse, Analyze, and filters use annotator aliases

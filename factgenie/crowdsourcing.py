@@ -324,9 +324,13 @@ def parse_crowdsourcing_config(config):
     annotators_per_example = int(annotators_per_example) if annotators_per_example else 1
     idle_time = config.get("idleTime")
     idle_time = int(idle_time) if idle_time else 120
+    save_mode = config.get("saveMode") or config.get("save_mode") or "batch"
+    if save_mode not in {"batch", "per_example"}:
+        save_mode = "batch"
     config = {
         "annotator_instructions": config.get("annotatorInstructions", "No instructions needed :)"),
         "final_message": config.get("finalMessage"),
+        "save_mode": save_mode,
         "examples_per_batch": int(examples_per_batch),
         "annotators_per_example": int(annotators_per_example),
         "idle_time": int(idle_time),
@@ -344,6 +348,10 @@ def parse_crowdsourcing_config(config):
     }
 
     return config
+
+
+def is_per_example_save_campaign(campaign):
+    return campaign.metadata.get("config", {}).get("save_mode", "batch") == "per_example"
 
 
 def select_batch(db, seed, annotator_id):
@@ -401,25 +409,73 @@ def select_batch(db, seed, annotator_id):
         raise ValueError("No available batches")
 
 
-def get_examples_for_batch(db, batch_idx):
+def _normal_item_from_row(row):
+    return {
+        "dataset": row["dataset"],
+        "split": row["split"],
+        "setup_id": row["setup_id"],
+        "example_idx": int(row["example_idx"]),
+        "batch_idx": int(row["batch_idx"]),
+        "annotator_group": int(row.get("annotator_group", 0)),
+        "annotator_id": row.get("annotator_id", ""),
+    }
+
+
+def _active_record_for_row(campaign_id, row):
+    item = _normal_item_from_row(row)
+    return redo.latest_active_record(campaign_id, item)
+
+
+def get_examples_for_batch(db, batch_idx, campaign=None, annotator_id=None, include_saved=False):
     annotator_batch = []
 
     # find all examples for this batch and annotator group
     batch_examples = db[db["batch_idx"] == batch_idx]
 
     for _, row in batch_examples.iterrows():
-        annotator_batch.append(
-            {
-                "dataset": row["dataset"],
-                "split": row["split"],
-                "setup_id": row["setup_id"],
-                "example_idx": row["example_idx"],
-                "batch_idx": row["batch_idx"],
-                "annotator_group": row["annotator_group"],
-            }
-        )
+        example = {
+            "dataset": row["dataset"],
+            "split": row["split"],
+            "setup_id": row["setup_id"],
+            "example_idx": row["example_idx"],
+            "batch_idx": row["batch_idx"],
+            "annotator_group": row["annotator_group"],
+        }
+        if campaign is not None and is_per_example_save_campaign(campaign):
+            active_record = None
+            row_annotator = str(row.get("annotator_id", "") or "")
+            if row_annotator == str(annotator_id or ""):
+                active_record = _active_record_for_row(campaign.campaign_id, row)
+            if active_record:
+                example.update(
+                    {
+                        "annotations": _sanitize_redo_annotations_for_campaign(
+                            campaign, _normal_item_from_row(row), active_record.get("annotations", [])
+                        ),
+                        "flags": active_record.get("flags", []),
+                        "options": active_record.get("options", []),
+                        "sliders": active_record.get("sliders", []),
+                        "textFields": active_record.get("text_fields", []),
+                        "per_example_saved": row.get("status") == ExampleStatus.FINISHED,
+                    }
+                )
+            else:
+                example["per_example_saved"] = row.get("status") == ExampleStatus.FINISHED
+            if not include_saved and example.get("per_example_saved"):
+                example["per_example_hidden"] = True
+        annotator_batch.append(example)
 
     return annotator_batch
+
+
+def select_finished_batch_for_review(db, annotator_id):
+    if not annotator_id or annotator_id == PREVIEW_STUDY_ID:
+        raise ValueError("No available batches")
+    finished = db.loc[(db["annotator_id"] == annotator_id) & (db["status"] == ExampleStatus.FINISHED)]
+    if finished.empty:
+        raise ValueError("No available batches")
+    latest = finished.sort_values(["end", "batch_idx"], na_position="first").iloc[-1]
+    return latest["batch_idx"]
 
 
 def select_preview_batch(db):
@@ -462,13 +518,22 @@ def get_redo_annotation_set(app, campaign, db, annotator_id, include_completed=F
     return annotation_set
 
 
-def get_annotator_batch(app, campaign, service_ids, batch_idx=None, include_completed_redo=False, return_context=False):
+def get_annotator_batch(
+    app,
+    campaign,
+    service_ids,
+    batch_idx=None,
+    include_completed_redo=False,
+    include_saved_examples=False,
+    return_context=False,
+):
     # simple locking over the CSV file to prevent double writes
     redo_context = {
         "mode": "normal",
         "is_redo": False,
         "empty_redo_fallback": False,
         "show_completed": include_completed_redo,
+        "show_saved": include_saved_examples,
     }
     with app.db["lock"]:
         campaign.load_db()
@@ -503,6 +568,8 @@ def get_annotator_batch(app, campaign, service_ids, batch_idx=None, include_comp
             try:
                 if annotator_id == PREVIEW_STUDY_ID:
                     batch_idx = select_preview_batch(db)
+                elif include_saved_examples and is_per_example_save_campaign(campaign):
+                    batch_idx = select_finished_batch_for_review(db, annotator_id)
                 else:
                     # usual case: an annotator opened the annotation page, we need to select the batch
                     batch_idx = select_batch(db, seed, annotator_id)
@@ -520,18 +587,204 @@ def get_annotator_batch(app, campaign, service_ids, batch_idx=None, include_comp
 
         # we do not block the example if we are in preview mode
         if annotator_id != PREVIEW_STUDY_ID:
-            db.loc[mask, "status"] = ExampleStatus.ASSIGNED
-            db.loc[mask, "start"] = start
-            db.loc[mask, "annotator_id"] = annotator_id
+            assign_mask = mask
+            if is_per_example_save_campaign(campaign):
+                assign_mask = mask & (db["status"] != ExampleStatus.FINISHED)
+            db.loc[assign_mask, "status"] = ExampleStatus.ASSIGNED
+            db.loc[assign_mask, "start"] = start
+            db.loc[assign_mask, "annotator_id"] = annotator_id
 
             campaign.update_db(db)
 
-        annotator_batch = get_examples_for_batch(db, batch_idx)
+        annotator_batch = get_examples_for_batch(
+            db,
+            batch_idx,
+            campaign=campaign,
+            annotator_id=annotator_id,
+            include_saved=include_saved_examples,
+        )
         logging.info(f"Releasing lock for {annotator_id}")
 
     if return_context:
         return annotator_batch, redo_context
     return annotator_batch
+
+
+def _remove_active_records_without_archive(campaign_id, item):
+    matches = redo.find_active_records(campaign_id, item)
+    if not matches:
+        return []
+
+    matches_by_file = {}
+    for match in matches:
+        matches_by_file.setdefault(match["file"], set()).add(match["line_index"])
+
+    for jsonl_file, line_indexes in matches_by_file.items():
+        with open(jsonl_file) as f:
+            lines = f.readlines()
+        remaining_lines = [line for idx, line in enumerate(lines) if idx not in line_indexes]
+        if any(line.strip() for line in remaining_lines):
+            with open(jsonl_file, "w") as f:
+                f.writelines(remaining_lines)
+        else:
+            jsonl_file.unlink()
+
+    return matches
+
+
+def _find_annotation_row(db, annotation, annotator_id):
+    required = ["dataset", "split", "setup_id", "example_idx", "batch_idx", "annotator_group"]
+    if not all(key in annotation for key in required):
+        missing = ", ".join(key for key in required if key not in annotation)
+        raise ValueError(f"Missing annotation identity field(s): {missing}")
+
+    mask = (
+        (db["dataset"].astype(str) == str(annotation["dataset"]))
+        & (db["split"].astype(str) == str(annotation["split"]))
+        & (db["setup_id"].astype(str) == str(annotation["setup_id"]))
+        & (db["example_idx"].astype(int) == int(annotation["example_idx"]))
+        & (db["batch_idx"].astype(int) == int(annotation["batch_idx"]))
+        & (db["annotator_group"].astype(int) == int(annotation.get("annotator_group", 0)))
+        & (db["annotator_id"].fillna("").astype(str) == str(annotator_id))
+    )
+    if mask.sum() != 1:
+        raise ValueError("Could not find a unique assigned campaign row for this annotation item")
+    return db[mask].index[0]
+
+
+def _backup_campaign_files(campaign_id):
+    files_dir = Path(CAMPAIGN_DIR) / campaign_id / "files"
+    backups = {}
+    if files_dir.exists():
+        for path in files_dir.glob("*.jsonl"):
+            backups[path] = path.read_text(encoding="utf-8")
+    return backups
+
+
+def _restore_campaign_files(campaign_id, backups):
+    files_dir = Path(CAMPAIGN_DIR) / campaign_id / "files"
+    files_dir.mkdir(parents=True, exist_ok=True)
+    for path in list(files_dir.glob("*.jsonl")):
+        if path not in backups:
+            path.unlink()
+    for path, content in backups.items():
+        path.write_text(content, encoding="utf-8")
+
+
+def _save_annotation_item_locked(app, campaign, db, row_idx, annotation, annotator_id, now):
+    row = db.loc[row_idx].copy()
+    updated_row = row.copy()
+    updated_row["status"] = ExampleStatus.FINISHED
+    updated_row["end"] = now
+
+    output = workflows.get_output_for_setup(
+        dataset=row["dataset"],
+        split=row["split"],
+        setup_id=row["setup_id"],
+        example_idx=row["example_idx"],
+        app=app,
+        force_reload=False,
+    )["output"]
+
+    annotations = [a for a in annotation.get("annotations", []) if a.get("text")]
+    result = {
+        "annotations": annotations,
+        "flags": annotation.get("flags", []),
+        "options": annotation.get("options", []),
+        "sliders": annotation.get("sliders", []),
+        "text_fields": annotation.get("textFields", annotation.get("text_fields", [])),
+        "time_last_saved": annotation.get("timeLastSaved", annotation.get("time_last_saved")),
+        "time_last_accessed": annotation.get("timeLastAccessed", annotation.get("time_last_accessed")),
+        "output": output,
+    }
+
+    item = _normal_item_from_row(updated_row)
+    _remove_active_records_without_archive(campaign.campaign_id, item)
+    workflows.save_record(
+        mode=CampaignMode.CROWDSOURCING,
+        campaign=campaign,
+        row=updated_row,
+        result=result,
+    )
+    db.loc[row_idx, "status"] = ExampleStatus.FINISHED
+    db.loc[row_idx, "end"] = now
+    return item
+
+
+def save_annotation_item(app, campaign_id, annotation, annotator_id):
+    if not campaign_id or not annotator_id or not isinstance(annotation, dict):
+        return utils.error("Missing campaign_id, annotator_id, or annotation")
+    if is_preview_annotator(annotator_id):
+        return utils.error("Preview mode is read-only. Preview annotations are not saved.")
+
+    campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    if not is_per_example_save_campaign(campaign):
+        return utils.error("This campaign does not allow per-example saves.")
+
+    now = int(time.time())
+    db_path = Path(CAMPAIGN_DIR) / campaign_id / "db.csv"
+
+    with app.db["lock"]:
+        campaign.load_db()
+        db = campaign.db.copy()
+        db_backup = db_path.read_text(encoding="utf-8") if db_path.exists() else None
+        files_backup = _backup_campaign_files(campaign_id)
+
+        def restore_backups():
+            if db_backup is not None:
+                db_path.write_text(db_backup, encoding="utf-8")
+            _restore_campaign_files(campaign_id, files_backup)
+
+        try:
+            row_idx = _find_annotation_row(db, annotation, annotator_id)
+            saved_item = _save_annotation_item_locked(app, campaign, db, row_idx, annotation, annotator_id, now)
+            campaign.update_db(db)
+        except Exception as exc:
+            restore_backups()
+            return utils.error(f"Annotation item could not be saved: {exc}")
+
+    workflows.refresh_indexes(app)
+    final_message_html = markdown.markdown(campaign.metadata["config"].get("final_message", "Thank you."))
+    return jsonify(success=True, item=saved_item, message="Annotation item saved.", final_message=final_message_html)
+
+
+def save_per_example_annotations(app, campaign_id, annotation_set, annotator_id):
+    if not campaign_id or not annotator_id or not isinstance(annotation_set, list) or not annotation_set:
+        return utils.error("Missing campaign_id, annotator_id, or annotation_set")
+    if is_preview_annotator(annotator_id):
+        return utils.error("Preview mode is read-only. Preview annotations are not saved.")
+
+    campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    if not is_per_example_save_campaign(campaign):
+        return utils.error("This campaign does not allow per-example saves.")
+
+    now = int(time.time())
+    db_path = Path(CAMPAIGN_DIR) / campaign_id / "db.csv"
+
+    with app.db["lock"]:
+        campaign.load_db()
+        db = campaign.db.copy()
+        db_backup = db_path.read_text(encoding="utf-8") if db_path.exists() else None
+        files_backup = _backup_campaign_files(campaign_id)
+        saved_items = []
+
+        def restore_backups():
+            if db_backup is not None:
+                db_path.write_text(db_backup, encoding="utf-8")
+            _restore_campaign_files(campaign_id, files_backup)
+
+        try:
+            for annotation in annotation_set:
+                row_idx = _find_annotation_row(db, annotation, annotator_id)
+                saved_items.append(_save_annotation_item_locked(app, campaign, db, row_idx, annotation, annotator_id, now))
+            campaign.update_db(db)
+        except Exception as exc:
+            restore_backups()
+            return utils.error(f"Annotations could not be saved: {exc}")
+
+    workflows.refresh_indexes(app)
+    final_message_html = markdown.markdown(campaign.metadata["config"].get("final_message", "Thank you."))
+    return jsonify(success=True, message=final_message_html, saved_count=len(saved_items))
 
 
 def save_redo_annotation(app, campaign_id, redo_id, annotation, annotator_id):

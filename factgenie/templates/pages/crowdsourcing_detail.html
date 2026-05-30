@@ -274,7 +274,7 @@
             <tr>
               <td>{{ batch.batch_idx }}</td>
               <td>{{ batch.example_cnt }}</td>
-              <td><span id="statusBtn{{ rowId }}" class="badge bg-{{ batch.status }}">{{ batch.status }}</span>
+              <td><span id="statusBtn{{ rowId }}" class="badge bg-{{ batch.status }}">{{ batch.status }}{% if metadata.config.get('save_mode') == 'per_example' and batch.status == 'assigned' %} {{ batch.finished_cnt }}/{{ batch.example_cnt }}{% endif %}</span>
               </td>
               <td>{{ batch.annotator_id }}</td>
               <td>{{ batch.start | ctime }}</td>
@@ -302,6 +302,7 @@
                         <th>Setup id</th>
                         <th>Example idx</th>
                         <th>Ann. group</th>
+                        <th>Status</th>
                         <th>Link</th>
                       </tr>
                     </thead>
@@ -313,6 +314,7 @@
                         <td>{{ e.setup_id }}</td>
                         <td>{{ e.example_idx }}</td>
                         <td>{{ e.annotator_group }}</td>
+                        <td>{{ e.status }}</td>
                         <td><a
                             href="{{ host_prefix }}/browse?dataset={{ e.dataset }}&split={{ e.split }}&example_idx={{ e.example_idx }}&setup_id={{ e.setup_id }}&ann_campaign={{ batch.annotator_id | urlencode }}"
                             class="blue-link" target="_blank">

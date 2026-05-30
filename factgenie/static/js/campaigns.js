@@ -250,7 +250,7 @@ function validateOpenRouterModel(config, options) {
 
 function clearCampaign(campaignId) {
     // ask for confirmation
-    if (!confirm("Are you sure you want to clear all campaign outputs?")) {
+    if (!confirm("Are you sure you want to clear all campaign annotations and annotators?")) {
         return;
     }
     $.post({
@@ -466,6 +466,7 @@ function gatherConfig() {
         config.annotationGranularity = $("#annotationGranularity").val();
         config.annotationOverlapAllowed = $("#annotationOverlapAllowed").is(":checked");
         config.annotateReason = $("#annotateReason").is(":checked");
+        config.saveMode = $("#saveMode").val();
         config.pseudonymizeAnnotators = $("#pseudonymizeAnnotators").is(":checked");
         config.service = $("#service").val();
         config.sortOrder = $("#sortOrder").val();
@@ -957,6 +958,7 @@ function updateCrowdsourcingConfig() {
         $("#idleTime").val("");
         $("#annotationOverlapAllowed").prop("checked", false);
         $("#annotateReason").prop("checked", false);
+        $("#saveMode").val("batch");
         $("#pseudonymizeAnnotators").prop("checked", true);
         $("#annotation-span-categories").empty();
         $("#flags").empty();
@@ -975,6 +977,7 @@ function updateCrowdsourcingConfig() {
     const annotationGranularity = cfg.annotation_granularity;
     const annotationOverlapAllowed = cfg.annotation_overlap_allowed;
     const annotateReason = cfg.annotate_reason;
+    const saveMode = cfg.save_mode || "batch";
     const pseudonymizeAnnotators = cfg.pseudonymize_annotators !== false;
     const service = cfg.service;
     const sortOrder = cfg.sort_order;
@@ -993,6 +996,7 @@ function updateCrowdsourcingConfig() {
     $("#annotationGranularity").val(annotationGranularity);
     $("#annotationOverlapAllowed").prop("checked", annotationOverlapAllowed);
     $("#annotateReason").prop("checked", annotateReason);
+    $("#saveMode").val(saveMode);
     $("#pseudonymizeAnnotators").prop("checked", pseudonymizeAnnotators);
     $("#service").val(service);
     $("#sortOrder").val(sortOrder);

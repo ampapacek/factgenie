@@ -97,6 +97,56 @@ def write_active_record(campaign_id, filename, annotation_text="old", end_timest
     return record
 
 
+def make_per_example_campaign(tmp_path, campaign_id="per-example-test"):
+    campaign_dir = tmp_path / campaign_id
+    files_dir = campaign_dir / "files"
+    files_dir.mkdir(parents=True)
+    metadata = {
+        "id": campaign_id,
+        "mode": CampaignMode.CROWDSOURCING,
+        "created": "2026-05-30 12:00:00",
+        "config": {
+            "annotation_span_categories": [{"name": "Issue", "color": "#ff0000"}],
+            "annotation_granularity": "word",
+            "annotation_overlap_allowed": False,
+            "annotator_instructions": "Annotate.",
+            "final_message": "Thanks.",
+            "save_mode": "per_example",
+        },
+    }
+    (campaign_dir / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    db = pd.DataFrame(
+        [
+            {
+                "dataset": "dataset-a",
+                "split": "test",
+                "setup_id": "setup-a",
+                "example_idx": 0,
+                "batch_idx": 0,
+                "annotator_group": 0,
+                "annotator_id": "ann-a",
+                "status": ExampleStatus.ASSIGNED,
+                "start": 10,
+                "end": None,
+            },
+            {
+                "dataset": "dataset-a",
+                "split": "test",
+                "setup_id": "setup-a",
+                "example_idx": 1,
+                "batch_idx": 0,
+                "annotator_group": 0,
+                "annotator_id": "ann-a",
+                "status": ExampleStatus.ASSIGNED,
+                "start": 10,
+                "end": None,
+            },
+        ]
+    )
+    db.to_csv(campaign_dir / "db.csv", index=False)
+    return Campaign(campaign_id)
+
+
 def active_record_with_overrides(campaign_id, annotation_text="old", end_timestamp=20, **overrides):
     record = {
         "dataset": "dataset-a",
@@ -778,6 +828,125 @@ def test_save_annotations_rejects_preview_annotator(monkeypatch, tmp_path):
     assert campaign.db.loc[0, "annotator_id"] == "ann-a"
 
 
+def test_per_example_save_replaces_active_record_and_marks_one_row(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_per_example_campaign(tmp_path)
+    write_active_record("per-example-test", "0-0-ann-a-20.jsonl", "old", 20)
+    monkeypatch.setattr(workflows, "load_campaign", lambda app, campaign_id: campaign)
+    monkeypatch.setattr(workflows, "get_output_for_setup", lambda **kwargs: {"output": "new output"})
+    monkeypatch.setattr(workflows, "refresh_indexes", lambda app: None)
+    app = SimpleNamespace(db={"lock": threading.Lock()})
+
+    flask_app = Flask(__name__)
+    with flask_app.app_context():
+        response = crowdsourcing.save_annotation_item(
+            app,
+            "per-example-test",
+            {
+                "dataset": "dataset-a",
+                "split": "test",
+                "setup_id": "setup-a",
+                "example_idx": 0,
+                "batch_idx": 0,
+                "annotator_group": 0,
+                "annotations": [{"type": 0, "start": 1, "text": "new"}],
+                "flags": [],
+                "options": [],
+                "sliders": [],
+                "textFields": [],
+            },
+            "ann-a",
+        )
+
+    payload = response.get_json()
+    assert payload["success"] is True
+    item = {
+        "dataset": "dataset-a",
+        "split": "test",
+        "setup_id": "setup-a",
+        "example_idx": 0,
+        "batch_idx": 0,
+        "annotator_group": 0,
+        "annotator_id": "ann-a",
+    }
+    matches = redo.find_active_records("per-example-test", item)
+    assert len(matches) == 1
+    assert matches[0]["record"]["annotations"][0]["text"] == "new"
+    assert redo.load_revision_log("per-example-test") == []
+    campaign.load_db()
+    assert campaign.db.loc[0, "status"] == ExampleStatus.FINISHED
+    assert campaign.db.loc[1, "status"] == ExampleStatus.ASSIGNED
+
+
+def test_per_example_submit_saves_all_and_replaces_saved_items(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_per_example_campaign(tmp_path)
+    write_active_record("per-example-test", "0-0-ann-a-20.jsonl", "old", 20)
+    monkeypatch.setattr(workflows, "load_campaign", lambda app, campaign_id: campaign)
+    monkeypatch.setattr(workflows, "get_output_for_setup", lambda **kwargs: {"output": f"output {kwargs['example_idx']}"})
+    monkeypatch.setattr(workflows, "refresh_indexes", lambda app: None)
+    app = SimpleNamespace(db={"lock": threading.Lock()})
+
+    annotation_set = [
+        {
+            "dataset": "dataset-a",
+            "split": "test",
+            "setup_id": "setup-a",
+            "example_idx": 0,
+            "batch_idx": 0,
+            "annotator_group": 0,
+            "annotations": [{"type": 0, "start": 1, "text": "replacement"}],
+            "flags": [],
+            "options": [],
+            "sliders": [],
+            "textFields": [],
+        },
+        {
+            "dataset": "dataset-a",
+            "split": "test",
+            "setup_id": "setup-a",
+            "example_idx": 1,
+            "batch_idx": 0,
+            "annotator_group": 0,
+            "annotations": [{"type": 0, "start": 2, "text": "second"}],
+            "flags": [],
+            "options": [],
+            "sliders": [],
+            "textFields": [],
+        },
+    ]
+
+    flask_app = Flask(__name__)
+    with flask_app.app_context():
+        response = crowdsourcing.save_per_example_annotations(app, "per-example-test", annotation_set, "ann-a")
+
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["saved_count"] == 2
+    for example_idx, text in [(0, "replacement"), (1, "second")]:
+        item = {
+            "dataset": "dataset-a",
+            "split": "test",
+            "setup_id": "setup-a",
+            "example_idx": example_idx,
+            "batch_idx": 0,
+            "annotator_group": 0,
+            "annotator_id": "ann-a",
+        }
+        matches = redo.find_active_records("per-example-test", item)
+        assert len(matches) == 1
+        assert matches[0]["record"]["annotations"][0]["text"] == text
+    campaign.load_db()
+    assert set(campaign.db["status"]) == {ExampleStatus.FINISHED}
+
+
+def test_parse_crowdsourcing_config_defaults_to_batch_save_mode():
+    parsed = crowdsourcing.parse_crowdsourcing_config({})
+    assert parsed["save_mode"] == "batch"
+    parsed = crowdsourcing.parse_crowdsourcing_config({"saveMode": "per_example"})
+    assert parsed["save_mode"] == "per_example"
+
+
 def test_archive_replace_archives_duplicates_and_active_index_skips_revisions(monkeypatch, tmp_path):
     configure_campaign_dir(monkeypatch, tmp_path)
     make_campaign(tmp_path)
@@ -1081,8 +1250,15 @@ def test_campaign_overview_handles_mixed_finished_and_unfinished_setup_rows(monk
     campaign.update_db(campaign.db)
 
     overview = campaign.get_overview()
+    stats = campaign.get_stats()
 
     assert overview[0]["end"] == 30.0
+    assert overview[0]["status"] == ExampleStatus.ASSIGNED
+    assert overview[0]["finished_cnt"] == 1
+    assert overview[0]["example_cnt"] == 2
+    assert overview[0]["example_list"][1]["status"] == ExampleStatus.FINISHED
+    assert stats["assigned"] == 1
+    assert stats["finished"] == 0
 
 
 def test_get_annotator_batch_serves_redo_prefill_then_falls_back(monkeypatch, tmp_path):

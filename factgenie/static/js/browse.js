@@ -2,6 +2,7 @@ var current_example_idx = 0;
 var selected_campaigns = [];
 var collapsed_boxes = [];
 var showAnnotatorNames = false;
+var annotatorNamesUserOverride = false;
 var preferredAnnotatorIds = [];
 var browseFilterSchema = {};
 var filteredResults = [];
@@ -355,9 +356,13 @@ function buildAnnotationInfo(generated_outputs) {
                     annotator_id: hasAnnotatorId ? annotator_id : null,
                     annotator_ids: new Set(),
                     annotator_aliases: new Set(),
+                    expose_annotator_id: false,
                     has_non_skipped_annotation: false,
                     has_skipped_annotation: false,
                 });
+            }
+            if (annotation.expose_annotator_id === true) {
+                annIds.get(ann_id).expose_annotator_id = true;
             }
             const isSkipped = isSkipSelected(annotation);
             if (isSkipped) {
@@ -593,6 +598,15 @@ function currentExampleCanShowAnnotatorNames() {
     return false;
 }
 
+function currentExampleDefaultsToAnnotatorNames() {
+    for (const annInfo of currentAnnInfo.values()) {
+        if (annInfo?.expose_annotator_id && getAnnotatorNames(annInfo).length > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function updateAnnotatorNamesToggleAvailability() {
     const button = $("#toggle-annotator-names-btn");
     if (button.length === 0) {
@@ -601,6 +615,9 @@ function updateAnnotatorNamesToggleAvailability() {
     }
 
     const canShowNames = currentExampleCanShowAnnotatorNames();
+    if (!annotatorNamesUserOverride) {
+        showAnnotatorNames = currentExampleDefaultsToAnnotatorNames();
+    }
     button.closest(".page-item").toggle(canShowNames);
     if (!canShowNames) {
         showAnnotatorNames = false;
@@ -683,13 +700,12 @@ function createOutputBoxes(generated_outputs) {
             let annotations = null;
             if (info.annotator_id) {
                 annotations = output.annotations.find(a => a.campaign_id == info.campaign_id && a.annotator_id == info.annotator_id) || null;
-            }
-            if (!annotations) {
+            } else {
                 const aliases = getAnnotatorAliases(info);
                 annotations = output.annotations.find(a => a.campaign_id == info.campaign_id && aliases.includes(String(a.annotator_alias || "").trim())) || null;
-            }
-            if (!annotations) {
-                annotations = output.annotations.find(a => a.campaign_id == info.campaign_id && a.annotator_group == info.annotator_group) || null;
+                if (!annotations) {
+                    annotations = output.annotations.find(a => a.campaign_id == info.campaign_id && a.annotator_group == info.annotator_group) || null;
+                }
             }
             if (!annotations) {
                 continue;
@@ -2202,6 +2218,7 @@ function toggleRaw() {
 }
 
 function toggleAnnotatorNames() {
+    annotatorNamesUserOverride = true;
     showAnnotatorNames = !showAnnotatorNames;
     updateAnnotatorNamesToggleAvailability();
 

@@ -448,12 +448,14 @@ def annotate(campaign_id):
         }
     else:
         show_completed_redo = request.args.get("show_completed_redo") == "1" or request.args.get("redo_review") == "1"
+        show_saved_examples = request.args.get("show_saved_items") == "1" or request.args.get("saved_review") == "1"
         annotation_set, redo_context = crowdsourcing.get_annotator_batch(
             app,
             campaign,
             service_ids,
             batch_idx=batch_idx,
             include_completed_redo=show_completed_redo,
+            include_saved_examples=show_saved_examples,
             return_context=True,
         )
 
@@ -600,6 +602,10 @@ def _save_annotator_registry(campaign_id, records):
         json.dump({"annotators": normalized}, f, indent=2, ensure_ascii=False)
 
 
+def _clear_annotator_registry(campaign_id):
+    _save_annotator_registry(campaign_id, [])
+
+
 def _find_existing_annotator(records, candidate):
     candidate_norm = candidate.lower()
     for existing in records:
@@ -618,7 +624,22 @@ def _attach_annotation_aliases(example_data):
     if not isinstance(generated_outputs, list):
         return
 
-    alias_cache = {}
+    campaign_annotators = {}
+    for output in generated_outputs:
+        annotations = output.get("annotations", [])
+        if not isinstance(annotations, list):
+            continue
+        for annotation in annotations:
+            campaign_id = annotation.get("campaign_id")
+            annotator_id = _normalize_annotator_id(annotation.get("annotator_id"))
+            if not campaign_id or not annotator_id:
+                continue
+            campaign_annotators.setdefault(campaign_id, set()).add(annotator_id)
+
+    alias_cache = {
+        campaign_id: querying.alias_map_for_annotators(campaign_id, annotator_ids)
+        for campaign_id, annotator_ids in campaign_annotators.items()
+    }
     for output in generated_outputs:
         annotations = output.get("annotations", [])
         if not isinstance(annotations, list):
@@ -629,11 +650,9 @@ def _attach_annotation_aliases(example_data):
             if not campaign_id or not annotator_id:
                 continue
 
-            if campaign_id not in alias_cache:
-                alias_cache[campaign_id] = _annotator_alias_map(campaign_id)
-
             alias = alias_cache[campaign_id].get(annotator_id.lower()) or querying._fallback_alias(campaign_id, annotator_id)
             annotation["annotator_alias"] = alias
+            annotation["expose_annotator_id"] = not _campaign_pseudonymizes_annotators(campaign_id)
 
 
 def _sanitize_example_annotator_ids(example_data, is_authenticated):
@@ -864,6 +883,7 @@ def clear_campaign():
 
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
     campaign.clear_all_outputs()
+    _clear_annotator_registry(campaign_id)
 
     return utils.success()
 
@@ -1077,6 +1097,17 @@ def redo_keep_item():
         app,
         data.get("campaign_id"),
         data.get("redo_id"),
+        data.get("annotator_id"),
+    )
+
+
+@app.route("/save_annotation_item", methods=["POST"])
+def save_annotation_item():
+    data = request.get_json() or {}
+    return crowdsourcing.save_annotation_item(
+        app,
+        data.get("campaign_id"),
+        data.get("annotation"),
         data.get("annotator_id"),
     )
 
@@ -1622,6 +1653,10 @@ def submit_annotations():
         return crowdsourcing.preview_submission_response(app, campaign_id)
     if any(annotation.get("redo_id") for annotation in annotation_set):
         return utils.error("Redo annotations must be saved with Save current item.")
+
+    campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    if crowdsourcing.is_per_example_save_campaign(campaign):
+        return crowdsourcing.save_per_example_annotations(app, campaign_id, annotation_set, annotator_id)
 
     return crowdsourcing.save_annotations(app, campaign_id, annotation_set, annotator_id)
 
