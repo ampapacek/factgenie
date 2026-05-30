@@ -250,7 +250,7 @@ function validateOpenRouterModel(config, options) {
 
 function clearCampaign(campaignId) {
     // ask for confirmation
-    if (!confirm("Are you sure you want to clear all campaign outputs?")) {
+    if (!confirm("Are you sure you want to clear all campaign annotations and annotators?")) {
         return;
     }
     $.post({

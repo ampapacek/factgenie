@@ -602,6 +602,10 @@ def _save_annotator_registry(campaign_id, records):
         json.dump({"annotators": normalized}, f, indent=2, ensure_ascii=False)
 
 
+def _clear_annotator_registry(campaign_id):
+    _save_annotator_registry(campaign_id, [])
+
+
 def _find_existing_annotator(records, candidate):
     candidate_norm = candidate.lower()
     for existing in records:
@@ -879,6 +883,7 @@ def clear_campaign():
 
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
     campaign.clear_all_outputs()
+    _clear_annotator_registry(campaign_id)
 
     return utils.success()
 
