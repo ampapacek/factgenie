@@ -491,6 +491,8 @@
 
   var redoFilterOptions = {{ redo_admin.filter_options | tojson }};
   const REDO_PREVIEW_MATCH_PREFIX = "factgenie_redo_preview_match:";
+  const REDO_SPAN_FIELDS = new Set(["span_category", "span_reason", "span_text"]);
+  const REDO_NEW_SPAN_GROUP_VALUE = "__new__";
 
   function redoRowKey(row) {
     return row.attr("data-redo-key") || JSON.stringify([
@@ -590,6 +592,10 @@
     if (response.filter_options) {
       redoFilterOptions.categories = response.filter_options.categories || redoFilterOptions.categories || [];
       redoFilterOptions.sliders = response.filter_options.sliders || redoFilterOptions.sliders || [];
+      redoFilterOptions.setups = response.filter_options.setups || redoFilterOptions.setups || [];
+      redoFilterOptions.splits = response.filter_options.splits || redoFilterOptions.splits || [];
+      redoFilterOptions.annotators = response.filter_options.annotators || redoFilterOptions.annotators || [];
+      redoFilterOptions.annotation_states = response.filter_options.annotation_states || redoFilterOptions.annotation_states || [];
       refreshRedoConditionControls();
     }
     const visibleKeys = new Set();
@@ -677,6 +683,7 @@
       op: row.find(".redo-condition-op").val(),
       value: row.find(".redo-condition-value").val(),
       sliderLabel: row.find(".redo-condition-slider-label").val(),
+      spanGroup: row.find(".redo-condition-span-group").val() || "",
     };
   }
 
@@ -698,20 +705,28 @@
     return $("<option>").attr("value", value).text(value);
   }
 
+  function redoFieldOptions() {
+    return [
+      ["setup", "Answer source (setup)"],
+      ["split", "Split"],
+      ["annotation_state", "Annotation state"],
+      ["annotator", "Annotator"],
+      ["span_category", "Span category"],
+      ["span_reason", "Span reason"],
+      ["span_text", "Span text"],
+      ["question", "Question"],
+      ["output", "Answer"],
+      ["any_text", "Any text"],
+      ["slider", "Slider"],
+    ];
+  }
+
   function addRedoFilterCondition(condition) {
     const row = $(`
       <div class="row g-2 align-items-end redo-filter-condition">
         <div class="col-md-3">
           <label class="form-label small mb-1">Field</label>
-          <select class="form-select form-select-sm redo-condition-field">
-            <option value="span_category">Span category</option>
-            <option value="span_reason">Span reason</option>
-            <option value="span_text">Span text</option>
-            <option value="question">Question</option>
-            <option value="output">Output</option>
-            <option value="any_text">Any text</option>
-            <option value="slider">Slider</option>
-          </select>
+          <select class="form-select form-select-sm redo-condition-field"></select>
         </div>
         <div class="col-md-3">
           <label class="form-label small mb-1">Operator</label>
@@ -725,9 +740,14 @@
         </div>
       </div>
     `);
+    const fieldSelect = row.find(".redo-condition-field");
+    redoFieldOptions().forEach(function ([value, label]) {
+      fieldSelect.append(escapeRedoOption(value).text(label));
+    });
     $("#redo-filter-conditions").append(row);
-    row.find(".redo-condition-field").val(condition?.field || "span_category");
+    fieldSelect.val(condition?.field || "span_category");
     renderRedoConditionControls(row, condition || {});
+    refreshRedoSpanGroupOptions();
   }
 
   function renderRedoConditionControls(row, condition) {
@@ -744,15 +764,25 @@
 
     const wrap = row.find(".redo-condition-value-wrap");
     wrap.empty();
-    if (field === "span_category") {
-      const select = $('<select class="form-select form-select-sm redo-condition-value"></select>');
-      select.append(escapeRedoOption("").text("Select category..."));
-      (redoFilterOptions.categories || []).forEach(function (category) {
-        select.append(escapeRedoOption(category));
+    const isSpanField = REDO_SPAN_FIELDS.has(field);
+    const listFields = {
+      setup: ["Answer source (setup)", redoFilterOptions.setups || []],
+      split: ["Split", redoFilterOptions.splits || []],
+      annotation_state: ["State", redoFilterOptions.annotation_states || []],
+      annotator: ["Annotator", redoFilterOptions.annotators || []],
+      span_category: ["Category", redoFilterOptions.categories || []],
+    };
+    if (field in listFields) {
+      const [label, values] = listFields[field];
+      const listId = `redo-${field}-values-${Math.random().toString(36).slice(2)}`;
+      const input = $(`<input class="form-control form-control-sm redo-condition-value" type="search" list="${listId}">`);
+      const dataList = $(`<datalist id="${listId}"></datalist>`);
+      values.forEach(function (value) {
+        dataList.append(escapeRedoOption(value));
       });
-      wrap.append('<label class="form-label small mb-1">Value</label>');
-      wrap.append(select);
-      select.val(condition.value || "");
+      appendRedoValueControl(wrap, input, isSpanField, condition, label);
+      wrap.append(dataList);
+      input.val(condition.value || "");
     } else if (field === "slider") {
       const controls = $(`
         <div class="row g-2">
@@ -775,11 +805,73 @@
       labelSelect.val(condition.sliderLabel || "");
       controls.find(".redo-condition-value").val(condition.value || "");
     } else {
-      wrap.append('<label class="form-label small mb-1">Value</label>');
-      wrap.append('<input class="form-control form-control-sm redo-condition-value" type="search">');
-      wrap.find(".redo-condition-value").val(condition.value || "");
+      const input = $('<input class="form-control form-control-sm redo-condition-value" type="search">');
+      appendRedoValueControl(wrap, input, isSpanField, condition);
+      input.val(condition.value || "");
     }
     row.find(".redo-condition-value").prop("disabled", ["missing", "not_missing"].includes(opSelect.val()));
+    refreshRedoSpanGroupOptions();
+  }
+
+  function appendRedoValueControl(wrap, control, includeSpanGroup, condition, label) {
+    if (!includeSpanGroup) {
+      wrap.append(`<label class="form-label small mb-1">${label || "Value"}</label>`);
+      wrap.append(control);
+      return;
+    }
+    const controls = $(`
+      <div class="row g-2">
+        <div class="col-md-8 redo-condition-main-value">
+          <label class="form-label small mb-1">${label || "Value"}</label>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small mb-1">Span group</label>
+          <select class="form-select form-select-sm redo-condition-span-group"></select>
+        </div>
+      </div>
+    `);
+    controls.find(".redo-condition-main-value").append(control);
+    controls.find(".redo-condition-span-group").attr("data-current-group", condition.spanGroup || "1");
+    wrap.append(controls);
+  }
+
+  function redoCurrentSpanGroups() {
+    const groups = new Set(["1"]);
+    $(".redo-condition-span-group").each(function () {
+      const selectedValue = String($(this).val() || "").trim();
+      const value = selectedValue === REDO_NEW_SPAN_GROUP_VALUE
+        ? String($(this).attr("data-current-group") || "").trim()
+        : String(selectedValue || $(this).attr("data-current-group") || "").trim();
+      if (/^\d+$/.test(value)) {
+        groups.add(String(Math.max(1, Number(value))));
+      }
+    });
+    return Array.from(groups).map(Number).sort((a, b) => a - b);
+  }
+
+  function refreshRedoSpanGroupOptions() {
+    const groups = redoCurrentSpanGroups();
+    $(".redo-condition-span-group").each(function () {
+      const select = $(this);
+      const current = String(select.val() || select.attr("data-current-group") || "1");
+      select.empty();
+      groups.forEach(function (group) {
+        select.append($("<option>").attr("value", String(group)).text(`Group ${group}`));
+      });
+      select.append($("<option>").attr("value", REDO_NEW_SPAN_GROUP_VALUE).text("New group"));
+      select.val(groups.map(String).includes(current) ? current : "1");
+      select.attr("data-current-group", select.val());
+    });
+  }
+
+  function assignNewRedoSpanGroup(select) {
+    const groups = redoCurrentSpanGroups();
+    const nextGroup = String((groups[groups.length - 1] || 1) + 1);
+    select.attr("data-current-group", nextGroup);
+    select.val(nextGroup);
+    refreshRedoSpanGroupOptions();
+    select.val(nextGroup);
+    select.attr("data-current-group", nextGroup);
   }
 
   function resetRedoFilters() {
@@ -836,6 +928,15 @@
     const row = $(this).closest(".redo-filter-condition");
     row.find(".redo-condition-value").prop("disabled", ["missing", "not_missing"].includes($(this).val()));
   });
+  $("#redo-filter-conditions").on("change", ".redo-condition-span-group", function () {
+    const select = $(this);
+    if (select.val() === REDO_NEW_SPAN_GROUP_VALUE) {
+      assignNewRedoSpanGroup(select);
+    } else {
+      select.attr("data-current-group", select.val() || "1");
+      refreshRedoSpanGroupOptions();
+    }
+  });
   $("#redo-filter-conditions").on("keydown", ".redo-condition-value", function (event) {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -844,6 +945,7 @@
   });
   $("#redo-filter-conditions").on("click", ".redo-remove-condition", function () {
     $(this).closest(".redo-filter-condition").remove();
+    refreshRedoSpanGroupOptions();
   });
   $("#redo-items-table").on("click", ".redo-preview-link", function () {
     const link = this;

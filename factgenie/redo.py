@@ -16,6 +16,7 @@ QUEUE_VERSION = 1
 STATUS_PENDING = "pending"
 STATUS_COMPLETED = "completed"
 STATUS_CANCELLED = "cancelled"
+SHARED_ANNOTATION_STATES = ["done", "skipped", "mixed", "empty", "assigned", "todo"]
 
 KEY_FIELDS = [
     "campaign_id",
@@ -695,6 +696,61 @@ def redo_query_row(campaign, row, record, categories, alias_map=None):
     }
 
 
+def _admin_filter_option_sets(campaign, rows=None, alias_map=None):
+    alias_map = alias_map or {}
+    db = campaign.db.copy() if hasattr(campaign, "db") else pd.DataFrame()
+    setup_ids = set()
+    splits = set()
+    annotators = set()
+    states = set()
+
+    if not db.empty:
+        for _, row in db.iterrows():
+            setup_id = str(row.get("setup_id", "") or "").strip()
+            if setup_id:
+                setup_ids.add(setup_id)
+            split = str(row.get("split", "") or "").strip()
+            if split:
+                splits.add(split)
+            annotator_id = normalize_annotator_id(row.get("annotator_id"))
+            if annotator_id:
+                annotators.add(annotator_id)
+                alias = alias_map.get(annotator_id.lower(), "")
+                if alias:
+                    annotators.add(alias)
+
+    for row in rows or []:
+        states.update(str(state) for state in row.get("annotation_states", []) if str(state or "").strip())
+        annotators.update(str(value) for value in row.get("annotator_ids", []) if str(value or "").strip())
+        annotators.update(str(value) for value in row.get("annotator_alias_values", []) if str(value or "").strip())
+
+    return {
+        "setups": sorted(setup_ids, key=lambda value: value.casefold()),
+        "splits": sorted(splits, key=lambda value: value.casefold()),
+        "annotators": sorted(annotators, key=lambda value: value.casefold()),
+        "annotation_states": [
+            state for state in SHARED_ANNOTATION_STATES if state in states
+        ]
+        + sorted(
+            [state for state in states if state not in SHARED_ANNOTATION_STATES],
+            key=lambda value: value.casefold(),
+        ),
+    }
+
+
+def _admin_filter_options(campaign, categories, slider_labels, rows=None, alias_map=None):
+    option_sets = _admin_filter_option_sets(campaign, rows=rows, alias_map=alias_map)
+    states = option_sets["annotation_states"] or SHARED_ANNOTATION_STATES
+    return {
+        "categories": [categories[index] for index in sorted(categories)],
+        "sliders": sorted(slider_labels, key=lambda value: value.casefold()),
+        "setups": option_sets["setups"],
+        "splits": option_sets["splits"],
+        "annotators": option_sets["annotators"],
+        "annotation_states": states,
+    }
+
+
 def build_admin_overview(campaign, alias_map=None):
     alias_map = alias_map or {}
     queue = load_queue(campaign.campaign_id)
@@ -710,7 +766,7 @@ def build_admin_overview(campaign, alias_map=None):
             "annotators": [],
             "examples": [],
             "queue": queue,
-            "filter_options": {"categories": [], "sliders": sorted(slider_labels, key=lambda value: value.casefold())},
+            "filter_options": _admin_filter_options(campaign, categories, slider_labels, alias_map=alias_map),
         }
 
     for _, row in db.iterrows():
@@ -755,19 +811,17 @@ def build_admin_overview(campaign, alias_map=None):
         "annotators": annotators,
         "examples": examples,
         "queue": queue,
-        "filter_options": {
-            "categories": [categories[index] for index in sorted(categories)],
-            "sliders": sorted(slider_labels, key=lambda value: value.casefold()),
-        },
+        "filter_options": _admin_filter_options(campaign, categories, slider_labels, alias_map=alias_map),
     }
 
 
-def build_admin_filter_payload(campaign):
+def build_admin_filter_payload(campaign, alias_map=None):
+    alias_map = alias_map or {}
     categories = category_lookup(campaign)
     db = campaign.db.copy() if hasattr(campaign, "db") else pd.DataFrame()
     rows = []
     if db.empty:
-        return {"rows": rows}
+        return {"rows": rows, "filter_options": _admin_filter_options(campaign, categories, set(), alias_map=alias_map)}
 
     for _, row in db.iterrows():
         annotator_id = normalize_annotator_id(row.get("annotator_id"))
@@ -777,10 +831,14 @@ def build_admin_filter_payload(campaign):
         active_record = latest_active_record(campaign.campaign_id, item)
         filter_data = span_filter_data(active_record, categories)
         filter_data["skipped"] = is_skip_selected(active_record.get("flags", []) if active_record else [])
+        query_row = redo_query_row(campaign, row, active_record, categories, alias_map=alias_map)
         rows.append(
             {
                 "row_key": admin_row_key(row),
                 "filter_data": filter_data,
+                "annotation_states": query_row.get("annotation_states", []),
+                "annotator_ids": query_row.get("annotator_ids", []),
+                "annotator_alias_values": query_row.get("annotator_alias_values", []),
             }
         )
 
@@ -791,10 +849,7 @@ def build_admin_filter_payload(campaign):
                 slider_labels.add(str(slider["label"]))
     return {
         "rows": rows,
-        "filter_options": {
-            "categories": [categories[index] for index in sorted(categories)],
-            "sliders": sorted(slider_labels, key=lambda value: value.casefold()),
-        },
+        "filter_options": _admin_filter_options(campaign, categories, slider_labels, rows=rows, alias_map=alias_map),
     }
 
 
@@ -812,10 +867,7 @@ def build_admin_filter_result(
         return {
             "rows": rows,
             "visible_count": 0,
-            "filter_options": {
-                "categories": [categories[index] for index in sorted(categories)],
-                "sliders": sorted(slider_labels, key=lambda value: value.casefold()),
-            },
+            "filter_options": _admin_filter_options(campaign, categories, slider_labels, alias_map=alias_map),
         }
 
     queue = load_queue(campaign.campaign_id)
@@ -825,6 +877,7 @@ def build_admin_filter_result(
     if mode not in ["all", "any"]:
         mode = "all"
     selected_annotator = normalize_annotator_id(annotator_id)
+    rows_for_options = []
 
     for _, row in db.iterrows():
         row_annotator_id = normalize_annotator_id(row.get("annotator_id"))
@@ -847,6 +900,7 @@ def build_admin_filter_result(
                 slider_labels.add(str(slider["label"]))
 
         query_row = redo_query_row(campaign, row, active_record, categories, alias_map=alias_map)
+        rows_for_options.append(query_row)
         if normalized_conditions:
             matched, metadata = querying.row_matches_conditions(
                 query_row,
@@ -873,8 +927,11 @@ def build_admin_filter_result(
     return {
         "rows": rows,
         "visible_count": len(rows),
-        "filter_options": {
-            "categories": [categories[index] for index in sorted(categories)],
-            "sliders": sorted(slider_labels, key=lambda value: value.casefold()),
-        },
+        "filter_options": _admin_filter_options(
+            campaign,
+            categories,
+            slider_labels,
+            rows=rows_for_options,
+            alias_map=alias_map,
+        ),
     }

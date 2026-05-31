@@ -79,6 +79,7 @@ OCCURRENCE_LABELS = {
     "slider": ("slider", "sliders"),
     "annotation": ("annotation", "annotations"),
     "setup": ("answer source", "answer sources"),
+    "split": ("split", "splits"),
     "annotation_state": ("annotation", "annotations"),
     "annotator": ("annotation", "annotations"),
     "any_text": ("text block", "text blocks"),
@@ -88,6 +89,7 @@ SPAN_FIELDS = {"span_category", "span_reason", "span_text"}
 ANNOTATION_SCOPED_FIELDS = {"annotator", "annotation_state", "slider"} | SPAN_FIELDS
 TEXT_FIELDS = {
     "setup",
+    "split",
     "annotation_state",
     "annotator",
     "span_category",
@@ -896,6 +898,9 @@ def condition_matches_row(row, condition, authenticated, regex_cache):
         values = row.get("setup_ids") or []
         matched = text_matches(values, condition["op"], condition.get("value"), regex_cache)
         return matched, metadata_from_details([condition_detail(condition, "setup", {}, authenticated, matched_text_for_values(values, condition, regex_cache))]) if matched else {}
+    if field == "split":
+        matched = text_matches(row.get("split"), condition["op"], condition.get("value"), regex_cache)
+        return matched, metadata_from_details([condition_detail(condition, "split", {}, authenticated, matched_text_for_value(row.get("split"), condition, regex_cache))]) if matched else {}
     if field == "annotation_state":
         values = row.get("annotation_states") or []
         matched = text_matches(values, condition["op"], condition.get("value"), regex_cache)
