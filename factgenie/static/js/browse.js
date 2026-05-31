@@ -974,6 +974,11 @@ function detailCauseLabel(detail) {
     return detailLabel(detail);
 }
 
+function preferredBrowseOccurrenceUnit(details) {
+    const units = new Set((details || []).map((detail) => detailOccurrenceUnit(detail)));
+    return ["span", "slider", "output", "source_data", "annotation", "setup", "question", "any_text", "occurrence"].find((unit) => units.has(unit)) || "occurrence";
+}
+
 function detailEvidence(detail) {
     const parts = [];
     const who = detailAnnotatorLabel(detail).replace(/^ · /, "");
@@ -1014,10 +1019,15 @@ function detailEvidence(detail) {
 }
 
 function browseMatchedOccurrences(details) {
+    const preferredUnit = preferredBrowseOccurrenceUnit(details);
     const occurrences = [];
     const byKey = new Map();
     (details || []).forEach(function (detail) {
         if (!detail || typeof detail !== "object") {
+            return;
+        }
+        const unit = detailOccurrenceUnit(detail);
+        if (unit !== preferredUnit) {
             return;
         }
         const key = detailOccurrenceIdentity(detail);
@@ -1025,7 +1035,7 @@ function browseMatchedOccurrences(details) {
         if (!occurrence) {
             occurrence = {
                 key,
-                unit: detailOccurrenceUnit(detail),
+                unit,
                 typeLabel: detailOccurrenceTypeLabel(detail),
                 label: detailLabel(detail),
                 evidence: detailEvidence(detail),
@@ -1045,6 +1055,22 @@ function browseMatchedOccurrences(details) {
         }
     });
     return occurrences;
+}
+
+function occurrencePanelTitle(occurrences) {
+    const units = Array.from(new Set(occurrences.map((occurrence) => occurrence.unit)));
+    const labels = {
+        question: "Matched questions in this question",
+        source_data: "Matched source data in this question",
+        output: "Matched answers in this question",
+        setup: "Matched answer sources in this question",
+        annotation: "Matched annotations in this question",
+        span: "Matched spans in this question",
+        slider: "Matched sliders in this question",
+        occurrence: "Matched occurrences in this question",
+    };
+    const unit = units.length === 1 ? units[0] : "occurrence";
+    return labels[unit] || labels.occurrence;
 }
 
 function occurrenceCountLabel(occurrences) {
@@ -1074,7 +1100,7 @@ function renderBrowseMatchDetails() {
     }
     const occurrences = browseMatchedOccurrences(activeBrowseMatchDetails);
     const header = $('<div>', { class: "d-flex align-items-center justify-content-between gap-2 mb-1" });
-    header.append($('<div>', { class: "small text-muted fw-semibold" }).text("Matched occurrences in this question"));
+    header.append($('<div>', { class: "small text-muted fw-semibold" }).text(occurrencePanelTitle(occurrences)));
     const headerControls = $('<div>', { class: "d-flex align-items-center gap-2" });
     headerControls.append($('<div>', { class: "small text-muted" }).text(occurrenceCountLabel(occurrences)));
     const expandButton = $('<button>', {
