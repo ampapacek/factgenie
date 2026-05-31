@@ -41,6 +41,7 @@ const SPLIT_STORAGE_KEY = "factgenie:splitSizes";
 const REDO_PREVIEW_MATCH_PREFIX = "factgenie_redo_preview_match:";
 const BROWSE_SPAN_FIELDS = new Set(["span_category", "span_reason", "span_text"]);
 const NEW_SPAN_GROUP_VALUE = "__new__";
+const CUSTOM_BROWSE_VALUE = "__custom__";
 
 function loadSplitSizes() {
     try {
@@ -1631,14 +1632,105 @@ function browseConditionValues(row) {
     return {
         field: row.find(".browse-condition-field").val(),
         op: row.find(".browse-condition-op").val(),
-        value: row.find(".browse-condition-value").val(),
-        sliderLabel: row.find(".browse-condition-slider-label").val(),
+        value: getBrowseConditionValue(row),
+        sliderLabel: getBrowseSliderLabelValue(row),
         spanGroup: row.find(".browse-condition-span-group").val() || "",
     };
 }
 
 function escapeBrowseOption(value) {
     return $("<option>").attr("value", value).text(value);
+}
+
+function browseSelectUsesCustomValue(select) {
+    return String(select.val() || "") === CUSTOM_BROWSE_VALUE;
+}
+
+function updateBrowseCustomValueVisibility(select) {
+    const customInput = select
+        .closest(".browse-select-with-custom")
+        .find(".browse-condition-custom-input");
+    if (!customInput.length) {
+        return;
+    }
+    const showCustomInput = browseSelectUsesCustomValue(select);
+    customInput.toggle(showCustomInput);
+    customInput.prop("disabled", !showCustomInput || select.prop("disabled"));
+}
+
+function buildBrowseSelectWithCustomInput({
+    selectClass,
+    customInputClass,
+    values,
+    placeholder,
+    customPlaceholder,
+    selectedValue,
+    inputType = "search",
+}) {
+    const wrapper = $('<div class="browse-select-with-custom d-flex flex-column gap-2"></div>');
+    const select = $(`<select class="form-select form-select-sm ${selectClass}"></select>`);
+    const normalizedValues = (values || []).map((value) => String(value || ""));
+    select.append(escapeBrowseOption("").text(placeholder));
+    normalizedValues.forEach(function (value) {
+        select.append(escapeBrowseOption(value));
+    });
+    select.append(escapeBrowseOption(CUSTOM_BROWSE_VALUE).text("Other..."));
+    wrapper.append(select);
+
+    const customInput = $(`<input class="form-control form-control-sm browse-condition-custom-input ${customInputClass}" type="${inputType}">`);
+    customInput.attr("placeholder", customPlaceholder);
+    wrapper.append(customInput);
+
+    const currentValue = String(selectedValue || "");
+    if (currentValue && normalizedValues.includes(currentValue)) {
+        select.val(currentValue);
+        customInput.val("");
+    } else if (currentValue) {
+        select.val(CUSTOM_BROWSE_VALUE);
+        customInput.val(currentValue);
+    } else {
+        select.val("");
+        customInput.val("");
+    }
+    updateBrowseCustomValueVisibility(select);
+    return wrapper;
+}
+
+function getBrowseConditionValue(row) {
+    const customInput = row.find(".browse-condition-value-custom");
+    if (customInput.length) {
+        const select = row.find(".browse-condition-value-select");
+        if (browseSelectUsesCustomValue(select)) {
+            return customInput.val();
+        }
+        return select.val();
+    }
+    return row.find(".browse-condition-value").val();
+}
+
+function getBrowseSliderLabelValue(row) {
+    const customInput = row.find(".browse-condition-slider-label-custom");
+    if (customInput.length) {
+        const select = row.find(".browse-condition-slider-label-select");
+        if (browseSelectUsesCustomValue(select)) {
+            return customInput.val();
+        }
+        return select.val();
+    }
+    return row.find(".browse-condition-slider-label").val();
+}
+
+function setBrowseConditionValueDisabled(row, disabled) {
+    const directValueInput = row.find(".browse-condition-value");
+    directValueInput.prop("disabled", disabled);
+    const valueSelect = row.find(".browse-condition-value-select");
+    const customValueInput = row.find(".browse-condition-value-custom");
+    if (valueSelect.length) {
+        valueSelect.prop("disabled", disabled);
+    }
+    if (customValueInput.length) {
+        customValueInput.prop("disabled", disabled || !browseSelectUsesCustomValue(valueSelect));
+    }
 }
 
 function addBrowseFilterCondition(condition) {
@@ -1693,19 +1785,21 @@ function renderBrowseConditionControls(row, condition) {
     };
     if (field in selectFields) {
         const [placeholder, values] = selectFields[field];
-        const select = $('<select class="form-select form-select-sm browse-condition-value"></select>');
-        select.append(escapeBrowseOption("").text(placeholder));
-        values.forEach(function (value) {
-            select.append(escapeBrowseOption(value));
+        const control = buildBrowseSelectWithCustomInput({
+            selectClass: "browse-condition-value-select",
+            customInputClass: "browse-condition-value-custom",
+            values,
+            placeholder,
+            customPlaceholder: "Type custom value...",
+            selectedValue: condition.value || "",
         });
-        appendBrowseValueControl(wrap, select, isSpanField, condition);
-        select.val(condition.value || "");
+        appendBrowseValueControl(wrap, control, isSpanField, condition);
     } else if (field === "slider") {
         const controls = $(`
           <div class="row g-2">
             <div class="col-md-6">
               <label class="form-label small mb-1">Slider</label>
-              <select class="form-select form-select-sm browse-condition-slider-label"></select>
+              <div class="browse-condition-slider-label-wrap"></div>
             </div>
             <div class="col-md-6">
               <label class="form-label small mb-1">Value</label>
@@ -1713,20 +1807,23 @@ function renderBrowseConditionControls(row, condition) {
             </div>
           </div>
         `);
-        const labelSelect = controls.find(".browse-condition-slider-label");
-        labelSelect.append(escapeBrowseOption("").text("Select slider..."));
-        (browseFilterSchema.slider_labels || []).forEach(function (label) {
-            labelSelect.append(escapeBrowseOption(label));
+        const labelControl = buildBrowseSelectWithCustomInput({
+            selectClass: "browse-condition-slider-label-select",
+            customInputClass: "browse-condition-slider-label-custom",
+            values: browseFilterSchema.slider_labels || [],
+            placeholder: "Select slider...",
+            customPlaceholder: "Type custom slider...",
+            selectedValue: condition.sliderLabel || "",
         });
+        controls.find(".browse-condition-slider-label-wrap").append(labelControl);
         wrap.append(controls);
-        labelSelect.val(condition.sliderLabel || "");
         controls.find(".browse-condition-value").val(condition.value || "");
     } else {
         const input = $('<input class="form-control form-control-sm browse-condition-value" type="search">');
         appendBrowseValueControl(wrap, input, isSpanField, condition);
         input.val(condition.value || "");
     }
-    row.find(".browse-condition-value").prop("disabled", ["missing", "not_missing"].includes(opSelect.val()));
+    setBrowseConditionValueDisabled(row, ["missing", "not_missing"].includes(opSelect.val()));
     refreshBrowseSpanGroupOptions();
 }
 
@@ -2313,10 +2410,14 @@ $("#browse-filter-conditions").on("change", ".browse-condition-field", function 
 });
 $("#browse-filter-conditions").on("change", ".browse-condition-op", function () {
     const row = $(this).closest(".browse-filter-condition");
-    row.find(".browse-condition-value").prop("disabled", ["missing", "not_missing"].includes($(this).val()));
+    setBrowseConditionValueDisabled(row, ["missing", "not_missing"].includes($(this).val()));
     markBrowseFilterStale();
 });
-$("#browse-filter-conditions").on("input change", ".browse-condition-value, .browse-condition-slider-label", markBrowseFilterStale);
+$("#browse-filter-conditions").on("change", ".browse-condition-value-select, .browse-condition-slider-label-select", function () {
+    updateBrowseCustomValueVisibility($(this));
+    markBrowseFilterStale();
+});
+$("#browse-filter-conditions").on("input change", ".browse-condition-value, .browse-condition-value-custom, .browse-condition-slider-label, .browse-condition-slider-label-custom", markBrowseFilterStale);
 $("#browse-filter-conditions").on("change", ".browse-condition-span-group", function () {
     const select = $(this);
     if (select.val() === NEW_SPAN_GROUP_VALUE) {
@@ -2327,7 +2428,7 @@ $("#browse-filter-conditions").on("change", ".browse-condition-span-group", func
     }
     markBrowseFilterStale();
 });
-$("#browse-filter-conditions").on("keydown", "input.browse-condition-value, textarea.browse-condition-value", function (event) {
+$("#browse-filter-conditions").on("keydown", "input.browse-condition-value, input.browse-condition-value-custom, textarea.browse-condition-value", function (event) {
     if (event.key === "Enter") {
         event.preventDefault();
         applyBrowseFilters();
