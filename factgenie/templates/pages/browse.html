@@ -119,7 +119,10 @@
           </select>
         </div>
         <div class="d-flex align-items-center gap-2 flex-wrap">
-          <span class="browse-filter-status" id="browse-filter-count"></span>
+          <span class="d-flex flex-column align-items-end">
+            <span class="browse-filter-status" id="browse-filter-count"></span>
+            <span class="small text-muted" id="browse-filter-context"></span>
+          </span>
           <span class="small text-danger" id="browse-filter-error"></span>
           <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal"
             data-bs-target="#browse-filter-help-modal" title="How Browse filters work">
@@ -200,10 +203,12 @@
             <li><b>Match all</b> keeps questions where all conditions are true. <b>Match any</b> keeps questions where at least one condition is true.</li>
             <li>Each matched question appears once in navigation, even if several answers, annotators, spans, or sliders match.</li>
             <li>Text matching is case-insensitive: <code>top10</code>, <code>Top10</code>, and <code>TOP10</code> match the same text.</li>
-            <li>The result count shows matched questions and matched occurrences. Details inside the active question show the occurrences that explain the match.</li>
+            <li>The main result count shows matched questions and the most specific matched evidence type. Span matches are counted as distinct span records, not as condition rows.</li>
+            <li>The smaller context line shows how many distinct answers and annotations contain matched evidence. Answers are counted per question and answer source. Annotations are counted per question, answer source, and annotator submission.</li>
             <li>The matched-occurrence list is clickable. Click an occurrence to reveal the relevant answer or annotator, scroll to the match, and briefly pulse the exact target.</li>
             <li>Use the expand button in the matched-occurrence panel when you want a taller list.</li>
-            <li>In <b>Match any</b>, occurrence rows show the condition or conditions that caused that occurrence to match. In <b>Match all</b>, rows stay compact because each listed occurrence already satisfies the whole filter.</li>
+            <li>In <b>Match any</b>, counts are based on whichever conditions matched, so a matched question can come from question text, answer text, spans, sliders, or annotation metadata. Occurrence rows show the condition or conditions that caused each occurrence to match.</li>
+            <li>In <b>Match all</b>, rows stay compact because each listed occurrence already satisfies the whole filter.</li>
             <li>While filters are active, navigation moves through matched questions. The navigation bar shows the matched-question position separately from the original question number.</li>
             <li>After you apply filters, the browser URL includes the applied filter state and current question so the view can be shared or reopened.</li>
             <li>Editing filters keeps the last applied results visible and marks them as <b>Unsaved filter changes</b> until you apply or reset.</li>
@@ -220,6 +225,7 @@
           <ul>
             <li>Span conditions have a <b>Span group</b>. Conditions in the same group must match the same span.</li>
             <li>Choose <b>New group</b> when a span condition may be satisfied by a different span in the same annotation.</li>
+            <li>When multiple span groups match, the span count is the distinct union of all matched spans across those groups. If the same span satisfies more than one group, it is counted once.</li>
             <li>For example, <code>Span category is Chybí</code> in <b>Group 1</b> and <code>Span reason regex \bNotInTop10\b</code> in <b>Group 1</b> means: keep questions where there is a <code>Chybí</code> span whose own reason matches <code>NotInTop10</code>.</li>
             <li><code>Span category is Chybí</code> in <b>Group 1</b> and <code>Span category is Nesrozumitelné</code> in <b>Group 2</b> means: keep questions with an annotation that contains both categories, possibly on different spans.</li>
             <li>The matching span, reason text, answer text, or slider row is highlighted when possible. You can turn this off with <b>Hide highlights</b> and turn it back on with <b>Show highlights</b>.</li>

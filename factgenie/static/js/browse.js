@@ -18,6 +18,7 @@ var browseOccurrenceUnitLabel = "occurrence";
 var browseOccurrenceUnitPlural = "occurrences";
 var appliedBrowseFilterMode = "all";
 var appliedBrowseOccurrenceCount = null;
+var appliedBrowseSummary = null;
 var browseMatchDetailsExpanded = false;
 var appliedBrowseFilterConditions = [];
 var pendingBrowseFilterRestore = null;
@@ -1993,6 +1994,7 @@ function clearFilteredQueue() {
     activeBrowseMatchDetails = [];
     appliedBrowseFilterConditions = [];
     appliedBrowseOccurrenceCount = null;
+    appliedBrowseSummary = null;
     renderBrowseMatchDetails();
     clearBrowseMatchHighlights();
     setBrowseFilterStatus("");
@@ -2043,7 +2045,7 @@ function resetBrowseFilters() {
     updateBrowseUrl($('#dataset-select').val(), $('#split-select').val(), current_example_idx);
 }
 
-function setBrowseFilterStatus(message, tone = "default") {
+function setBrowseFilterStatus(message, tone = "default", context = "") {
     const status = $("#browse-filter-count");
     const toneClasses = [
         "browse-filter-status-default",
@@ -2059,6 +2061,7 @@ function setBrowseFilterStatus(message, tone = "default") {
     if (message) {
         status.addClass(`browse-filter-status-${tone}`);
     }
+    $("#browse-filter-context").text(context || "");
 }
 
 function restoreAppliedBrowseFilterStatus() {
@@ -2068,7 +2071,8 @@ function restoreAppliedBrowseFilterStatus() {
     }
     setBrowseFilterStatus(
         browseMatchedQuestionStatus(filteredResults.length, appliedBrowseOccurrenceCount),
-        filteredQueueActive ? "active" : "empty"
+        filteredQueueActive ? "active" : "empty",
+        browseMatchedContextStatus(appliedBrowseSummary)
     );
 }
 
@@ -2102,6 +2106,27 @@ function browseMatchedQuestionStatus(count, occurrenceCount = null) {
         status += `, ${numericOccurrenceCount} matched ${occurrenceUnit}`;
     }
     return status;
+}
+
+function pluralizeCount(count, single, plural) {
+    const numericCount = Number(count || 0);
+    return `${numericCount} ${numericCount === 1 ? single : plural}`;
+}
+
+function browseMatchedContextStatus(summary) {
+    if (!summary) {
+        return "";
+    }
+    const parts = [];
+    const answerCount = Number(summary.matched_answer_count || 0);
+    const annotationCount = Number(summary.matched_annotation_count || 0);
+    if (answerCount > 0) {
+        parts.push(pluralizeCount(answerCount, "answer", "answers"));
+    }
+    if (annotationCount > 0) {
+        parts.push(pluralizeCount(annotationCount, "annotation", "annotations"));
+    }
+    return parts.length ? `Across ${parts.join(" and ")}` : "";
 }
 
 function updateBrowseHighlightsToggleLabel() {
@@ -2208,6 +2233,7 @@ function applyBrowseFilters(targetExampleIdx = null, replaceUrl = false) {
     appliedBrowseFilterMode = $("#browse-filter-match-mode").val() || "all";
     appliedBrowseFilterConditions = conditions;
     appliedBrowseOccurrenceCount = null;
+    appliedBrowseSummary = null;
     setBrowseFilterStatus("Finding matched questions...", "default");
     $.ajax({
         url: `${url_prefix}/query/filter`,
@@ -2233,11 +2259,13 @@ function applyBrowseFilters(targetExampleIdx = null, replaceUrl = false) {
             filteredResults = payload.rows || [];
             filteredQueueActive = filteredResults.length > 0;
             appliedBrowseOccurrenceCount = payload.summary?.matched_occurrence_count ?? null;
+            appliedBrowseSummary = payload.summary || null;
             const targetIndex = filteredResults.findIndex((row) => Number(row.example_idx) === Number(targetExampleIdx));
             filteredQueueIndex = targetIndex >= 0 ? targetIndex : 0;
             setBrowseFilterStatus(
                 browseMatchedQuestionStatus(filteredResults.length, appliedBrowseOccurrenceCount),
-                filteredQueueActive ? "active" : "empty"
+                filteredQueueActive ? "active" : "empty",
+                browseMatchedContextStatus(payload.summary)
             );
             updateBrowseHighlightsToggleLabel();
             $("#browse-toggle-highlights").toggle(filteredQueueActive);
