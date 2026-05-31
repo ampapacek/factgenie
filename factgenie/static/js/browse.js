@@ -17,6 +17,7 @@ var browseResultUnitPlural = "questions";
 var browseOccurrenceUnitLabel = "occurrence";
 var browseOccurrenceUnitPlural = "occurrences";
 var appliedBrowseFilterMode = "all";
+var appliedBrowseOccurrenceCount = null;
 var browseMatchDetailsExpanded = false;
 var appliedBrowseFilterConditions = [];
 var pendingBrowseFilterRestore = null;
@@ -1902,6 +1903,47 @@ function browseActiveConditions() {
     return conditions;
 }
 
+function normalizeBrowseFilterCondition(condition) {
+    return {
+        field: String(condition?.field || ""),
+        op: String(condition?.op || ""),
+        value: String(condition?.value || ""),
+        sliderLabel: String(condition?.sliderLabel || ""),
+        spanGroup: String(condition?.spanGroup || ""),
+    };
+}
+
+function normalizeBrowseFilterState(mode, conditions) {
+    return {
+        mode: mode === "any" ? "any" : "all",
+        conditions: (conditions || []).map(normalizeBrowseFilterCondition),
+    };
+}
+
+function currentBrowseFilterState() {
+    return normalizeBrowseFilterState(
+        $("#browse-filter-match-mode").val() || "all",
+        browseActiveConditions()
+    );
+}
+
+function appliedBrowseFilterState() {
+    return normalizeBrowseFilterState(
+        appliedBrowseFilterMode,
+        appliedBrowseFilterConditions
+    );
+}
+
+function browseHasAppliedFilterState() {
+    return appliedBrowseFilterConditions.length > 0;
+}
+
+function browseFilterStateDiffersFromApplied() {
+    const currentState = currentBrowseFilterState();
+    const appliedState = appliedBrowseFilterState();
+    return JSON.stringify(currentState) !== JSON.stringify(appliedState);
+}
+
 function loadBrowseFilterSchema() {
     const dataset = $('#dataset-select').val();
     const split = $('#split-select').val();
@@ -1950,6 +1992,7 @@ function clearFilteredQueue() {
     filteredQueueIndex = 0;
     activeBrowseMatchDetails = [];
     appliedBrowseFilterConditions = [];
+    appliedBrowseOccurrenceCount = null;
     renderBrowseMatchDetails();
     clearBrowseMatchHighlights();
     setBrowseFilterStatus("");
@@ -2018,13 +2061,25 @@ function setBrowseFilterStatus(message, tone = "default") {
     }
 }
 
-function markBrowseFilterStale() {
-    if (!filteredQueueActive) {
-        clearFilteredQueue();
+function restoreAppliedBrowseFilterStatus() {
+    if (!browseHasAppliedFilterState()) {
+        setBrowseFilterStatus("");
         return;
     }
-    browseFilterStale = true;
-    setBrowseFilterStatus("Unsaved filter changes", "pending");
+    setBrowseFilterStatus(
+        browseMatchedQuestionStatus(filteredResults.length, appliedBrowseOccurrenceCount),
+        filteredQueueActive ? "active" : "empty"
+    );
+}
+
+function markBrowseFilterStale() {
+    const isStale = browseFilterStateDiffersFromApplied();
+    browseFilterStale = isStale;
+    if (isStale) {
+        setBrowseFilterStatus("Unsaved filter changes", "pending");
+    } else {
+        restoreAppliedBrowseFilterStatus();
+    }
 }
 
 function updateBrowseResultUnitMetadata(payload) {
@@ -2152,6 +2207,7 @@ function applyBrowseFilters(targetExampleIdx = null, replaceUrl = false) {
     browseFilterStale = false;
     appliedBrowseFilterMode = $("#browse-filter-match-mode").val() || "all";
     appliedBrowseFilterConditions = conditions;
+    appliedBrowseOccurrenceCount = null;
     setBrowseFilterStatus("Finding matched questions...", "default");
     $.ajax({
         url: `${url_prefix}/query/filter`,
@@ -2176,10 +2232,11 @@ function applyBrowseFilters(targetExampleIdx = null, replaceUrl = false) {
             updateBrowseResultUnitMetadata(payload);
             filteredResults = payload.rows || [];
             filteredQueueActive = filteredResults.length > 0;
+            appliedBrowseOccurrenceCount = payload.summary?.matched_occurrence_count ?? null;
             const targetIndex = filteredResults.findIndex((row) => Number(row.example_idx) === Number(targetExampleIdx));
             filteredQueueIndex = targetIndex >= 0 ? targetIndex : 0;
             setBrowseFilterStatus(
-                browseMatchedQuestionStatus(filteredResults.length, payload.summary?.matched_occurrence_count),
+                browseMatchedQuestionStatus(filteredResults.length, appliedBrowseOccurrenceCount),
                 filteredQueueActive ? "active" : "empty"
             );
             updateBrowseHighlightsToggleLabel();
