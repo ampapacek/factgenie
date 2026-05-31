@@ -1145,6 +1145,57 @@ body.auth-only #annotator-auth-modal .modal-dialog {
     padding-top: 8px;
 }
 
+.browse-filter-status {
+    display: none;
+    align-items: center;
+    min-height: 2rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: 0.01em;
+}
+
+.browse-filter-status-visible {
+    display: inline-flex;
+}
+
+.browse-filter-status-default {
+    background: #edf4fb;
+    border-color: #cfe0f2;
+    color: #33506b;
+}
+
+.browse-filter-status-active {
+    background: #eef8f1;
+    border-color: #cfe7d6;
+    color: #25543c;
+}
+
+.browse-filter-status-pending {
+    font-size: 0.98rem;
+    background: #fff6e8;
+    border-color: #edd9b4;
+    color: #7b5a1f;
+}
+
+.browse-filter-status-empty {
+    padding: 0.45rem 0.85rem;
+    font-size: 1rem;
+    background: #fdeceb;
+    border-color: #e7b8b5;
+    color: #8d2d27;
+    box-shadow: 0 0 0 1px rgba(141, 45, 39, 0.04);
+}
+
+.browse-filter-status-error {
+    background: #fde8e8;
+    border-color: #e4b3b3;
+    color: #912d2b;
+}
+
 .browse-match-occurrence-list {
     display: flex;
     flex-direction: column;

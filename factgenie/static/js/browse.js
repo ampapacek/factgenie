@@ -1855,7 +1855,7 @@ function clearFilteredQueue() {
     appliedBrowseFilterConditions = [];
     renderBrowseMatchDetails();
     clearBrowseMatchHighlights();
-    $("#browse-filter-count").removeClass("text-danger").text("");
+    setBrowseFilterStatus("");
     $("#browse-filter-error").text("");
     $("#browse-toggle-highlights").hide();
     if (wasActive) {
@@ -1903,8 +1903,22 @@ function resetBrowseFilters() {
     updateBrowseUrl($('#dataset-select').val(), $('#split-select').val(), current_example_idx);
 }
 
-function setBrowseFilterStatus(message, isError = false) {
-    $("#browse-filter-count").toggleClass("text-danger", isError).text(message || "");
+function setBrowseFilterStatus(message, tone = "default") {
+    const status = $("#browse-filter-count");
+    const toneClasses = [
+        "browse-filter-status-default",
+        "browse-filter-status-pending",
+        "browse-filter-status-empty",
+        "browse-filter-status-error",
+        "browse-filter-status-active",
+    ];
+    status
+        .removeClass(toneClasses.join(" "))
+        .toggleClass("browse-filter-status-visible", Boolean(message))
+        .text(message || "");
+    if (message) {
+        status.addClass(`browse-filter-status-${tone}`);
+    }
 }
 
 function markBrowseFilterStale() {
@@ -1913,7 +1927,7 @@ function markBrowseFilterStale() {
         return;
     }
     browseFilterStale = true;
-    setBrowseFilterStatus("Unsaved filter changes");
+    setBrowseFilterStatus("Unsaved filter changes", "pending");
 }
 
 function updateBrowseResultUnitMetadata(payload) {
@@ -2041,7 +2055,7 @@ function applyBrowseFilters(targetExampleIdx = null, replaceUrl = false) {
     browseFilterStale = false;
     appliedBrowseFilterMode = $("#browse-filter-match-mode").val() || "all";
     appliedBrowseFilterConditions = conditions;
-    setBrowseFilterStatus("Finding matched questions...");
+    setBrowseFilterStatus("Finding matched questions...", "default");
     $.ajax({
         url: `${url_prefix}/query/filter`,
         method: "POST",
@@ -2059,7 +2073,7 @@ function applyBrowseFilters(targetExampleIdx = null, replaceUrl = false) {
             if (!payload.success) {
                 clearFilteredQueue();
                 $("#browse-filter-error").text(payload.error || "Filter failed.");
-                setBrowseFilterStatus("Filter failed.", true);
+                setBrowseFilterStatus("Filter failed.", "error");
                 return;
             }
             updateBrowseResultUnitMetadata(payload);
@@ -2067,7 +2081,10 @@ function applyBrowseFilters(targetExampleIdx = null, replaceUrl = false) {
             filteredQueueActive = filteredResults.length > 0;
             const targetIndex = filteredResults.findIndex((row) => Number(row.example_idx) === Number(targetExampleIdx));
             filteredQueueIndex = targetIndex >= 0 ? targetIndex : 0;
-            setBrowseFilterStatus(browseMatchedQuestionStatus(filteredResults.length, payload.summary?.matched_occurrence_count));
+            setBrowseFilterStatus(
+                browseMatchedQuestionStatus(filteredResults.length, payload.summary?.matched_occurrence_count),
+                filteredQueueActive ? "active" : "empty"
+            );
             updateBrowseHighlightsToggleLabel();
             $("#browse-toggle-highlights").toggle(filteredQueueActive);
             if (filteredQueueActive) {
@@ -2085,7 +2102,7 @@ function applyBrowseFilters(targetExampleIdx = null, replaceUrl = false) {
         },
         error: function () {
             clearFilteredQueue();
-            setBrowseFilterStatus("Filter failed.", true);
+            setBrowseFilterStatus("Filter failed.", "error");
         }
     });
 }
