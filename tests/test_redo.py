@@ -147,6 +147,13 @@ def make_per_example_campaign(tmp_path, campaign_id="per-example-test"):
     return Campaign(campaign_id)
 
 
+def write_custom_active_record(campaign_id, filename, **overrides):
+    record = active_record_with_overrides(campaign_id, **overrides)
+    path = Path(redo.CAMPAIGN_DIR) / campaign_id / "files" / filename
+    path.write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+    return record
+
+
 def active_record_with_overrides(campaign_id, annotation_text="old", end_timestamp=20, **overrides):
     record = {
         "dataset": "dataset-a",
@@ -196,10 +203,12 @@ def queue_row():
     }
 
 
-def condition(field, op, value="", slider_label=None):
+def condition(field, op, value="", slider_label=None, span_group=None):
     payload = {"field": field, "op": op, "value": value}
     if slider_label is not None:
         payload["sliderLabel"] = slider_label
+    if span_group is not None:
+        payload["spanGroup"] = span_group
     return payload
 
 
@@ -473,6 +482,221 @@ def test_admin_backend_filter_requires_one_reason_to_match_multiple_reason_condi
 
     assert split_reasons["visible_count"] == 0
     assert same_reason["visible_count"] == 1
+
+
+def test_admin_backend_filter_matches_setup_condition_by_setup_id(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    campaign.db = pd.DataFrame(
+        [
+            {**queue_row(), "status": ExampleStatus.FINISHED, "start": 10, "end": 20},
+            {
+                **queue_row(),
+                "setup_id": "setup-b",
+                "annotator_id": "ann-b",
+                "annotator_group": 1,
+                "status": ExampleStatus.FINISHED,
+                "start": 10,
+                "end": 20,
+            },
+            {
+                **queue_row(),
+                "setup_id": "setup-unsaved",
+                "annotator_id": "ann-c",
+                "annotator_group": 2,
+                "status": ExampleStatus.ASSIGNED,
+            },
+        ]
+    )
+    write_custom_active_record(
+        "redo-test",
+        "setup-a-ann-a.jsonl",
+        metadata={"annotator_id": "ann-a", "annotator_group": 0},
+    )
+    write_custom_active_record(
+        "redo-test",
+        "setup-b-ann-b.jsonl",
+        setup_id="setup-b",
+        metadata={"annotator_id": "ann-b", "annotator_group": 1},
+    )
+
+    result = redo_filter(campaign, [condition("setup", "eq", "setup-b")])
+
+    assert result["visible_count"] == 1
+    assert result["rows"][0]["row_key"] == redo.admin_row_key(campaign.db.iloc[1])
+    assert "setup-unsaved" in result["filter_options"]["setups"]
+
+
+def test_admin_backend_filter_matches_split_condition(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    campaign.db = pd.DataFrame(
+        [
+            {**queue_row(), "status": ExampleStatus.FINISHED, "start": 10, "end": 20},
+            {
+                **queue_row(),
+                "split": "dev",
+                "annotator_id": "ann-b",
+                "annotator_group": 1,
+                "status": ExampleStatus.FINISHED,
+                "start": 10,
+                "end": 20,
+            },
+        ]
+    )
+    write_custom_active_record(
+        "redo-test",
+        "test-ann-a.jsonl",
+        metadata={"annotator_id": "ann-a", "annotator_group": 0},
+    )
+    write_custom_active_record(
+        "redo-test",
+        "dev-ann-b.jsonl",
+        split="dev",
+        metadata={"annotator_id": "ann-b", "annotator_group": 1},
+    )
+
+    result = redo_filter(campaign, [condition("split", "eq", "dev")])
+
+    assert result["visible_count"] == 1
+    assert result["rows"][0]["row_key"] == redo.admin_row_key(campaign.db.iloc[1])
+    assert result["filter_options"]["splits"] == ["dev", "test"]
+
+
+def test_admin_backend_filter_matches_annotator_condition_by_real_id(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    campaign.db = pd.DataFrame(
+        [
+            {**queue_row(), "status": ExampleStatus.FINISHED, "start": 10, "end": 20},
+            {
+                **queue_row(),
+                "annotator_id": "ann-b",
+                "annotator_group": 1,
+                "status": ExampleStatus.FINISHED,
+                "start": 10,
+                "end": 20,
+            },
+        ]
+    )
+    write_custom_active_record(
+        "redo-test",
+        "ann-a.jsonl",
+        metadata={"annotator_id": "ann-a", "annotator_group": 0},
+    )
+    write_custom_active_record(
+        "redo-test",
+        "ann-b.jsonl",
+        metadata={"annotator_id": "ann-b", "annotator_group": 1},
+    )
+
+    result = redo_filter(campaign, [condition("annotator", "eq", "ann-b")])
+
+    assert result["visible_count"] == 1
+    assert result["rows"][0]["row_key"] == redo.admin_row_key(campaign.db.iloc[1])
+
+
+def test_admin_backend_filter_matches_annotator_condition_by_alias(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    write_custom_active_record(
+        "redo-test",
+        "ann-a.jsonl",
+        metadata={"annotator_id": "ann-a", "annotator_group": 0},
+    )
+
+    result = redo_filter(campaign, [condition("annotator", "eq", "Prague")], alias_map={"ann-a": "Prague"})
+
+    assert result["visible_count"] == 1
+    assert "Prague" in result["filter_options"]["annotators"]
+
+
+def test_admin_backend_filter_matches_done_and_skipped_annotation_states(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    campaign.db = pd.DataFrame(
+        [
+            {**queue_row(), "status": ExampleStatus.FINISHED, "start": 10, "end": 20},
+            {
+                **queue_row(),
+                "setup_id": "setup-b",
+                "annotator_id": "ann-b",
+                "annotator_group": 1,
+                "status": ExampleStatus.FINISHED,
+                "start": 10,
+                "end": 20,
+            },
+        ]
+    )
+    write_custom_active_record(
+        "redo-test",
+        "done.jsonl",
+        metadata={"annotator_id": "ann-a", "annotator_group": 0},
+    )
+    write_custom_active_record(
+        "redo-test",
+        "skipped.jsonl",
+        setup_id="setup-b",
+        annotations=[],
+        flags=[{"label": "Skip", "value": True}],
+        metadata={"annotator_id": "ann-b", "annotator_group": 1},
+    )
+
+    done = redo_filter(campaign, [condition("annotation_state", "eq", "done")])
+    skipped = redo_filter(campaign, [condition("annotation_state", "eq", "skipped")])
+
+    assert done["visible_count"] == 1
+    assert done["rows"][0]["row_key"] == redo.admin_row_key(campaign.db.iloc[0])
+    assert skipped["visible_count"] == 1
+    assert skipped["rows"][0]["row_key"] == redo.admin_row_key(campaign.db.iloc[1])
+    assert skipped["filter_options"]["annotation_states"] == ["done", "skipped"]
+
+
+def test_admin_backend_filter_span_groups_allow_different_spans(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-20.jsonl",
+        [
+            {"type": 6, "text": "missing city", "start": 0, "reason": "NotInTop10"},
+            {"type": 0, "text": "other", "start": 5, "reason": "InSeafile"},
+        ],
+    )
+
+    result = redo_filter(
+        campaign,
+        [
+            condition("span_category", "eq", "Chybí", span_group="1"),
+            condition("span_reason", "contains", "InSeafile", span_group="2"),
+        ],
+    )
+
+    assert result["visible_count"] == 1
+    assert {detail["start"] for detail in result["rows"][0]["match_details"] if detail["target"] == "span"} == {0, 5}
+
+
+def test_admin_backend_filter_same_span_group_still_requires_one_matching_span(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    write_active_record_with_annotations(
+        "redo-test",
+        "0-0-ann-a-20.jsonl",
+        [
+            {"type": 6, "text": "missing city", "start": 0, "reason": "NotInTop10"},
+            {"type": 0, "text": "other", "start": 5, "reason": "InSeafile"},
+        ],
+    )
+
+    result = redo_filter(
+        campaign,
+        [
+            condition("span_category", "eq", "Chybí", span_group="1"),
+            condition("span_reason", "contains", "InSeafile", span_group="1"),
+        ],
+    )
+
+    assert result["visible_count"] == 0
 
 
 def test_admin_backend_filter_match_any_slider_and_invalid_regex(monkeypatch, tmp_path):

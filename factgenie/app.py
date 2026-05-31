@@ -980,7 +980,7 @@ def redo_revisions_csv(campaign_id):
 @login_required
 def redo_filter_data(campaign_id):
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
-    return jsonify(success=True, **redo.build_admin_filter_result(campaign))
+    return jsonify(success=True, **redo.build_admin_filter_result(campaign, alias_map=_annotator_alias_map(campaign_id)))
 
 
 @app.route("/redo/<campaign_id>/filter", methods=["POST"])
@@ -993,6 +993,7 @@ def redo_filter(campaign_id):
             campaign,
             filters=data.get("filters") or {},
             annotator_id=data.get("annotatorId") or "",
+            alias_map=_annotator_alias_map(campaign_id),
         )
     except querying.QueryFilterError as exc:
         return utils.error(str(exc))
