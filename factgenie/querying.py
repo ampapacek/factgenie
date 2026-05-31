@@ -1212,30 +1212,54 @@ def summarize_rows(rows):
 
 
 def summarize_matched_occurrences(rows):
-    occurrence_keys = set()
-    occurrence_units = set()
+    occurrence_keys_by_unit = defaultdict(set)
+    answer_keys = set()
+    annotation_keys = set()
     if rows is None or rows.empty or "match_details" not in rows.columns:
         return {
             "matched_occurrence_count": 0,
             "occurrence_unit": "occurrence",
             "occurrence_unit_label": "occurrence",
             "occurrence_unit_plural": "occurrences",
+            "matched_question_count": 0,
+            "matched_answer_count": 0,
+            "matched_annotation_count": 0,
+            "matched_span_count": 0,
         }
     for row_position, (_, row) in enumerate(rows.iterrows()):
         for detail in _safe_list(row.get("match_details")):
             if not isinstance(detail, dict):
                 continue
             unit = occurrence_unit_for_detail(detail)
-            occurrence_units.add(unit)
-            occurrence_keys.add((row_position, unit, occurrence_identity(detail)))
-    unit = next(iter(occurrence_units)) if len(occurrence_units) == 1 else "occurrence"
+            occurrence_keys_by_unit[unit].add((row_position, occurrence_identity(detail)))
+            answer_key = answer_identity(detail)
+            if answer_key:
+                answer_keys.add((row_position, answer_key))
+            annotation_key = annotation_identity(detail)
+            if annotation_key:
+                annotation_keys.add((row_position, annotation_key))
+    unit = preferred_occurrence_unit(occurrence_keys_by_unit)
+    occurrence_count = len(occurrence_keys_by_unit.get(unit, set())) if unit else 0
+    if not unit:
+        unit = "occurrence"
     label, plural = OCCURRENCE_LABELS.get(unit, ("occurrence", "occurrences"))
     return {
-        "matched_occurrence_count": len(occurrence_keys),
+        "matched_occurrence_count": occurrence_count,
         "occurrence_unit": unit,
         "occurrence_unit_label": label,
         "occurrence_unit_plural": plural,
+        "matched_question_count": int(len(rows)),
+        "matched_answer_count": len(answer_keys),
+        "matched_annotation_count": len(annotation_keys),
+        "matched_span_count": len(occurrence_keys_by_unit.get("span", set())),
     }
+
+
+def preferred_occurrence_unit(occurrence_keys_by_unit):
+    for unit in ["span", "slider", "output", "source_data", "annotation", "setup", "question", "any_text", "occurrence"]:
+        if occurrence_keys_by_unit.get(unit):
+            return unit
+    return ""
 
 
 def occurrence_unit_for_detail(detail):
@@ -1266,6 +1290,23 @@ def occurrence_identity(detail):
     if target in ["annotation_state", "annotator", "setup"]:
         return base + (target,)
     return (target, detail.get("matched_text", ""), detail.get("value", ""))
+
+
+def answer_identity(detail):
+    setup_id = str(detail.get("setup_id", "") or "")
+    if not setup_id:
+        return ()
+    return (setup_id,)
+
+
+def annotation_identity(detail):
+    campaign_id = str(detail.get("campaign_id", "") or "")
+    setup_id = str(detail.get("setup_id", "") or "")
+    annotator_id = str(detail.get("annotator_id", "") or "")
+    annotator_alias = str(detail.get("annotator_alias", "") or "")
+    if not (campaign_id or setup_id or annotator_id or annotator_alias):
+        return ()
+    return (campaign_id, setup_id, annotator_id, annotator_alias)
 
 
 def table_payload(rows, limit=500, authenticated=False):

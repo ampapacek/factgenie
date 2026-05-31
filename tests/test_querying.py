@@ -404,6 +404,49 @@ def test_summary_counts_distinct_span_occurrences_not_condition_details():
     assert payload["summary"]["occurrence_unit"] == "span"
     assert payload["summary"]["occurrence_unit_label"] == "span"
     assert payload["summary"]["occurrence_unit_plural"] == "spans"
+    assert payload["summary"]["matched_answer_count"] == 1
+    assert payload["summary"]["matched_annotation_count"] == 2
+    assert payload["summary"]["matched_span_count"] == 2
+
+
+def test_summary_prefers_span_count_when_setup_filter_is_annotation_scoped():
+    tables = sample_tables()
+
+    rows = filter_rows(
+        tables,
+        [
+            condition("setup", "eq", "rag-generated"),
+            condition("span_category", "eq", "Chybí"),
+        ],
+    )
+    payload = querying.table_payload(rows)
+
+    assert payload["summary"]["total"] == 2
+    assert payload["summary"]["matched_occurrence_count"] == 3
+    assert payload["summary"]["occurrence_unit"] == "span"
+    assert payload["summary"]["matched_answer_count"] == 2
+    assert payload["summary"]["matched_annotation_count"] == 3
+    assert payload["summary"]["matched_span_count"] == 3
+
+
+def test_summary_counts_distinct_spans_across_span_groups():
+    tables = sample_tables()
+
+    rows = filter_rows(
+        tables,
+        [
+            condition("span_category", "eq", "Chybí", span_group="1"),
+            condition("span_text", "contains", "castle", span_group="2"),
+        ],
+    )
+    payload = querying.table_payload(rows)
+
+    assert payload["summary"]["total"] == 1
+    assert payload["summary"]["matched_occurrence_count"] == 2
+    assert payload["summary"]["occurrence_unit"] == "span"
+    assert payload["summary"]["matched_answer_count"] == 1
+    assert payload["summary"]["matched_annotation_count"] == 1
+    assert payload["summary"]["matched_span_count"] == 2
 
 
 def test_summary_counts_source_data_occurrences():

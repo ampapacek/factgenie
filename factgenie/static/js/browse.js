@@ -1840,6 +1840,7 @@ function clearFilteredQueue() {
     renderBrowseMatchDetails();
     clearBrowseMatchHighlights();
     $("#browse-filter-count").removeClass("text-danger").text("");
+    $("#browse-filter-context").text("");
     $("#browse-filter-error").text("");
     $("#browse-toggle-highlights").hide();
     if (wasActive) {
@@ -1887,8 +1888,9 @@ function resetBrowseFilters() {
     updateBrowseUrl($('#dataset-select').val(), $('#split-select').val(), current_example_idx);
 }
 
-function setBrowseFilterStatus(message, isError = false) {
+function setBrowseFilterStatus(message, isError = false, context = "") {
     $("#browse-filter-count").toggleClass("text-danger", isError).text(message || "");
+    $("#browse-filter-context").text(context || "");
 }
 
 function markBrowseFilterStale() {
@@ -1920,6 +1922,27 @@ function browseMatchedQuestionStatus(count, occurrenceCount = null) {
         status += `, ${numericOccurrenceCount} matched ${occurrenceUnit}`;
     }
     return status;
+}
+
+function pluralizeCount(count, single, plural) {
+    const numericCount = Number(count || 0);
+    return `${numericCount} ${numericCount === 1 ? single : plural}`;
+}
+
+function browseMatchedContextStatus(summary) {
+    if (!summary) {
+        return "";
+    }
+    const parts = [];
+    const answerCount = Number(summary.matched_answer_count || 0);
+    const annotationCount = Number(summary.matched_annotation_count || 0);
+    if (answerCount > 0) {
+        parts.push(pluralizeCount(answerCount, "answer", "answers"));
+    }
+    if (annotationCount > 0) {
+        parts.push(pluralizeCount(annotationCount, "annotation", "annotations"));
+    }
+    return parts.length ? `Across ${parts.join(" and ")}` : "";
 }
 
 function updateBrowseHighlightsToggleLabel() {
@@ -2051,7 +2074,11 @@ function applyBrowseFilters(targetExampleIdx = null, replaceUrl = false) {
             filteredQueueActive = filteredResults.length > 0;
             const targetIndex = filteredResults.findIndex((row) => Number(row.example_idx) === Number(targetExampleIdx));
             filteredQueueIndex = targetIndex >= 0 ? targetIndex : 0;
-            setBrowseFilterStatus(browseMatchedQuestionStatus(filteredResults.length, payload.summary?.matched_occurrence_count));
+            setBrowseFilterStatus(
+                browseMatchedQuestionStatus(filteredResults.length, payload.summary?.matched_occurrence_count),
+                false,
+                browseMatchedContextStatus(payload.summary)
+            );
             updateBrowseHighlightsToggleLabel();
             $("#browse-toggle-highlights").toggle(filteredQueueActive);
             if (filteredQueueActive) {
