@@ -441,7 +441,7 @@ def get_examples_for_batch(db, batch_idx, campaign=None, annotator_id=None, incl
             "batch_idx": row["batch_idx"],
             "annotator_group": row["annotator_group"],
         }
-        if campaign is not None and is_per_example_save_campaign(campaign):
+        if campaign is not None and is_per_example_save_campaign(campaign) and annotator_id != PREVIEW_STUDY_ID:
             active_record = None
             row_annotator = str(row.get("annotator_id", "") or "")
             if row_annotator == str(annotator_id or ""):
