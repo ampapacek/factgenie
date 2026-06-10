@@ -7,6 +7,7 @@ import factgenie.app as app_module
 from factgenie import querying
 from factgenie.app import app as flask_app
 from factgenie.campaign import ExampleStatus
+from factgenie.pseudonyms import ANNOTATOR_PSEUDONYM_CITIES, city_alias_from_index, next_available_city_alias
 
 
 class DummyDataset:
@@ -604,6 +605,12 @@ def test_authenticated_filters_include_raw_annotators_even_when_pseudonymized():
     assert alias in schema["annotators"]
     assert raw_id_rows["example_idx"].tolist() == [0]
     assert alias_rows["example_idx"].tolist() == [0]
+
+
+def test_city_pseudonyms_are_shared_and_extend_with_numeric_suffixes():
+    assert city_alias_from_index(0) == ANNOTATOR_PSEUDONYM_CITIES[0]
+    assert city_alias_from_index(len(ANNOTATOR_PSEUDONYM_CITIES)) == f"{ANNOTATOR_PSEUDONYM_CITIES[0]} 2"
+    assert next_available_city_alias(set(ANNOTATOR_PSEUDONYM_CITIES)) == f"{ANNOTATOR_PSEUDONYM_CITIES[0]} 2"
 
 
 def test_example_sanitizer_keeps_raw_ids_for_authenticated_and_public_non_pseudonymized_campaigns():

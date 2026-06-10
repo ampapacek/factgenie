@@ -11,21 +11,9 @@ import pandas as pd
 import factgenie.workflows as workflows
 from factgenie import CAMPAIGN_DIR
 from factgenie.campaign import CampaignMode
+from factgenie.pseudonyms import ANNOTATOR_PSEUDONYM_CITIES, city_alias_from_index, next_available_city_alias
 
 logger = logging.getLogger("factgenie")
-
-ANNOTATOR_PSEUDONYM_CITIES = [
-    "Tokyo",
-    "Paris",
-    "London",
-    "New York",
-    "Sydney",
-    "Berlin",
-    "Rome",
-    "Cairo",
-    "Mumbai",
-    "Mexico City",
-]
 
 ROW_COLUMNS = [
     "dataset",
@@ -119,12 +107,7 @@ def normalize_annotator_id(value):
 
 
 def _city_alias_from_index(index):
-    base_index = index % len(ANNOTATOR_PSEUDONYM_CITIES)
-    suffix_index = (index // len(ANNOTATOR_PSEUDONYM_CITIES)) + 1
-    alias = ANNOTATOR_PSEUDONYM_CITIES[base_index]
-    if suffix_index > 1:
-        alias = f"{alias} {suffix_index}"
-    return alias
+    return city_alias_from_index(index)
 
 
 def _load_annotator_aliases(campaign_id):
@@ -166,12 +149,7 @@ def _load_annotator_aliases(campaign_id):
 
 
 def _next_available_alias(used_aliases):
-    index = 0
-    while True:
-        alias = _city_alias_from_index(index)
-        if alias not in used_aliases:
-            return alias
-        index += 1
+    return next_available_city_alias(used_aliases)
 
 
 def alias_map_for_annotators(campaign_id, annotator_ids):

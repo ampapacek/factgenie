@@ -34,6 +34,7 @@ import factgenie.workflows as workflows
 from factgenie import CAMPAIGN_DIR, INPUT_DIR, PACKAGE_DIR, PREVIEW_STUDY_ID, STATIC_DIR, TEMPLATES_DIR
 from factgenie.campaign import CampaignMode, CampaignStatus, ExampleStatus
 from factgenie.models import ModelFactory
+from factgenie.pseudonyms import city_alias_from_index, next_available_city_alias
 
 app = Flask("factgenie", template_folder=TEMPLATES_DIR, static_folder=STATIC_DIR)
 app.db = {}
@@ -48,20 +49,6 @@ app.db["announcers"] = {}
 app.wsgi_app = ProxyFix(app.wsgi_app, x_host=1)
 
 logger = logging.getLogger("factgenie")
-
-ANNOTATOR_PSEUDONYM_CITIES = [
-    "Tokyo",
-    "Paris",
-    "London",
-    "New York",
-    "Sydney",
-    "Berlin",
-    "Rome",
-    "Cairo",
-    "Mumbai",
-    "Mexico City",
-]
-
 
 def run_llm_campaign_background(app, mode, campaign_id, announcer, campaign, datasets, model):
     with app.app_context():
@@ -511,23 +498,11 @@ def _normalize_annotator_id(value):
 
 
 def _city_alias_from_index(index):
-    if index < 0:
-        index = 0
-    base_index = index % len(ANNOTATOR_PSEUDONYM_CITIES)
-    suffix_index = (index // len(ANNOTATOR_PSEUDONYM_CITIES)) + 1
-    alias = ANNOTATOR_PSEUDONYM_CITIES[base_index]
-    if suffix_index > 1:
-        alias = f"{alias} {suffix_index}"
-    return alias
+    return city_alias_from_index(index)
 
 
 def _next_available_alias(used_aliases):
-    index = 0
-    while True:
-        alias = _city_alias_from_index(index)
-        if alias not in used_aliases:
-            return alias
-        index += 1
+    return next_available_city_alias(used_aliases)
 
 
 def _normalize_annotator_records(records):
