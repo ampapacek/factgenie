@@ -634,6 +634,10 @@ body:not(.annotation-ui-ready) #text-type-info {
     min-width: 140px;
 }
 
+.coverage-setup-filter {
+    min-height: 1.75rem;
+}
+
 .instructions-accordion-body {
     background-color: #eeeeee !important;
 }

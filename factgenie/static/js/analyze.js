@@ -649,7 +649,9 @@ function statusBadge(status) {
 }
 
 const coverageTransposeStorageKey = `factgenie_coverage_transpose_${metadata?.id || 'default'}`;
+const coverageSetupFilterStorageKey = `factgenie_coverage_setup_filter_${metadata?.id || 'default'}`;
 let coverageTransposeMemoryPreference = false;
+let coverageSetupMemoryPreference = null;
 
 function getCoverageTransposePreference() {
     try {
@@ -687,6 +689,88 @@ function bindCoverageTransposeControl(coverageStats) {
     return transposed;
 }
 
+function getCoverageSetupIds(rows) {
+    return Array.from(new Set((rows || [])
+        .map((row) => String(row.setup_id || '').trim())
+        .filter((setupId) => setupId !== ''))).sort((a, b) => a.localeCompare(b));
+}
+
+function getCoverageSetupFilterPreference(setupIds) {
+    const availableSetups = new Set(setupIds);
+    let storedSetups = null;
+
+    try {
+        const stored = localStorage.getItem(coverageSetupFilterStorageKey);
+        if (stored) {
+            storedSetups = JSON.parse(stored);
+        }
+    } catch (error) {
+        storedSetups = coverageSetupMemoryPreference;
+    }
+
+    if (!Array.isArray(storedSetups)) {
+        storedSetups = coverageSetupMemoryPreference;
+    }
+
+    const selected = (storedSetups || [])
+        .map((setupId) => String(setupId || '').trim())
+        .filter((setupId) => availableSetups.has(setupId));
+
+    return selected.length > 0 ? selected : setupIds;
+}
+
+function setCoverageSetupFilterPreference(setupIds) {
+    coverageSetupMemoryPreference = setupIds;
+    try {
+        localStorage.setItem(coverageSetupFilterStorageKey, JSON.stringify(setupIds));
+    } catch (error) {
+        // Ignore storage failures; the checkboxes still work for the current page.
+    }
+}
+
+function bindCoverageSetupFilter(coverageStats, rows) {
+    const container = $('#coverage-setup-filter');
+    const setupIds = getCoverageSetupIds(rows);
+    if (container.length === 0 || setupIds.length <= 1) {
+        container.empty();
+        return setupIds;
+    }
+
+    const selectedSetups = getCoverageSetupFilterPreference(setupIds);
+    const selectedSet = new Set(selectedSetups);
+    const selectedCount = selectedSetups.length;
+    let html = '<span class="small text-muted me-1">Setups:</span>';
+
+    setupIds.forEach((setupId, index) => {
+        const checked = selectedSet.has(setupId);
+        const safeId = normalizeCoverageAnnotatorKey(setupId) || 'setup';
+        const inputId = `coverage-setup-filter-${safeId}-${index}`;
+        const disabled = checked && selectedCount === 1;
+        html += `
+            <div class="form-check form-check-inline mb-0">
+              <input class="form-check-input coverage-setup-filter-checkbox" type="checkbox"
+                id="${inputId}" value="${escapeHtml(setupId)}"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}>
+              <label class="form-check-label small" for="${inputId}">${escapeHtml(setupId)}</label>
+            </div>
+        `;
+    });
+
+    container.html(html);
+    container.find('.coverage-setup-filter-checkbox').off('change.coverageSetupFilter').on('change.coverageSetupFilter', function () {
+        const nextSelected = container.find('.coverage-setup-filter-checkbox:checked').map(function () {
+            return $(this).val();
+        }).get();
+        if (nextSelected.length === 0) {
+            $(this).prop('checked', true);
+            return;
+        }
+        setCoverageSetupFilterPreference(nextSelected);
+        renderCoverageMatrix(coverageStats);
+    });
+
+    return selectedSetups;
+}
+
 function coverageCountsBadgeGroup(counts) {
     return `
         <div class="d-flex justify-content-center align-items-center gap-1 flex-wrap">
@@ -697,13 +781,27 @@ function coverageCountsBadgeGroup(counts) {
     `;
 }
 
-function getCoverageOutputLabels(row, commonPrefix) {
-    const fullOutputPath = `${row.dataset}/${row.split}/${row.setup_id}`;
-    const outputPath = commonPrefix && fullOutputPath.startsWith(commonPrefix)
-        ? fullOutputPath.slice(commonPrefix.length)
-        : fullOutputPath;
+function getCoverageLabelContext(rows) {
+    const datasets = new Set(rows.map((row) => String(row.dataset || '').trim()));
+    const splits = new Set(rows.map((row) => String(row.split || '').trim()));
     return {
-        outputLabel: `${escapeHtml(outputPath)} #${row.example_idx}`,
+        showDataset: datasets.size > 1,
+        showSplit: datasets.size > 1 || splits.size > 1,
+    };
+}
+
+function getCoverageOutputLabels(row, labelContext) {
+    const labelParts = [];
+    if (labelContext?.showDataset) {
+        labelParts.push(row.dataset || '-');
+    }
+    if (labelContext?.showSplit) {
+        labelParts.push(row.split || '-');
+    }
+    labelParts.push(row.setup_id || '-');
+
+    return {
+        outputLabel: `${escapeHtml(labelParts.join('/'))} #${row.example_idx}`,
         questionPreview: escapeHtml(row.question_preview || ''),
     };
 }
@@ -958,29 +1056,7 @@ function computeCoverageRowCounts(row, annotators) {
     return counts;
 }
 
-function getCoverageCommonOutputPrefix(rows) {
-    const outputPaths = rows.map((row) => `${row.dataset}/${row.split}/${row.setup_id}`);
-    if (outputPaths.length === 0) {
-        return '';
-    }
-
-    let commonParts = outputPaths[0].split('/');
-    for (let i = 1; i < outputPaths.length; i += 1) {
-        const parts = outputPaths[i].split('/');
-        let matchLen = 0;
-        while (matchLen < commonParts.length && matchLen < parts.length && commonParts[matchLen] === parts[matchLen]) {
-            matchLen += 1;
-        }
-        commonParts = commonParts.slice(0, matchLen);
-        if (commonParts.length === 0) {
-            break;
-        }
-    }
-
-    return commonParts.length > 0 ? `${commonParts.join('/')}/` : '';
-}
-
-function renderCoverageMatrixDefault(rows, annotators, commonPrefix, annotatorCounts) {
+function renderCoverageMatrixDefault(rows, annotators, annotatorCounts, labelContext) {
     let html = `
       <div class="coverage-matrix-wrapper">
         <table id="coverage-matrix-table" class="table table-bordered table-sm align-middle">
@@ -1028,7 +1104,7 @@ function renderCoverageMatrixDefault(rows, annotators, commonPrefix, annotatorCo
     rows.forEach((row) => {
         const rowCounts = computeCoverageRowCounts(row, annotators);
         const rowClass = Number(row.group_parity || 0) % 2 === 0 ? 'table-light' : '';
-        const labels = getCoverageOutputLabels(row, commonPrefix);
+        const labels = getCoverageOutputLabels(row, labelContext);
         const browseUrl = buildBrowseUrl(row);
 
         html += `<tr class="${rowClass}">`;
@@ -1054,7 +1130,7 @@ function renderCoverageMatrixDefault(rows, annotators, commonPrefix, annotatorCo
     return html;
 }
 
-function renderCoverageMatrixTransposed(rows, annotators, commonPrefix, annotatorCounts) {
+function renderCoverageMatrixTransposed(rows, annotators, annotatorCounts, labelContext) {
     let html = `
       <div class="coverage-matrix-wrapper">
         <table id="coverage-matrix-table" class="table table-bordered table-sm align-middle">
@@ -1065,7 +1141,7 @@ function renderCoverageMatrixTransposed(rows, annotators, commonPrefix, annotato
     `;
 
     rows.forEach((row) => {
-        const labels = getCoverageOutputLabels(row, commonPrefix);
+        const labels = getCoverageOutputLabels(row, labelContext);
         html += `
             <th class="text-center" style="min-width: 128px;">
               <a href="${buildBrowseUrl(row)}" target="_blank" data-bs-toggle="tooltip" title="${labels.questionPreview}">
@@ -1133,11 +1209,14 @@ function renderCoverageMatrix(coverageStats) {
     $('#coverage-stats-content').show();
 
     const transposed = bindCoverageTransposeControl(coverageStats);
-    const annotatorCounts = computeCoverageHeaderCounts(rows, annotators);
-    const commonPrefix = getCoverageCommonOutputPrefix(rows);
+    const selectedSetupIds = bindCoverageSetupFilter(coverageStats, rows);
+    const selectedSetupSet = new Set(selectedSetupIds);
+    const visibleRows = rows.filter((row) => selectedSetupSet.has(String(row.setup_id || '').trim()));
+    const annotatorCounts = computeCoverageHeaderCounts(visibleRows, annotators);
+    const labelContext = getCoverageLabelContext(visibleRows);
     const html = transposed
-        ? renderCoverageMatrixTransposed(rows, annotators, commonPrefix, annotatorCounts)
-        : renderCoverageMatrixDefault(rows, annotators, commonPrefix, annotatorCounts);
+        ? renderCoverageMatrixTransposed(visibleRows, annotators, annotatorCounts, labelContext)
+        : renderCoverageMatrixDefault(visibleRows, annotators, annotatorCounts, labelContext);
 
     $('#coverage-matrix-container').html(html);
     setupCoverageStickyHeader();
