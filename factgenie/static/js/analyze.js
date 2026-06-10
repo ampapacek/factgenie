@@ -648,6 +648,90 @@ function statusBadge(status) {
     return '<span class="badge bg-secondary">todo</span>';
 }
 
+const coverageTransposeStorageKey = `factgenie_coverage_transpose_${metadata?.id || 'default'}`;
+let coverageTransposeMemoryPreference = false;
+
+function getCoverageTransposePreference() {
+    try {
+        const stored = localStorage.getItem(coverageTransposeStorageKey);
+        if (stored !== null) {
+            return stored === 'true';
+        }
+    } catch (error) {
+        return coverageTransposeMemoryPreference;
+    }
+    return coverageTransposeMemoryPreference;
+}
+
+function setCoverageTransposePreference(value) {
+    coverageTransposeMemoryPreference = value;
+    try {
+        localStorage.setItem(coverageTransposeStorageKey, value ? 'true' : 'false');
+    } catch (error) {
+        // Ignore storage failures; the checkbox still works for the current page.
+    }
+}
+
+function bindCoverageTransposeControl(coverageStats) {
+    const checkbox = $('#coverage-transpose-checkbox');
+    if (checkbox.length === 0) {
+        return false;
+    }
+
+    const transposed = getCoverageTransposePreference();
+    checkbox.prop('checked', transposed);
+    checkbox.off('change.coverageTranspose').on('change.coverageTranspose', function () {
+        setCoverageTransposePreference($(this).is(':checked'));
+        renderCoverageMatrix(coverageStats);
+    });
+    return transposed;
+}
+
+function coverageCountsBadgeGroup(counts) {
+    return `
+        <div class="d-flex justify-content-center align-items-center gap-1 flex-wrap">
+          <span class="badge bg-success">${counts.done}</span>
+          <span class="badge bg-warning text-dark">${counts.skipped}</span>
+          <span class="badge bg-secondary">${counts.todo}</span>
+        </div>
+    `;
+}
+
+function getCoverageOutputLabels(row, commonPrefix) {
+    const fullOutputPath = `${row.dataset}/${row.split}/${row.setup_id}`;
+    const outputPath = commonPrefix && fullOutputPath.startsWith(commonPrefix)
+        ? fullOutputPath.slice(commonPrefix.length)
+        : fullOutputPath;
+    return {
+        outputLabel: `${escapeHtml(outputPath)} #${row.example_idx}`,
+        questionPreview: escapeHtml(row.question_preview || ''),
+    };
+}
+
+function coverageAnnotatorHeaderHtml(ann) {
+    const alias = ann.annotator_alias ? escapeHtml(ann.annotator_alias) : '-';
+    return `
+        <div class="coverage-annotator-label">
+          <div>${escapeHtml(ann.annotator_name || '-')}</div>
+          <div class="text-muted small">${alias}</div>
+        </div>
+    `;
+}
+
+function coverageStatusCellHtml(row, groupKey, status) {
+    const cell = row.cell_details?.[groupKey] || { state: status };
+    const tooltip = buildCoverageTooltip(cell);
+    const cellBrowseUrl = buildCoverageCellBrowseUrl(row, groupKey, status);
+    const redoBadge = cell.redo_status ? `<div><span class="badge bg-info text-dark">redo ${escapeHtml(cell.redo_status)}</span></div>` : '';
+    return `
+        <td class="text-center">
+          <a href="${cellBrowseUrl}" target="_blank" data-bs-toggle="tooltip" data-bs-html="true" title="${tooltip}">
+            ${statusBadge(status)}
+            ${redoBadge}
+          </a>
+        </td>
+    `;
+}
 
 function buildCoveragePlainExportTable() {
     const sourceTable = $('#coverage-matrix-table');
@@ -874,43 +958,29 @@ function computeCoverageRowCounts(row, annotators) {
     return counts;
 }
 
-function renderCoverageMatrix(coverageStats) {
-    const matrix = coverageStats?.matrix;
-    const annotators = matrix?.annotators || [];
-    const rows = matrix?.rows || [];
-
-    if (!matrix || annotators.length === 0 || rows.length === 0) {
-        destroyCoverageStickyHeader();
-        $('#coverage-stats-empty').show();
-        $('#coverage-stats-content').hide();
-        return;
+function getCoverageCommonOutputPrefix(rows) {
+    const outputPaths = rows.map((row) => `${row.dataset}/${row.split}/${row.setup_id}`);
+    if (outputPaths.length === 0) {
+        return '';
     }
 
-    $('#coverage-stats-empty').hide();
-    $('#coverage-stats-content').show();
-
-    const headerCounts = computeCoverageHeaderCounts(rows, annotators);
-
-    const outputPaths = rows.map((row) => `${row.dataset}/${row.split}/${row.setup_id}`);
-    const commonPrefix = (() => {
-        if (outputPaths.length === 0) {
-            return '';
+    let commonParts = outputPaths[0].split('/');
+    for (let i = 1; i < outputPaths.length; i += 1) {
+        const parts = outputPaths[i].split('/');
+        let matchLen = 0;
+        while (matchLen < commonParts.length && matchLen < parts.length && commonParts[matchLen] === parts[matchLen]) {
+            matchLen += 1;
         }
-        let commonParts = outputPaths[0].split('/');
-        for (let i = 1; i < outputPaths.length; i += 1) {
-            const parts = outputPaths[i].split('/');
-            let matchLen = 0;
-            while (matchLen < commonParts.length && matchLen < parts.length && commonParts[matchLen] === parts[matchLen]) {
-                matchLen += 1;
-            }
-            commonParts = commonParts.slice(0, matchLen);
-            if (commonParts.length === 0) {
-                break;
-            }
+        commonParts = commonParts.slice(0, matchLen);
+        if (commonParts.length === 0) {
+            break;
         }
-        return commonParts.length > 0 ? `${commonParts.join('/')}/` : '';
-    })();
+    }
 
+    return commonParts.length > 0 ? `${commonParts.join('/')}/` : '';
+}
+
+function renderCoverageMatrixDefault(rows, annotators, commonPrefix, annotatorCounts) {
     let html = `
       <div class="coverage-matrix-wrapper">
         <table id="coverage-matrix-table" class="table table-bordered table-sm align-middle">
@@ -941,14 +1011,10 @@ function renderCoverageMatrix(coverageStats) {
     `;
 
     annotators.forEach((ann) => {
-        const counts = headerCounts[ann.annotator_group_key] || { done: 0, skipped: 0, todo: 0 };
+        const counts = annotatorCounts[ann.annotator_group_key] || { done: 0, skipped: 0, todo: 0 };
         html += `
             <th class="text-center">
-              <div class="d-flex justify-content-center align-items-center gap-1 flex-wrap">
-                <span class="badge bg-success">${counts.done}</span>
-                <span class="badge bg-warning text-dark">${counts.skipped}</span>
-                <span class="badge bg-secondary">${counts.todo}</span>
-              </div>
+              ${coverageCountsBadgeGroup(counts)}
             </th>
         `;
     });
@@ -962,43 +1028,20 @@ function renderCoverageMatrix(coverageStats) {
     rows.forEach((row) => {
         const rowCounts = computeCoverageRowCounts(row, annotators);
         const rowClass = Number(row.group_parity || 0) % 2 === 0 ? 'table-light' : '';
-        const questionPreview = escapeHtml(row.question_preview || '');
-        const fullOutputPath = `${row.dataset}/${row.split}/${row.setup_id}`;
-        const outputPath = commonPrefix && fullOutputPath.startsWith(commonPrefix)
-            ? fullOutputPath.slice(commonPrefix.length)
-            : fullOutputPath;
-        const outputLabel = `${escapeHtml(outputPath)} #${row.example_idx}`;
+        const labels = getCoverageOutputLabels(row, commonPrefix);
         const browseUrl = buildBrowseUrl(row);
-        const totalsCell = `
-            <div class="d-flex justify-content-center align-items-center gap-1 flex-wrap">
-              <span class="badge bg-success">${rowCounts.done}</span>
-              <span class="badge bg-warning text-dark">${rowCounts.skipped}</span>
-              <span class="badge bg-secondary">${rowCounts.todo}</span>
-            </div>
-        `;
 
         html += `<tr class="${rowClass}">`;
-        html += `<td class="text-center">${totalsCell}</td>`;
-        html += `<td><a href="${browseUrl}" target="_blank">${outputLabel}</a></td>`;
+        html += `<td class="text-center">${coverageCountsBadgeGroup(rowCounts)}</td>`;
+        html += `<td><a href="${browseUrl}" target="_blank">${labels.outputLabel}</a></td>`;
 
         annotators.forEach((ann) => {
             const groupKey = ann.annotator_group_key;
             const status = row.statuses?.[groupKey] || 'todo';
-            const cell = row.cell_details?.[groupKey] || { state: status };
-            const tooltip = buildCoverageTooltip(cell);
-            const cellBrowseUrl = buildCoverageCellBrowseUrl(row, groupKey, status);
-            const redoBadge = cell.redo_status ? `<div><span class="badge bg-info text-dark">redo ${escapeHtml(cell.redo_status)}</span></div>` : '';
-            html += `
-                <td class="text-center">
-                  <a href="${cellBrowseUrl}" target="_blank" data-bs-toggle="tooltip" data-bs-html="true" title="${tooltip}">
-                    ${statusBadge(status)}
-                    ${redoBadge}
-                  </a>
-                </td>
-            `;
+            html += coverageStatusCellHtml(row, groupKey, status);
         });
 
-        html += `<td>${questionPreview}</td>`;
+        html += `<td>${labels.questionPreview}</td>`;
         html += '</tr>';
     });
 
@@ -1007,6 +1050,94 @@ function renderCoverageMatrix(coverageStats) {
         </table>
       </div>
     `;
+
+    return html;
+}
+
+function renderCoverageMatrixTransposed(rows, annotators, commonPrefix, annotatorCounts) {
+    let html = `
+      <div class="coverage-matrix-wrapper">
+        <table id="coverage-matrix-table" class="table table-bordered table-sm align-middle">
+          <thead>
+            <tr>
+              <th rowspan="2" style="min-width: 170px;">Annotator</th>
+              <th rowspan="2" style="min-width: 88px;">Totals</th>
+    `;
+
+    rows.forEach((row) => {
+        const labels = getCoverageOutputLabels(row, commonPrefix);
+        html += `
+            <th class="text-center" style="min-width: 128px;">
+              <a href="${buildBrowseUrl(row)}" target="_blank" data-bs-toggle="tooltip" title="${labels.questionPreview}">
+                ${labels.outputLabel}
+              </a>
+            </th>
+        `;
+    });
+
+    html += `
+            </tr>
+            <tr>
+    `;
+
+    rows.forEach((row) => {
+        const rowCounts = computeCoverageRowCounts(row, annotators);
+        html += `<th class="text-center">${coverageCountsBadgeGroup(rowCounts)}</th>`;
+    });
+
+    html += `
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    annotators.forEach((ann, index) => {
+        const groupKey = ann.annotator_group_key;
+        const rowClass = index % 2 === 0 ? 'table-light' : '';
+        const counts = annotatorCounts[groupKey] || { done: 0, skipped: 0, todo: 0 };
+
+        html += `<tr class="${rowClass}">`;
+        html += `<td>${coverageAnnotatorHeaderHtml(ann)}</td>`;
+        html += `<td class="text-center">${coverageCountsBadgeGroup(counts)}</td>`;
+
+        rows.forEach((row) => {
+            const status = row.statuses?.[groupKey] || 'todo';
+            html += coverageStatusCellHtml(row, groupKey, status);
+        });
+
+        html += '</tr>';
+    });
+
+    html += `
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    return html;
+}
+
+function renderCoverageMatrix(coverageStats) {
+    const matrix = coverageStats?.matrix;
+    const annotators = matrix?.annotators || [];
+    const rows = matrix?.rows || [];
+
+    if (!matrix || annotators.length === 0 || rows.length === 0) {
+        destroyCoverageStickyHeader();
+        $('#coverage-stats-empty').show();
+        $('#coverage-stats-content').hide();
+        return;
+    }
+
+    $('#coverage-stats-empty').hide();
+    $('#coverage-stats-content').show();
+
+    const transposed = bindCoverageTransposeControl(coverageStats);
+    const annotatorCounts = computeCoverageHeaderCounts(rows, annotators);
+    const commonPrefix = getCoverageCommonOutputPrefix(rows);
+    const html = transposed
+        ? renderCoverageMatrixTransposed(rows, annotators, commonPrefix, annotatorCounts)
+        : renderCoverageMatrixDefault(rows, annotators, commonPrefix, annotatorCounts);
 
     $('#coverage-matrix-container').html(html);
     setupCoverageStickyHeader();

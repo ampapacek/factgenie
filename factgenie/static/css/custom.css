@@ -630,6 +630,10 @@ body:not(.annotation-ui-ready) #text-type-info {
     background: var(--bs-body-bg, #fff);
 }
 
+.coverage-annotator-label {
+    min-width: 140px;
+}
+
 .instructions-accordion-body {
     background-color: #eeeeee !important;
 }
