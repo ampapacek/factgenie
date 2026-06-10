@@ -14,23 +14,11 @@ import pandas as pd
 
 import factgenie.workflows as workflows
 import factgenie.redo as redo
+from factgenie.pseudonyms import city_alias_from_index, next_available_city_alias
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 logger = logging.getLogger("factgenie")
-
-ANNOTATOR_PSEUDONYM_CITIES = [
-    "Tokyo",
-    "Paris",
-    "London",
-    "New York",
-    "Sydney",
-    "Berlin",
-    "Rome",
-    "Cairo",
-    "Mumbai",
-    "Mexico City",
-]
 
 
 def generate_example_index(app, campaign):
@@ -692,6 +680,23 @@ def _matrix_state_from_assignment_status(status):
     return "todo"
 
 
+def _has_filled_extra_field(fields):
+    if not isinstance(fields, list):
+        return False
+    for field in fields:
+        if not isinstance(field, dict):
+            continue
+        value = field.get("value")
+        if value is None:
+            continue
+        if isinstance(value, str):
+            if value.strip():
+                return True
+        elif value != "":
+            return True
+    return False
+
+
 def _coverage_status(annotated_count, expected_count):
     if annotated_count <= 0:
         return "missing"
@@ -796,23 +801,11 @@ def _normalize_annotator_id(value):
 
 
 def _city_alias_from_index(index):
-    if index < 0:
-        index = 0
-    base_index = index % len(ANNOTATOR_PSEUDONYM_CITIES)
-    suffix_index = (index // len(ANNOTATOR_PSEUDONYM_CITIES)) + 1
-    alias = ANNOTATOR_PSEUDONYM_CITIES[base_index]
-    if suffix_index > 1:
-        alias = f"{alias} {suffix_index}"
-    return alias
+    return city_alias_from_index(index)
 
 
 def _next_available_city_alias(used_aliases):
-    index = 0
-    while True:
-        alias = _city_alias_from_index(index)
-        if alias not in used_aliases:
-            return alias
-        index += 1
+    return next_available_city_alias(used_aliases)
 
 
 def _build_annotator_public_name_map(annotator_ids, alias_map):
@@ -934,6 +927,10 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
             submitted["annotations"] = [[] for _ in range(len(submitted))]
         if "flags" not in submitted.columns:
             submitted["flags"] = [[] for _ in range(len(submitted))]
+        if "sliders" not in submitted.columns:
+            submitted["sliders"] = [[] for _ in range(len(submitted))]
+        if "text_fields" not in submitted.columns:
+            submitted["text_fields"] = [[] for _ in range(len(submitted))]
 
         submitted["example_idx"] = pd.to_numeric(submitted["example_idx"], errors="coerce")
         submitted = submitted.dropna(subset=key_cols)
@@ -954,13 +951,21 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
             submitted["annotator_group_key"] = submitted["annotator_group"].apply(_normalize_annotator_group)
             submitted["annotations"] = submitted["annotations"].apply(lambda value: value if isinstance(value, list) else [])
             submitted["flags"] = submitted["flags"].apply(lambda value: value if isinstance(value, list) else [])
+            submitted["sliders"] = submitted["sliders"].apply(lambda value: value if isinstance(value, list) else [])
+            submitted["text_fields"] = submitted["text_fields"].apply(lambda value: value if isinstance(value, list) else [])
 
             submitted["has_annotations"] = submitted["annotations"].apply(lambda anns: len(anns) > 0)
+            submitted["has_extra_fields"] = submitted["sliders"].apply(_has_filled_extra_field) | submitted[
+                "text_fields"
+            ].apply(_has_filled_extra_field)
+            submitted["has_completed_content"] = submitted["has_annotations"] | submitted["has_extra_fields"]
             submitted["skip_selected"] = submitted["flags"].apply(_is_skip_selected)
             submitted["span_count"] = submitted["annotations"].apply(len)
 
-            submitted["has_annotations_including_skipped"] = submitted["has_annotations"]
-            submitted["has_annotations_excluding_skipped"] = submitted["has_annotations"] & (~submitted["skip_selected"])
+            submitted["has_annotations_including_skipped"] = submitted["has_completed_content"]
+            submitted["has_annotations_excluding_skipped"] = submitted["has_completed_content"] & (
+                ~submitted["skip_selected"]
+            )
             submitted["span_count_including_skipped"] = submitted["span_count"]
             submitted["span_count_excluding_skipped"] = submitted.apply(
                 lambda row: row["span_count"] if not row["skip_selected"] else 0, axis=1
@@ -1080,17 +1085,27 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
         and "annotator_id" in example_index.columns
         and set(key_cols).issubset(example_index.columns)
     ):
-        ann_df = example_index[key_cols + ["annotator_id", "annotations", "flags"]].copy()
+        for field in ["annotations", "flags", "sliders", "text_fields"]:
+            if field not in example_index.columns:
+                example_index[field] = [[] for _ in range(len(example_index))]
+
+        ann_df = example_index[key_cols + ["annotator_id", "annotations", "flags", "sliders", "text_fields"]].copy()
         ann_df["annotator_id"] = ann_df["annotator_id"].apply(_normalize_annotator_id)
         ann_df = ann_df[ann_df["annotator_id"] != ""]
 
         if not ann_df.empty:
             ann_df["annotations"] = ann_df["annotations"].apply(lambda value: value if isinstance(value, list) else [])
             ann_df["flags"] = ann_df["flags"].apply(lambda value: value if isinstance(value, list) else [])
+            ann_df["sliders"] = ann_df["sliders"].apply(lambda value: value if isinstance(value, list) else [])
+            ann_df["text_fields"] = ann_df["text_fields"].apply(lambda value: value if isinstance(value, list) else [])
 
             ann_df["has_annotations"] = ann_df["annotations"].apply(lambda anns: len(anns) > 0)
+            ann_df["has_extra_fields"] = ann_df["sliders"].apply(_has_filled_extra_field) | ann_df[
+                "text_fields"
+            ].apply(_has_filled_extra_field)
+            ann_df["has_completed_content"] = ann_df["has_annotations"] | ann_df["has_extra_fields"]
             ann_df["skip_selected"] = ann_df["flags"].apply(_is_skip_selected)
-            ann_df["has_annotations_excluding_skipped"] = ann_df["has_annotations"] & (~ann_df["skip_selected"])
+            ann_df["has_annotations_excluding_skipped"] = ann_df["has_completed_content"] & (~ann_df["skip_selected"])
 
             ann_agg = (
                 ann_df.groupby(key_cols + ["annotator_id"])

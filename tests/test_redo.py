@@ -1772,6 +1772,73 @@ def test_question_coverage_admin_displays_redo_revision_status_and_public_hides_
     assert "revision_count" not in public_cell
 
 
+def test_question_coverage_treats_slider_or_text_only_submission_as_done(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_campaign(tmp_path)
+    setup_b_row = campaign.db.iloc[0].copy()
+    setup_b_row["setup_id"] = "setup-b"
+    setup_c_row = campaign.db.iloc[0].copy()
+    setup_c_row["setup_id"] = "setup-c"
+    campaign.db = pd.concat([campaign.db, pd.DataFrame([setup_b_row, setup_c_row])], ignore_index=True)
+    example_index = pd.DataFrame(
+        [
+            {
+                "campaign_id": "redo-test",
+                "dataset": "dataset-a",
+                "split": "test",
+                "setup_id": "setup-a",
+                "example_idx": 0,
+                "annotator_group": 0,
+                "annotator_id": "ann-a",
+                "annotations": [],
+                "flags": [],
+                "sliders": [{"label": "Tone", "value": 4}],
+                "text_fields": [],
+            },
+            {
+                "campaign_id": "redo-test",
+                "dataset": "dataset-a",
+                "split": "test",
+                "setup_id": "setup-b",
+                "example_idx": 0,
+                "annotator_group": 0,
+                "annotator_id": "ann-a",
+                "annotations": [],
+                "flags": [],
+                "sliders": [],
+                "text_fields": [{"label": "Note", "value": "checked"}],
+            },
+            {
+                "campaign_id": "redo-test",
+                "dataset": "dataset-a",
+                "split": "test",
+                "setup_id": "setup-c",
+                "example_idx": 0,
+                "annotator_group": 0,
+                "annotator_id": "ann-a",
+                "annotations": [],
+                "flags": [],
+                "sliders": [],
+                "text_fields": [{"label": "Note", "value": "  "}],
+            },
+        ]
+    )
+    stats = analysis.compute_question_coverage_stats(
+        SimpleNamespace(db={"datasets_obj": {}}),
+        campaign,
+        example_index,
+        show_real_annotator_names=True,
+    )
+    rows = {row["setup_id"]: row for row in stats["matrix"]["rows"]}
+
+    assert rows["setup-a"]["statuses"]["ann-a"] == "done"
+    assert rows["setup-b"]["statuses"]["ann-a"] == "done"
+    assert rows["setup-c"]["statuses"]["ann-a"] == "todo"
+    assert rows["setup-a"]["row_done_count"] == 1
+    assert rows["setup-b"]["row_done_count"] == 1
+    assert rows["setup-c"]["row_done_count"] == 0
+
+
 def test_login_disabled_counts_as_authenticated_view_for_analyze(monkeypatch):
     monkeypatch.setitem(app_mod.app.config["login"], "active", False)
 
