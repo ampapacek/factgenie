@@ -1530,7 +1530,7 @@ body.auth-only #annotator-auth-modal .modal-dialog {
     border-radius: 10px;
 }
 
-/* Ensure buttons stay on a single line */
+/* Let many annotator buttons wrap while each button keeps its natural width. */
 #annotations-select .btn {
     flex-shrink: 0;
 }
