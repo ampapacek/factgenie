@@ -1111,14 +1111,6 @@ body.auth-only #annotator-auth-modal .modal-dialog {
     border: 1px solid #ddd;
 }
 
-.btn-ann-select-skipped,
-.btn-ann-select-skipped.disabled,
-.btn-ann-select-skipped:disabled {
-    opacity: 0.55;
-    filter: grayscale(0.15);
-    cursor: default;
-}
-
 .annotator-primary-label {
     font-weight: 600;
 }

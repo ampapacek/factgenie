@@ -538,7 +538,7 @@ function savePreferredAnnotatorsFromSelection(selection) {
 }
 
 function getSelectableAnnotatorIds() {
-    return $(".btn-ann-select").not(".btn-ann-select-skipped").map(function () {
+    return $(".btn-ann-select").map(function () {
         return $(this).data('ann');
     }).get();
 }
@@ -594,7 +594,7 @@ function currentExampleCanShowAnnotatorNames() {
         return false;
     }
     for (const annInfo of currentAnnInfo.values()) {
-        if (getAnnotatorNames(annInfo).length > 0) {
+        if (annInfo?.has_non_skipped_annotation && getAnnotatorNames(annInfo).length > 0) {
             return true;
         }
     }
@@ -603,7 +603,7 @@ function currentExampleCanShowAnnotatorNames() {
 
 function currentExampleDefaultsToAnnotatorNames() {
     for (const annInfo of currentAnnInfo.values()) {
-        if (annInfo?.expose_annotator_id && getAnnotatorNames(annInfo).length > 0) {
+        if (annInfo?.has_non_skipped_annotation && annInfo?.expose_annotator_id && getAnnotatorNames(annInfo).length > 0) {
             return true;
         }
     }
@@ -660,30 +660,25 @@ function createOutputBoxes(generated_outputs) {
     });
     const selectorAnnIds = sortedAnnIds.filter((annId) => {
         const info = annIds.get(annId);
-        return showAnnotatorNames || info?.has_non_skipped_annotation;
+        return info?.has_non_skipped_annotation;
     });
 
     // add an option for each campaign id
     for (const ann_id of selectorAnnIds) {
         const annInfo = annIds.get(ann_id);
         const annLabel = getAnnotatorLabelHtml(ann_id, annInfo);
-        const isSkippedOnly = !annInfo?.has_non_skipped_annotation && annInfo?.has_skipped_annotation;
-        const extraClasses = isSkippedOnly ? " btn-ann-select-skipped disabled" : "";
-        const disabledAttr = isSkippedOnly ? ' disabled aria-disabled="true"' : "";
-        const button = $(`<button type="button" class="btn btn-sm btn-primary btn-ann-select${extraClasses}" data-ann="${ann_id}"${disabledAttr}>${annLabel}</button>`);
-        if (!isSkippedOnly) {
-            button.on('click', function () {
-                $(this).toggleClass('active');
-                const activeSelection = $('.btn-ann-select.active').map(function () {
-                    return $(this).data('ann');
-                }).get();
-                savePreferredAnnotatorsFromSelection(activeSelection);
-                updateDisplayedAnnotations();
-            });
-        }
+        const button = $(`<button type="button" class="btn btn-sm btn-primary btn-ann-select" data-ann="${ann_id}">${annLabel}</button>`);
+        button.on('click', function () {
+            $(this).toggleClass('active');
+            const activeSelection = $('.btn-ann-select.active').map(function () {
+                return $(this).data('ann');
+            }).get();
+            savePreferredAnnotatorsFromSelection(activeSelection);
+            updateDisplayedAnnotations();
+        });
         selectBox.append(button);
     }
-    if (annIds.size > 0) {
+    if (selectorAnnIds.length > 0) {
         $("#setuparea").show();
     } else {
         $("#setuparea").hide();
@@ -765,7 +760,7 @@ function highlightSetup() {
         if (!specificBox.is(":visible")) {
             // Add this campaign to selected campaigns if not already there
             const highlightButton = $(`.btn-ann-select[data-ann="${window.highlight_ann_campaign}"]`);
-            if (!selected_campaigns.includes(window.highlight_ann_campaign) && !highlightButton.hasClass("btn-ann-select-skipped")) {
+            if (!selected_campaigns.includes(window.highlight_ann_campaign) && highlightButton.length > 0) {
                 highlightButton.addClass("active");
                 selected_campaigns.push(window.highlight_ann_campaign);
                 updateDisplayedAnnotations();
