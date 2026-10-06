@@ -377,6 +377,8 @@ def analyze_detail(campaign_id):
         show_real_annotator_names=show_real_annotator_names,
         rag_mistake_setup_id=rag_mistake_setup_id,
         rag_mistake_span_category=rag_mistake_span_category,
+        selected_annotators=request.args.getlist("annotator"),
+        averaging=request.args.get("averaging"),
     )
 
     return render_template(

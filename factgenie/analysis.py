@@ -20,6 +20,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 logger = logging.getLogger("factgenie")
 
+# How Analyze averages span and slider stats: "pooled" counts every annotation once,
+# "annotator" averages each annotator's own mean so every annotator weighs the same.
+ANALYZE_AVERAGING_MODES = ("pooled", "annotator")
+
 
 def generate_example_index(app, campaign):
     logger.info(f"Preparing example index for campaign {campaign.campaign_id}")
@@ -189,6 +193,39 @@ def compute_prevalence(ann_counts, example_index):
         axis=1,
     ).round(3)
 
+    return ann_counts
+
+
+def apply_per_annotator_span_averages(ann_counts, span_index, example_index):
+    """Replace pooled avg_count/prevalence with the mean of each annotator's own averages."""
+    logger.info("Computing per-annotator span averages")
+
+    keys = ["dataset", "split", "setup_id"]
+    annotations = example_index.assign(annotator_key=annotator_key_series(example_index))
+    spans = span_index.assign(annotator_key=annotator_key_series(span_index))
+    annotator_keys = keys + ["annotator_key"]
+    per_annotator = annotations.groupby(annotator_keys).size().rename("annotation_count").reset_index()
+
+    averages = []
+    for annotation_type in ann_counts["annotation_type"].unique():
+        span_counts = spans[spans["annotation_type"] == annotation_type].groupby(annotator_keys).size().rename("spans")
+        affected = annotations[annotations[f"cat_{annotation_type}"] > 0].groupby(annotator_keys).size().rename("affected")
+        df = per_annotator.join(span_counts, on=annotator_keys).join(affected, on=annotator_keys).fillna(0)
+        df["avg_count"] = df["spans"] / df["annotation_count"]
+        df["prevalence"] = df["affected"] / df["annotation_count"]
+        type_averages = df.groupby(keys).agg(avg_count=("avg_count", "mean"), prevalence=("prevalence", "mean")).reset_index()
+        type_averages["annotation_type"] = annotation_type
+        averages.append(type_averages)
+
+    ann_counts = ann_counts.drop(columns=["avg_count", "prevalence"])
+    if not averages:
+        ann_counts["avg_count"] = 0.0
+        ann_counts["prevalence"] = 0.0
+        return ann_counts
+
+    ann_counts = ann_counts.merge(pd.concat(averages), on=keys + ["annotation_type"], how="left")
+    ann_counts["avg_count"] = ann_counts["avg_count"].fillna(0.0).round(3)
+    ann_counts["prevalence"] = ann_counts["prevalence"].fillna(0.0).round(3)
     return ann_counts
 
 
@@ -362,14 +399,20 @@ def compute_rag_mistake_stats(
     selected_span_category=None,
     show_real_annotator_names=True,
     span_index=None,
+    defaults=None,
 ):
-    """Summarize the three common RAG mistake buckets for the selected setup and span category."""
+    """Summarize the three common RAG mistake buckets for the selected setup and span category.
+
+    Pass `defaults` computed from the unfiltered span index when `span_index` is filtered (e.g. by annotator),
+    so that a setup missing from the filtered spans yields no matches instead of falling back to the default.
+    """
     if span_index is None:
         span_index = generate_span_index(app, campaign)
     if span_index.empty:
         return []
 
-    defaults = _get_rag_summary_defaults(span_index, campaign)
+    if defaults is None:
+        defaults = _get_rag_summary_defaults(span_index, campaign)
     selected_setup_id, selected_span_category = _resolve_rag_summary_selection(
         defaults,
         selected_setup_id=selected_setup_id,
@@ -823,6 +866,52 @@ def _normalize_annotator_id(value):
     if not text or text.lower() in {"nan", "<na>"}:
         return ""
     return text
+
+
+def annotator_key_series(df):
+    if "annotator_id" not in df.columns:
+        return pd.Series(["unknown"] * len(df), index=df.index, dtype=object)
+    return df["annotator_id"].apply(lambda value: _normalize_annotator_id(value) or "unknown")
+
+
+def build_annotator_filter(example_index, annotator_aliases, show_real_annotator_names, selected_values=None):
+    """Build Analyze annotator filter options and resolve the selected values to annotator ids.
+
+    When real names are hidden, options and accepted values are pseudonyms only, so real ids never reach the page.
+    Returns (filter data for the template, list of selected annotator ids; empty means all annotators).
+    """
+    annotator_ids = sorted(set(annotator_key_series(example_index)))
+    public_names = _build_annotator_public_name_map(annotator_ids, annotator_aliases or {})
+
+    options = []
+    value_to_id = {}
+    for annotator_id in annotator_ids:
+        public_name = public_names.get(annotator_id, annotator_id)
+        if show_real_annotator_names:
+            value = annotator_id
+            label = f"{annotator_id} ({public_name})" if public_name != annotator_id else annotator_id
+        else:
+            value = public_name
+            label = public_name
+        options.append({"value": value, "label": label})
+        value_to_id[value] = annotator_id
+
+    selected = []
+    selected_ids = []
+    for value in selected_values or []:
+        value = str(value).strip()
+        annotator_id = value_to_id.get(value)
+        if annotator_id is not None and annotator_id not in selected_ids:
+            selected.append(value)
+            selected_ids.append(annotator_id)
+
+    labels_by_value = {option["value"]: option["label"] for option in options}
+    filter_data = {
+        "options": options,
+        "selected": selected,
+        "selected_label": ", ".join(labels_by_value[value] for value in selected) if selected else "All annotators",
+    }
+    return filter_data, selected_ids
 
 
 def _city_alias_from_index(index):
@@ -1346,7 +1435,7 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
     }
 
 
-def compute_slider_stats(example_index, datasets, slider_label_order=None):
+def compute_slider_stats(example_index, datasets, slider_label_order=None, averaging="pooled"):
     slider_rows = []
     setup_annotation_counts = (
         example_index.groupby(["dataset", "split", "setup_id"])
@@ -1381,6 +1470,7 @@ def compute_slider_stats(example_index, datasets, slider_label_order=None):
                     "split": row["split"],
                     "setup_id": row["setup_id"],
                     "example_idx": row["example_idx"],
+                    "annotator_key": _normalize_annotator_id(row.get("annotator_id")) or "unknown",
                     "label": label,
                     "value": value_num,
                 }
@@ -1391,20 +1481,34 @@ def compute_slider_stats(example_index, datasets, slider_label_order=None):
 
     df = pd.DataFrame.from_records(slider_rows)
 
-    def build_stats_df(groupby_cols):
+    def build_stats_df(groupby_cols, per_annotator=False):
+        grouped = df.groupby(groupby_cols)
         stats = (
-            df.groupby(groupby_cols)["value"]
+            grouped["value"]
             .agg(count="count", min_value="min", max_value="max", avg_value="mean", std_value="std")
             .reset_index()
         )
+        stats = stats.merge(
+            grouped["annotator_key"].nunique().rename("annotator_count").reset_index(), on=groupby_cols
+        )
+        if per_annotator:
+            # Average each annotator's mean so that every annotator weighs the same; std is then the spread
+            # between annotator means.
+            annotator_means = df.groupby(groupby_cols + ["annotator_key"])["value"].mean().reset_index()
+            mean_stats = (
+                annotator_means.groupby(groupby_cols)["value"].agg(avg_value="mean", std_value="std").reset_index()
+            )
+            stats = stats.drop(columns=["avg_value", "std_value"]).merge(mean_stats, on=groupby_cols)
         stats["avg_value"] = stats["avg_value"].round(3)
         stats["min_value"] = stats["min_value"].round(3)
         stats["max_value"] = stats["max_value"].round(3)
         stats["std_value"] = stats["std_value"].fillna(0).round(3)
         return stats
 
-    overall_df = build_stats_df(["label"])
+    per_annotator = averaging == "annotator"
+    overall_df = build_stats_df(["label"], per_annotator=per_annotator)
     by_example_df = build_stats_df(["dataset", "split", "setup_id", "example_idx", "label"])
+    setup_summary_df = build_stats_df(["dataset", "split", "setup_id", "label"], per_annotator=per_annotator)
     overall = overall_df.to_dict(orient="records")
 
     example_text_map = {}
@@ -1460,6 +1564,11 @@ def compute_slider_stats(example_index, datasets, slider_label_order=None):
             labels_sorted = sorted(labels)
 
         rows = [rows_by_example[idx] for idx in sorted(rows_by_example)]
+        setup_summary = setup_summary_df[
+            (setup_summary_df["dataset"] == dataset)
+            & (setup_summary_df["split"] == split)
+            & (setup_summary_df["setup_id"] == setup_id)
+        ]
 
         by_setup.append(
             {
@@ -1469,6 +1578,15 @@ def compute_slider_stats(example_index, datasets, slider_label_order=None):
                 "annotation_count": setup_annotation_count_map.get((dataset, split, setup_id), 0),
                 "slider_labels": labels_sorted,
                 "rows": rows,
+                "summary": {
+                    summary_row["label"]: {
+                        "count": int(summary_row["count"]),
+                        "avg_value": summary_row["avg_value"],
+                        "min_value": summary_row["min_value"],
+                        "max_value": summary_row["max_value"],
+                    }
+                    for _, summary_row in setup_summary.iterrows()
+                },
             }
         )
 
@@ -1484,17 +1602,21 @@ def compute_statistics(
     show_real_annotator_names=True,
     rag_mistake_setup_id=None,
     rag_mistake_span_category=None,
+    selected_annotators=None,
+    averaging="pooled",
 ):
     statistics = {}
+    if averaging not in ANALYZE_AVERAGING_MODES:
+        averaging = "pooled"
 
     span_index = generate_span_index(app, campaign)
     example_index = generate_example_index(app, campaign)
     # Skipped annotations do not count towards span or slider statistics.
     if "flags" in span_index.columns:
         span_index = span_index[~span_index["flags"].apply(_is_skip_selected)]
-    filtered_example_index = example_index
+    non_skipped_example_index = example_index
     if "flags" in example_index.columns:
-        filtered_example_index = example_index[~example_index["flags"].apply(_is_skip_selected)]
+        non_skipped_example_index = example_index[~example_index["flags"].apply(_is_skip_selected)]
     annotator_aliases = _load_campaign_annotator_alias_map(campaign)
     rag_mistake_defaults = _get_rag_summary_defaults(span_index, campaign)
     selected_rag_setup_id, selected_rag_span_category = _resolve_rag_summary_selection(
@@ -1502,6 +1624,23 @@ def compute_statistics(
         selected_setup_id=rag_mistake_setup_id,
         selected_span_category=rag_mistake_span_category,
     )
+
+    # The annotator filter applies to the Spans, Summaries and Sliders tabs; "By annotator" and coverage stay
+    # unfiltered because they already break results down per annotator.
+    annotator_filter, selected_annotator_ids = build_annotator_filter(
+        non_skipped_example_index,
+        annotator_aliases,
+        show_real_annotator_names,
+        selected_values=selected_annotators,
+    )
+    annotator_filter["averaging"] = averaging
+    statistics["annotator_filter"] = annotator_filter
+    filtered_example_index = non_skipped_example_index
+    if selected_annotator_ids:
+        span_index = span_index[annotator_key_series(span_index).isin(selected_annotator_ids)]
+        filtered_example_index = filtered_example_index[
+            annotator_key_series(filtered_example_index).isin(selected_annotator_ids)
+        ]
     coverage_stats = compute_question_coverage_stats(
         app,
         campaign,
@@ -1515,6 +1654,10 @@ def compute_statistics(
         annotation_counts = compute_ann_counts(span_index)
         annotation_counts = compute_avg_ann_counts(annotation_counts, filtered_example_index)
         annotation_counts = compute_prevalence(annotation_counts, filtered_example_index)
+        if averaging == "annotator":
+            annotation_counts = apply_per_annotator_span_averages(
+                annotation_counts, span_index, filtered_example_index
+            )
 
         # replace NaNs with 0
         annotation_counts = annotation_counts.fillna(0.0)
@@ -1534,6 +1677,7 @@ def compute_statistics(
             selected_span_category=selected_rag_span_category,
             show_real_annotator_names=show_real_annotator_names,
             span_index=span_index,
+            defaults=rag_mistake_defaults,
         )
         if rag_mistake_stats:
             statistics["rag_mistake_stats"] = rag_mistake_stats
@@ -1557,11 +1701,13 @@ def compute_statistics(
             for slider in campaign.metadata["config"].get("sliders", [])
             if isinstance(slider, dict) and slider.get("label")
         ]
-        slider_stats = compute_slider_stats(filtered_example_index, app.db["datasets_obj"], slider_label_order)
+        slider_stats = compute_slider_stats(
+            filtered_example_index, app.db["datasets_obj"], slider_label_order, averaging=averaging
+        )
         if slider_stats:
             statistics["slider_stats"] = slider_stats
         annotator_stats = compute_annotator_stats(
-            filtered_example_index,
+            non_skipped_example_index,
             slider_label_order,
             annotator_aliases=annotator_aliases,
             show_real_annotator_names=show_real_annotator_names,

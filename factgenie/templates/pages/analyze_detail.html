@@ -25,6 +25,65 @@
 
 <body>
   {% include 'pages/navbar.html' %}
+{% macro annotator_filter_dropdown(annotator_filter, form_id) %}
+<label class="form-label d-block" for="{{ form_id }}-annotator-toggle">Annotators</label>
+<div class="dropdown annotator-filter" data-all-label="All annotators">
+  <button id="{{ form_id }}-annotator-toggle" class="btn btn-outline-secondary dropdown-toggle w-100 text-start text-truncate annotator-filter-toggle"
+    type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">{{ annotator_filter.selected_label }}</button>
+  <div class="dropdown-menu p-2 w-100">
+    <div class="form-check">
+      <input class="form-check-input annotator-filter-all" type="checkbox" id="{{ form_id }}-annotator-all"
+        {% if not annotator_filter.selected %}checked{% endif %}>
+      <label class="form-check-label" for="{{ form_id }}-annotator-all">All annotators</label>
+    </div>
+    <hr class="dropdown-divider">
+    {% for option in annotator_filter.options %}
+    <div class="form-check">
+      <input class="form-check-input annotator-filter-option" type="checkbox" name="annotator" value="{{ option.value }}"
+        id="{{ form_id }}-annotator-{{ loop.index }}" data-label="{{ option.label }}"
+        {% if option.value in annotator_filter.selected %}checked{% endif %}>
+      <label class="form-check-label" for="{{ form_id }}-annotator-{{ loop.index }}">{{ option.label }}</label>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro averaging_select(annotator_filter, form_id) %}
+<label for="{{ form_id }}-averaging" class="form-label">Average over</label>
+<select id="{{ form_id }}-averaging" name="averaging" class="form-select">
+  <option value="pooled" {% if annotator_filter.averaging == 'pooled' %}selected{% endif %}>All annotations (pooled)</option>
+  <option value="annotator" {% if annotator_filter.averaging == 'annotator' %}selected{% endif %}>Annotators (mean of annotator averages)</option>
+</select>
+{% endmacro %}
+
+{% macro annotator_filter_form(annotator_filter, rag_summary, tab, form_id) %}
+<form class="card mt-4 mb-4" method="get" action="{{ host_prefix }}/analyze/detail/{{ campaign.metadata.id }}">
+  <div class="card-body">
+    <input type="hidden" name="tab" value="{{ tab }}">
+    {% if rag_summary %}
+    <input type="hidden" name="summary_setup_id" value="{{ rag_summary.selected_setup_id }}">
+    <input type="hidden" name="summary_span_category" value="{{ rag_summary.selected_span_category }}">
+    {% endif %}
+    <div class="row g-3 align-items-end">
+      <div class="col-md-6">{{ annotator_filter_dropdown(annotator_filter, form_id) }}</div>
+      <div class="col-md-6">{{ averaging_select(annotator_filter, form_id) }}</div>
+    </div>
+    <div class="d-flex justify-content-between align-items-center mt-3 gap-3">
+      <div class="text-muted small">
+        <b>Pooled</b>: every annotation counts once, so annotators who annotated more outputs weigh more.
+        <b>Annotators</b>: each annotator's average is computed first and then averaged, so every annotator weighs the same
+        (Std then shows the spread between annotators).
+      </div>
+      <button type="submit" class="btn btn-outline-secondary text-nowrap">Update</button>
+    </div>
+  </div>
+</form>
+{% endmacro %}
+
+{% set annotator_filter = statistics.annotator_filter or {"options": [], "selected": [], "selected_label": "All annotators", "averaging": "pooled"} %}
+
+
 
   <div class="container w-75 mt-5">
 
@@ -67,7 +126,7 @@
       {% if not statistics.ann_counts %}
       <div class="alert alert-info mt-3" role="alert">
         <i class="fa fa-info"></i>
-        <span>No annotations were yet collected in this campaign.</span>
+        <span>{% if annotator_filter.selected %}No span annotations from the selected annotators.{% else %}No annotations were yet collected in this campaign.{% endif %}</span>
       </div>
       {% endif %}
 
@@ -100,6 +159,7 @@
     </ul>
     <div class="tab-content" id="pills-tabContent">
       <div class="tab-pane mb-5 fade {% if active_stats_tab == 'spans' %}show active{% endif %}" id="pills-stats-spans" role="tabpanel" aria-labelledby="pills-spans-tab">
+        {{ annotator_filter_form(annotator_filter, statistics.rag_mistake_summary, "spans", "spans-filter") }}
         <div class="mt-4">
           <h5>Full results</h5>
           <table id="full-table" class="table table-bordered table-hover" data-show-export="true" data-sortable="true"
@@ -118,7 +178,7 @@
                   data-title-tooltip="The total number of label occurrences within non-skipped annotations.">Count</th>
                 <th data-sortable="true" data-field="avg_count" data-align="right"
                   data-title-tooltip="The average number of label occurrences per annotation (=Count / Annotations).">
-                  Avg. per annotation</th>
+                  Avg. per ann.</th>
                 <th data-sortable="true" data-field="prevalence" data-align="right"
                   data-title-tooltip="The share of annotations containing the label (0 to 1 range).">Prevalence</th>
               </tr>
@@ -143,7 +203,7 @@
                   data-title-tooltip="The total number of label occurrences within non-skipped annotations.">Count</th>
                 <th data-sortable="true" data-field="avg_count" data-align="right"
                   data-title-tooltip="The average number of label occurrences per annotation (=Count / Annotations).">
-                  Avg. per annotation</th>
+                  Avg. per ann.</th>
                 <th data-sortable="true" data-field="prevalence" data-align="right"
                   data-title-tooltip="The share of annotations containing the label (0 to 1 range).">Prevalence</th>
               </tr>
@@ -169,7 +229,7 @@
                   data-title-tooltip="The total number of label occurrences within non-skipped annotations.">Count</th>
                 <th data-sortable="true" data-field="avg_count" data-align="right"
                   data-title-tooltip="The average number of label occurrences per annotation (=Count / Annotations).">
-                  Avg. per annotation</th>
+                  Avg. per ann.</th>
                 <th data-sortable="true" data-field="prevalence" data-align="right"
                   data-title-tooltip="The share of annotations containing the label (0 to 1 range).">Prevalence</th>
               </tr>
@@ -196,7 +256,7 @@
                   data-title-tooltip="The total number of label occurrences within non-skipped annotations.">Count</th>
                 <th data-sortable="true" data-field="avg_count" data-align="right"
                   data-title-tooltip="The average number of label occurrences per annotation (=Count / Annotations).">
-                  Avg. per annotation</th>
+                  Avg. per ann.</th>
                 <th data-sortable="true" data-field="prevalence" data-align="right"
                   data-title-tooltip="The share of annotations containing the label (0 to 1 range).">Prevalence</th>
               </tr>
@@ -245,8 +305,9 @@
         <form class="card mt-4 mb-4" method="get" action="{{ host_prefix }}/analyze/detail/{{ campaign.metadata.id }}">
           <div class="card-body">
             <input type="hidden" name="tab" value="summaries">
+            <input type="hidden" name="averaging" value="{{ annotator_filter.averaging }}">
             <div class="row g-3 align-items-end">
-              <div class="col-md-6">
+              <div class="col-md-4">
                 <label for="summary_setup_id" class="form-label">Setup</label>
                 <select id="summary_setup_id" name="summary_setup_id" class="form-select">
                   <option value="all" {% if rag_summary.selected_setup_id == 'all' %}selected{% endif %}>All setups</option>
@@ -255,7 +316,7 @@
                   {% endfor %}
                 </select>
               </div>
-              <div class="col-md-6">
+              <div class="col-md-4">
                 <label for="summary_span_category" class="form-label">Span type</label>
                 <select id="summary_span_category" name="summary_span_category" class="form-select">
                   <option value="all" {% if rag_summary.selected_span_category == 'all' %}selected{% endif %}>All span types</option>
@@ -264,10 +325,12 @@
                   {% endfor %}
                 </select>
               </div>
+              <div class="col-md-4">{{ annotator_filter_dropdown(annotator_filter, "summary-filter") }}</div>
             </div>
             <div class="d-flex justify-content-between align-items-center mt-3">
               <div class="text-muted small">
-                Showing summaries for setup <b>{{ rag_summary.selected_setup_label }}</b> and span type <b>{{ rag_summary.selected_span_category_label }}</b>.
+                Showing summaries for setup <b>{{ rag_summary.selected_setup_label }}</b>, span type <b>{{ rag_summary.selected_span_category_label }}</b>
+                and annotators <b>{{ annotator_filter.selected_label }}</b>.
               </div>
               <button type="submit" class="btn btn-outline-secondary">Update summary</button>
             </div>
@@ -350,9 +413,10 @@
       </div>
 
       <div class="tab-pane mb-5 fade {% if active_stats_tab == 'sliders' %}show active{% endif %}" id="pills-stats-sliders" role="tabpanel" aria-labelledby="pills-slider-stats-tab">
+        {{ annotator_filter_form(annotator_filter, statistics.rag_mistake_summary, "sliders", "sliders-filter") }}
         <div id="slider-stats-empty" class="alert alert-info" role="alert">
           <i class="fa fa-info"></i>
-          <span>No slider data was collected for this campaign.</span>
+          <span>{% if annotator_filter.selected %}No slider data from the selected annotators.{% else %}No slider data was collected for this campaign.{% endif %}</span>
         </div>
         <h5 class="mt-4">All examples</h5>
         <table id="slider-overall-table" class="table table-bordered table-hover" data-show-export="true"
@@ -361,6 +425,7 @@
             <tr>
               <th data-sortable="true" data-field="label">Slider</th>
               <th data-sortable="true" data-field="count" data-align="right">Count</th>
+              <th data-sortable="true" data-field="annotator_count" data-align="right">Annotators</th>
               <th data-sortable="true" data-field="min_value" data-align="right">Min</th>
               <th data-sortable="true" data-field="max_value" data-align="right">Max</th>
               <th data-sortable="true" data-field="avg_value" data-align="right">Avg</th>

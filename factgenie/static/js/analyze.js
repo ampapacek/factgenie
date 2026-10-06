@@ -176,7 +176,7 @@ const fullTableColumns = ['dataset', 'split', 'setup_id', 'example_count', 'anno
 const spanTableColumns = ['example_count', 'annotation_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
 const setupTableColumns = ['setup_id', 'example_count', 'annotation_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
 const datasetTableColumns = ['dataset', 'split', 'example_count', 'annotation_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
-const sliderOverallColumns = ['label', 'count', 'min_value', 'max_value', 'avg_value', 'std_value'];
+const sliderOverallColumns = ['label', 'count', 'annotator_count', 'min_value', 'max_value', 'avg_value', 'std_value'];
 const sliderMetrics = [
     { key: 'count', label: 'Count' },
     { key: 'avg_value', label: 'Avg' },
@@ -382,7 +382,17 @@ function renderSliderSetupSummaryTable(sliderStats) {
     const setupSummaries = sliderStats.by_setup.map((setup, index) => {
         const aggregates = {};
 
-        (setup.rows || []).forEach((row) => {
+        // Prefer the server-side summary, which respects the selected averaging mode.
+        Object.entries(setup.summary || {}).forEach(([label, stats]) => {
+            aggregates[label] = {
+                count: Number(stats.count) || 0,
+                avg_value: Number(stats.avg_value),
+                min_value: Number(stats.min_value),
+                max_value: Number(stats.max_value),
+            };
+        });
+
+        (setup.summary ? [] : (setup.rows || [])).forEach((row) => {
             Object.entries(row.stats || {}).forEach(([label, stats]) => {
                 if (!aggregates[label]) {
                     aggregates[label] = {
@@ -459,6 +469,10 @@ function renderSliderSetupSummaryTable(sliderStats) {
                 }
 
                 if (metricKey === 'avg_value') {
+                    if (Number.isFinite(stats.avg_value)) {
+                        rowData[setup.field] = Number(stats.avg_value.toFixed(3));
+                        return;
+                    }
                     rowData[setup.field] = stats.count > 0 ? Number((stats.weightedSum / stats.count).toFixed(3)) : '';
                     return;
                 }
@@ -1288,5 +1302,30 @@ $(document).ready(function () {
     }
 });
 
+
+function updateAnnotatorFilterLabel(container) {
+    const checked = container.find('.annotator-filter-option:checked');
+    const label = checked.length === 0
+        ? container.attr('data-all-label')
+        : checked.map(function () { return $(this).attr('data-label'); }).get().join(', ');
+    container.find('.annotator-filter-toggle').text(label);
+}
+
+$(document).on('change', '.annotator-filter-all', function () {
+    const container = $(this).closest('.annotator-filter');
+    if (this.checked) {
+        container.find('.annotator-filter-option').prop('checked', false);
+    } else if (container.find('.annotator-filter-option:checked').length === 0) {
+        // "All" is the only way to have nothing selected, so it cannot be unchecked on its own.
+        this.checked = true;
+    }
+    updateAnnotatorFilterLabel(container);
+});
+
+$(document).on('change', '.annotator-filter-option', function () {
+    const container = $(this).closest('.annotator-filter');
+    container.find('.annotator-filter-all').prop('checked', container.find('.annotator-filter-option:checked').length === 0);
+    updateAnnotatorFilterLabel(container);
+});
 
 $(document).on('change', '.btn-check-campaign', updateComparisonData);
