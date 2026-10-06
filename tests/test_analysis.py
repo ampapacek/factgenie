@@ -109,3 +109,34 @@ def test_rag_mistake_stats_respects_selected_setup_and_span(monkeypatch):
 
     assert filtered[1]["example_count"] == 1
     assert filtered[1]["examples"][0]["setup_id"] == "plain"
+
+
+def _span_count_fixture():
+    # Two annotators annotate the same single output; only alice marks two category-0 spans.
+    example_index = pd.DataFrame(
+        [
+            {"dataset": "demo", "split": "test", "setup_id": "rag", "example_idx": 0, "annotator_id": "alice", "cat_0": 2},
+            {"dataset": "demo", "split": "test", "setup_id": "rag", "example_idx": 0, "annotator_id": "bob", "cat_0": 0},
+        ]
+    )
+    span_index = pd.DataFrame(
+        [
+            {"dataset": "demo", "split": "test", "setup_id": "rag", "example_idx": 0, "annotator_id": "alice", "annotation_type": 0},
+            {"dataset": "demo", "split": "test", "setup_id": "rag", "example_idx": 0, "annotator_id": "alice", "annotation_type": 0},
+        ]
+    )
+    return example_index, span_index
+
+
+def test_span_averages_are_per_annotation_not_per_output():
+    example_index, span_index = _span_count_fixture()
+
+    counts = analysis.compute_ann_counts(span_index)
+    counts = analysis.compute_avg_ann_counts(counts, example_index)
+    counts = analysis.compute_prevalence(counts, example_index)
+    row = counts.iloc[0]
+
+    assert row["example_count"] == 1
+    assert row["annotation_count"] == 2
+    assert row["avg_count"] == 1.0
+    assert row["prevalence"] == 0.5

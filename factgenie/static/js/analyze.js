@@ -172,10 +172,10 @@ function updateComparisonData() {
     return combinations;
 }
 
-const fullTableColumns = ['dataset', 'split', 'setup_id', 'example_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
-const spanTableColumns = ['example_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
-const setupTableColumns = ['setup_id', 'example_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
-const datasetTableColumns = ['dataset', 'split', 'example_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
+const fullTableColumns = ['dataset', 'split', 'setup_id', 'example_count', 'annotation_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
+const spanTableColumns = ['example_count', 'annotation_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
+const setupTableColumns = ['setup_id', 'example_count', 'annotation_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
+const datasetTableColumns = ['dataset', 'split', 'example_count', 'annotation_count', 'annotation_type', 'ann_count', 'avg_count', 'prevalence'];
 const sliderOverallColumns = ['label', 'count', 'min_value', 'max_value', 'avg_value', 'std_value'];
 const sliderMetrics = [
     { key: 'count', label: 'Count' },

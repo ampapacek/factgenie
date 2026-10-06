@@ -152,19 +152,20 @@ def compute_ann_counts(df):
 def compute_avg_ann_counts(ann_counts, example_index):
     logger.info("Computing average annotation counts")
 
-    # Get example counts through groupby operation
+    # Each row of the example index is one annotation (one annotator x one output), so averages are taken
+    # per annotation; `example_count` keeps the number of distinct outputs for reference.
     example_counts = (
         example_index.groupby(["dataset", "split", "setup_id"])
-        .agg(example_count=("example_idx", "nunique"))
+        .agg(example_count=("example_idx", "nunique"), annotation_count=("example_idx", "size"))
         .reset_index()
-        .astype({"example_count": int})
+        .astype({"example_count": int, "annotation_count": int})
     )
 
     # Merge counts with original dataframe
     ann_counts = ann_counts.merge(example_counts, on=["dataset", "split", "setup_id"], how="left")
 
     # Compute average counts vectorized
-    ann_counts["avg_count"] = (ann_counts["ann_count"] / ann_counts["example_count"]).round(3)
+    ann_counts["avg_count"] = (ann_counts["ann_count"] / ann_counts["annotation_count"]).round(3)
 
     return ann_counts
 
@@ -181,8 +182,8 @@ def compute_prevalence(ann_counts, example_index):
                 & (example_index["setup_id"] == row["setup_id"])
                 & (example_index[f"cat_{row['annotation_type']}"] > 0)
             ).sum()
-            / row["example_count"]
-            if row["example_count"] > 0
+            / row["annotation_count"]
+            if row["annotation_count"] > 0
             else 0
         ),
         axis=1,
@@ -195,7 +196,15 @@ def aggregate_ann_counts(ann_counts, groupby):
     if groupby == "span":
         aggregated = (
             ann_counts.groupby("annotation_type")
-            .agg({"avg_count": "mean", "ann_count": "sum", "example_count": "sum", "prevalence": "mean"})
+            .agg(
+                {
+                    "avg_count": "mean",
+                    "ann_count": "sum",
+                    "example_count": "sum",
+                    "annotation_count": "sum",
+                    "prevalence": "mean",
+                }
+            )
             .reset_index()
             .to_dict(orient="records")
         )
@@ -204,7 +213,15 @@ def aggregate_ann_counts(ann_counts, groupby):
         # keep individual annotation categories, but aggregate setup_ids for each dataset, split
         aggregated = (
             ann_counts.groupby(["setup_id", "annotation_type"])
-            .agg({"avg_count": "mean", "ann_count": "sum", "example_count": "sum", "prevalence": "mean"})
+            .agg(
+                {
+                    "avg_count": "mean",
+                    "ann_count": "sum",
+                    "example_count": "sum",
+                    "annotation_count": "sum",
+                    "prevalence": "mean",
+                }
+            )
             .reset_index()
             .to_dict(orient="records")
         )
@@ -213,7 +230,15 @@ def aggregate_ann_counts(ann_counts, groupby):
         # keep individual annotation categories, but aggregate datasets for each split, setup_id
         aggregated = (
             ann_counts.groupby(["dataset", "split", "annotation_type"])
-            .agg({"avg_count": "mean", "ann_count": "sum", "example_count": "sum", "prevalence": "mean"})
+            .agg(
+                {
+                    "avg_count": "mean",
+                    "ann_count": "sum",
+                    "example_count": "sum",
+                    "annotation_count": "sum",
+                    "prevalence": "mean",
+                }
+            )
             .reset_index()
             .to_dict(orient="records")
         )
@@ -1464,6 +1489,12 @@ def compute_statistics(
 
     span_index = generate_span_index(app, campaign)
     example_index = generate_example_index(app, campaign)
+    # Skipped annotations do not count towards span or slider statistics.
+    if "flags" in span_index.columns:
+        span_index = span_index[~span_index["flags"].apply(_is_skip_selected)]
+    filtered_example_index = example_index
+    if "flags" in example_index.columns:
+        filtered_example_index = example_index[~example_index["flags"].apply(_is_skip_selected)]
     annotator_aliases = _load_campaign_annotator_alias_map(campaign)
     rag_mistake_defaults = _get_rag_summary_defaults(span_index, campaign)
     selected_rag_setup_id, selected_rag_span_category = _resolve_rag_summary_selection(
@@ -1482,8 +1513,8 @@ def compute_statistics(
 
     if not span_index.empty:
         annotation_counts = compute_ann_counts(span_index)
-        annotation_counts = compute_avg_ann_counts(annotation_counts, example_index)
-        annotation_counts = compute_prevalence(annotation_counts, example_index)
+        annotation_counts = compute_avg_ann_counts(annotation_counts, filtered_example_index)
+        annotation_counts = compute_prevalence(annotation_counts, filtered_example_index)
 
         # replace NaNs with 0
         annotation_counts = annotation_counts.fillna(0.0)
@@ -1496,10 +1527,6 @@ def compute_statistics(
         }
 
     if not example_index.empty:
-        filtered_example_index = example_index
-        if "flags" in example_index.columns:
-            filtered_example_index = example_index[~example_index["flags"].apply(_is_skip_selected)]
-
         rag_mistake_stats = compute_rag_mistake_stats(
             app,
             campaign,
