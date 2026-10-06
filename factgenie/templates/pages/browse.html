@@ -128,6 +128,10 @@
             data-bs-target="#browse-filter-help-modal" title="How Browse filters work">
             <i class="fa fa-question-circle"></i> Help
           </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="browse-instructions-button"
+            style="display: none;" data-bs-toggle="modal" data-bs-target="#browse-instructions-modal">
+            <i class="fa fa-book"></i> Instructions
+          </button>
           <button type="button" class="btn btn-sm btn-outline-secondary" id="browse-toggle-highlights" style="display: none;">
             Hide highlights
           </button>
@@ -274,6 +278,26 @@
     </div>
   </div>
 
+
+  <div class="modal fade" id="browse-instructions-modal" tabindex="-1" aria-labelledby="browse-instructions-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="browse-instructions-title">Annotation instructions</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="small text-muted mb-3" id="browse-instructions-campaign"></div>
+          <div id="browse-instructions-content"></div>
+          <div id="browse-instructions-categories"></div>
+        </div>
+        <div class="modal-footer">
+          <span class="small text-muted">These instructions are visible to everyone who can open Browse.</span>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="modal fade" id="info-modal" tabindex="-1">
     <div class="modal-dialog">

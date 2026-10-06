@@ -5,6 +5,8 @@ var showAnnotatorNames = false;
 var annotatorNamesUserOverride = false;
 var preferredAnnotatorIds = [];
 var browseFilterSchema = {};
+var browseInstructionsScope = null;
+var browseInstructionsRequestId = 0;
 var filteredResults = [];
 var filteredQueueActive = false;
 var filteredQueueIndex = 0;
@@ -1444,7 +1446,51 @@ function focusBrowseOccurrence(occurrence, row) {
     }
 }
 
+function loadBrowseInstructions(dataset, split) {
+    const scope = JSON.stringify([dataset, split]);
+    if (scope === browseInstructionsScope) {
+        return;
+    }
+    browseInstructionsScope = scope;
+    const requestId = ++browseInstructionsRequestId;
+    $("#browse-instructions-button").hide();
+    bootstrap.Modal.getInstance(document.getElementById("browse-instructions-modal"))?.hide();
+    $("#browse-instructions-campaign, #browse-instructions-content, #browse-instructions-categories").empty();
+    if (!dataset || !split) {
+        return;
+    }
+    $.get(`${url_prefix}/browse/instructions`, { dataset, split }, function (data) {
+        if (requestId !== browseInstructionsRequestId || !data.success || !data.instructions) {
+            return;
+        }
+        const instructions = data.instructions;
+        $("#browse-instructions-campaign").text(`Campaign: ${instructions.campaign_id}`);
+        $("#browse-instructions-content").html(instructions.html);
+        const categories = $("#browse-instructions-categories");
+        if (instructions.categories.length) {
+            categories.append($("<h6>", { class: "mt-3", text: "Annotation categories" }));
+            const list = $("<ul>", { class: "list-unstyled" });
+            for (const category of instructions.categories) {
+                const item = $("<li>", { class: "mb-2" });
+                item.append($("<span>", { class: "d-inline-block border rounded me-2" })
+                    .css({ backgroundColor: category.color, width: "1em", height: "1em" })
+                    .attr("aria-hidden", "true"));
+                item.append($("<strong>").text(category.name || ""));
+                item.append(document.createTextNode(` — ${category.description || ""}`));
+                list.append(item);
+            }
+            categories.append(list);
+        }
+        $("#browse-instructions-button").show();
+    }).fail(function () {
+        if (requestId === browseInstructionsRequestId) {
+            browseInstructionsScope = null;
+        }
+    });
+}
+
 function fetchExample(dataset, split, example_idx, options = {}) {
+    loadBrowseInstructions(dataset, split);
     saveSplitSizes();
     if (!options.skipUrlUpdate && !suppressBrowseUrlUpdate) {
         updateBrowseUrl(dataset, split, example_idx, options.replaceUrl);

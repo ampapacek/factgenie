@@ -10,6 +10,8 @@ import threading
 import traceback
 import urllib.parse
 
+import markdown
+
 from flask import (
     Flask,
     Response,
@@ -813,6 +815,51 @@ def browse():
         ),
         response_status,
     )
+
+
+@app.route("/browse/instructions", methods=["GET"])
+@login_required
+def browse_instructions():
+    dataset = slugify(str(request.args.get("dataset") or ""))
+    split = slugify(str(request.args.get("split") or ""))
+    is_authenticated = _is_authenticated_viewer()
+    dataset_config = utils.load_dataset_config().get(dataset)
+    if not dataset or not split or not dataset_config or not dataset_config.get("enabled", True):
+        return jsonify(success=True, instructions=None)
+    if not is_authenticated and dataset_config.get("hidden_from_regular_users", False):
+        return jsonify(success=True, instructions=None)
+
+    annotation_index = workflows.get_annotation_index(app, force_reload=False)
+    if annotation_index.empty:
+        return jsonify(success=True, instructions=None)
+    scoped = annotation_index[
+        (annotation_index["dataset"] == dataset) & (annotation_index["split"] == split)
+    ]
+    visible_configs = []
+    for campaign_id in scoped["campaign_id"].unique():
+        metadata_path = os.path.join(CAMPAIGN_DIR, slugify(str(campaign_id)), "metadata.json")
+        try:
+            with open(metadata_path) as metadata_file:
+                metadata = json.load(metadata_file)
+        except FileNotFoundError:
+            continue
+        # Only human annotation campaigns have annotator instructions.
+        if metadata.get("mode") != CampaignMode.CROWDSOURCING:
+            continue
+        if not is_authenticated and metadata.get("hidden_from_regular_users", False):
+            continue
+        visible_configs.append((campaign_id, metadata.get("config", {})))
+        if len(visible_configs) > 1:
+            return jsonify(success=True, instructions=None)
+
+    if not visible_configs:
+        return jsonify(success=True, instructions=None)
+    campaign_id, config = visible_configs[0]
+    return jsonify(success=True, instructions={
+        "campaign_id": campaign_id,
+        "html": markdown.markdown(config.get("annotator_instructions") or ""),
+        "categories": config.get("annotation_span_categories") or [],
+    })
 
 
 @app.route("/query/schema", methods=["GET"])
