@@ -1308,7 +1308,10 @@ function clearBrowseMatchHighlights() {
     $(".browse-match-highlight").each(function () {
         const node = $(this);
         if (node.is("mark")) {
+            const parent = this.parentNode;
             node.replaceWith(document.createTextNode(node.text()));
+            // merge the text back, so later searches see whole text nodes
+            parent?.normalize();
         } else {
             node.removeClass("browse-match-highlight");
         }
@@ -1429,10 +1432,106 @@ function markAnnotatableRange(box, start, length) {
     return marked;
 }
 
+// Code-point ranges of the case-insensitive matches of `needle` in `rawText`.
+function rawTextMatches(rawText, needle) {
+    const starts = new Map();
+    let haystack = "";
+    Array.from(rawText).forEach((char, index) => {
+        starts.set(haystack.length, index);
+        haystack += char.toLowerCase();
+    });
+    starts.set(haystack.length, starts.size);
+    const loweredNeedle = needle.toLowerCase();
+    const ranges = [];
+    let searchFrom = 0;
+    while (searchFrom <= haystack.length) {
+        const index = haystack.indexOf(loweredNeedle, searchFrom);
+        if (index < 0) {
+            break;
+        }
+        const start = starts.get(index);
+        const end = starts.get(index + loweredNeedle.length);
+        if (start !== undefined && end !== undefined) {
+            ranges.push({ start, end });
+        }
+        searchFrom = index + Math.max(loweredNeedle.length, 1);
+    }
+    return ranges;
+}
+
+// Marks a text match in a rendered output box: the match is searched in the
+// raw output, so it can cross formatting and hidden syntax, and then mapped
+// onto the atoms (annotated boxes) or the text segments (original box).
+function markRenderedOutputText(box, needle) {
+    let marked = false;
+    box.find(".out-placeholder").each(function () {
+        const placeholder = $(this);
+        const rawText = placeholder.data("rawText");
+        if (typeof rawText !== "string") {
+            return;
+        }
+        const ranges = rawTextMatches(rawText, needle);
+        if (!ranges.length) {
+            return;
+        }
+        const overlaps = (start, end) => ranges.some((range) => start < range.end && end > range.start);
+        const atoms = placeholder.find(".annotatable");
+        if (atoms.length) {
+            atoms.each(function () {
+                const span = $(this);
+                const start = Number(span.data("index"));
+                const length = Array.from(String(span.data("content") ?? "")).length;
+                if (Number.isFinite(start) && overlaps(start, start + Math.max(length, 1))) {
+                    span.addClass("browse-match-span");
+                    marked = true;
+                }
+            });
+            return;
+        }
+        (placeholder.data("segments") || []).forEach(function (segment) {
+            // contiguous runs of matching units, wrapped from the end so the
+            // earlier offsets stay valid
+            const runs = [];
+            segment.units.forEach(function (unit) {
+                if (!overlaps(unit.start, unit.end)) {
+                    return;
+                }
+                const last = runs[runs.length - 1];
+                if (last && last.to === unit.from) {
+                    last.to = unit.to;
+                } else {
+                    runs.push({ from: unit.from, to: unit.to });
+                }
+            });
+            segment.element.normalize();
+            const node = segment.element.firstChild;
+            if (!node || node.nodeType !== Node.TEXT_NODE) {
+                return;
+            }
+            runs.reverse().forEach(function (run) {
+                if (run.to > node.data.length) {
+                    return;
+                }
+                const after = node.splitText(run.from);
+                after.splitText(run.to - run.from);
+                const mark = document.createElement("mark");
+                mark.className = "browse-match-highlight";
+                mark.textContent = after.nodeValue;
+                after.parentNode.replaceChild(mark, after);
+                marked = true;
+            });
+        });
+    });
+    return marked;
+}
+
 function markAnnotatableText(box, text) {
     const needle = String(text || "");
     if (!needle) {
         return false;
+    }
+    if (markRenderedOutputText(box, needle)) {
+        return true;
     }
     let fullText = "";
     const spans = [];
@@ -1743,6 +1842,7 @@ function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
             const rendered = SpanRenderers.renderStatic(normalized, format, renderOptions);
             annotated_content = rendered.root;
             problems = rendered.problems;
+            placeholder.data("segments", rendered.segments);
             if (problems.length > 0) {
                 console.warn(`[FactGenie spans] Rendering checks failed for ${setup_id}/${annId} (${format}):`, problems);
             }
@@ -1753,6 +1853,8 @@ function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
     } else {
         placeholder.empty().append(annotated_content);
     }
+    // for search highlights (see markRenderedOutputText)
+    placeholder.data("rawText", normalized);
     resolveCitations(placeholder);
     if (problems.length > 0 && (format !== "plain" || renderOptions.citations)) {
         placeholder.prepend(unverifiedRenderingNotice(problems));

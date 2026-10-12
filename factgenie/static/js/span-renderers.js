@@ -272,6 +272,14 @@ class MarkdownRenderer {
         let [start, end] = range;
         while (start < end && ctx.chars[start] === '`') start++;
         while (end > start && ctx.chars[end - 1] === '`') end--;
+        // one padding space (or line ending) on both sides is stripped
+        // unless the content is only spaces
+        const padding = char => char === ' ' || char === '\n';
+        const content = ctx.chars.slice(start, end);
+        if (content.length >= 2 && padding(content[0]) && padding(content[content.length - 1]) && !content.every(char => char === ' ')) {
+            start += 1;
+            end -= 1;
+        }
         this._align(ctx, container, start, end, String(node.value ?? ''), { code: true });
     }
 
@@ -282,17 +290,20 @@ class MarkdownRenderer {
         }
         let [start, end] = range;
         const firstLine = ctx.chars.slice(start, end).join('').split('\n')[0];
-        if (/^\s*(`{3,}|~{3,})/.test(firstLine)) {
+        const fence = firstLine.match(/^\s*(`{3,}|~{3,})/);
+        if (fence) {
             // fenced: skip the opening fence line and a closing fence line
+            // (same character, at least as long as the opening fence)
             start += Array.from(firstLine).length + 1;
             const body = ctx.chars.slice(start, end).join('');
             const lastBreak = body.lastIndexOf('\n');
             const lastLine = body.slice(lastBreak + 1);
-            if (/^\s*(`{3,}|~{3,})\s*$/.test(lastLine)) {
+            const closing = lastLine.match(/^\s*(`+|~+)\s*$/);
+            if (closing && closing[1][0] === fence[1][0] && closing[1].length >= fence[1].length) {
                 end -= Array.from(lastLine).length;
             }
         }
-        this._align(ctx, container, Math.min(start, end), end, String(node.value ?? ''), { code: true });
+        this._align(ctx, container, Math.min(start, end), end, String(node.value ?? ''), { code: true, block: true });
     }
 
     // Maps the characters of a parsed value onto the raw range [start, end).
@@ -310,6 +321,10 @@ class MarkdownRenderer {
         while (j < target.length) {
             if (i >= end) {
                 return this._alignFailed(ctx, container, start, end, value);
+            }
+            if (opts.block && (i === start || atLineStart)) {
+                i = this._skipLinePrefix(raw, i, end, target, j);
+                atLineStart = false;
             }
             const char = raw[i];
             if (!opts.code && char === '\\' && i + 1 < end && raw[i + 1] === target[j] && MD_ASCII_PUNCT.test(target[j])) {
@@ -355,6 +370,33 @@ class MarkdownRenderer {
             return this._alignFailed(ctx, container, start, end, value);
         }
         units.forEach(([unitStart, unitEnd, display]) => this._push(ctx, container, unitStart, unitEnd, display));
+    }
+
+    // In code blocks a line of the value is the end of its raw line; the
+    // rest of the raw line before it is indentation or container prefix.
+    // Skipping it here keeps whitespace in the code on its own offsets
+    // (greedy alignment would take the indentation for it).
+    _skipLinePrefix(raw, i, end, target, j) {
+        let lineEnd = i;
+        while (lineEnd < end && raw[lineEnd] !== '\n') lineEnd++;
+        let targetEnd = j;
+        while (targetEnd < target.length && target[targetEnd] !== '\n') targetEnd++;
+        const length = targetEnd - j;
+        const from = lineEnd - length;
+        if (from < i) {
+            return i;
+        }
+        for (let k = i; k < from; k++) {
+            if (!/[\s>]/.test(raw[k])) {
+                return i;
+            }
+        }
+        for (let k = 0; k < length; k++) {
+            if (raw[from + k] !== target[j + k]) {
+                return i;
+            }
+        }
+        return from;
     }
 
     _alignFailed(ctx, container, start, end, value) {
@@ -518,25 +560,42 @@ const SpanRenderers = {
     },
 
     // Renders text without atoms (e.g. the Browse "original" box).
-    // Returns { root, problems } where problems lists failed unit checks.
+    // Returns { root, problems, segments } where problems lists failed unit
+    // checks and segments maps the shown text back to raw offsets:
+    // [{ element, units: [{ start, end, from, to }] }] where each element is
+    // a span with one text node and from/to are offsets into its text.
     renderStatic(rawText, format = 'plain', options = {}) {
         const rendered = this.render(rawText, format, options);
+        const segments = [];
         let lastContainer = null;
-        let textNode = null;
+        let segment = null;
+        let text = '';
+        const flush = () => {
+            if (segment) {
+                segment.element.textContent = text;
+            }
+        };
         rendered.units.forEach(unit => {
             if (unit.display === '\n') {
+                flush();
                 unit.container.append(document.createElement('br'));
-                textNode = null;
+                segment = null;
                 return;
             }
-            if (unit.container !== lastContainer || !textNode) {
-                textNode = document.createTextNode('');
-                unit.container.append(textNode);
+            if (unit.container !== lastContainer || !segment) {
+                flush();
+                segment = { element: document.createElement('span'), units: [] };
+                text = '';
+                unit.container.append(segment.element);
+                segments.push(segment);
             }
-            textNode.data += unit.display;
+            const from = text.length;
+            text += unit.display;
+            segment.units.push({ start: unit.start, end: unit.end, from, to: text.length });
             lastContainer = unit.container;
         });
-        return { root: rendered.root, problems: this.checkUnits(rendered) };
+        flush();
+        return { root: rendered.root, problems: this.checkUnits(rendered), segments };
     },
 
     // Renderer-level checks: units lie inside the text, are in raw order, do
