@@ -83,6 +83,24 @@ test('matching closing fence is hidden', () => {
     assertEqual(units('```\na\n`````'), [[4, 'a']]);
 });
 
+test('backticks indented four spaces are code, not a fence', () => {
+    // indented code block starting with backticks
+    assertEqual(units('    ```\n    a'), [[4, '`'], [5, '`'], [6, '`'], [7, '\n'], [12, 'a']]);
+    assertChecksPass('    ```\n    a');
+    assertChecksPass('- x\n\n      ```\n      a');
+    assertChecksPass('>     ```\n>     a');
+    // an indented backtick line inside a fenced block is content
+    assertEqual(units('```\na\n    ```'), [[4, 'a'], [5, '\n'], [6, ' '], [7, ' '], [8, ' '], [9, ' '], [10, '`'], [11, '`'], [12, '`']]);
+    assertChecksPass('```\na\n    ```');
+    assertChecksPass('```\na\n    ```\n```');
+});
+
+test('fences inside containers', () => {
+    assertEqual(units('> ```\n> a\n> ```'), [[8, 'a']]);
+    assertEqual(units('- ```\n  a\n  ```'), [[8, 'a']]);
+    assertEqual(units('  ```\n  a\n  ```'), [[8, 'a']]);
+});
+
 // Browse search: matches are found in the raw output, so they can cross
 // formatting and hidden syntax.
 
@@ -94,7 +112,7 @@ function loadBrowseFunction(name) {
     }
     window.eval(`${match[0]}; window.${name} = ${name};`);
 }
-['markRenderedOutputText'].forEach(loadBrowseFunction);
+['markSegmentRange', 'markRenderedOutputText'].forEach(loadBrowseFunction);
 
 // An output box like Browse builds it: annotated (atoms) or static (segments).
 function outputBox(text, granularity = null) {
@@ -151,6 +169,18 @@ test('search across formatting in annotated boxes', () => {
     const chars = outputBox('Hello **world** today', 'chars');
     assertEqual(window.markRenderedOutputText(chars, 'o **w'), true);
     assertEqual([...new Set(markedAtoms(chars))], [4, 5, 8]);
+});
+
+test('several searches in the same original box', () => {
+    const box = outputBox('one two **three**');
+    assertEqual(window.markRenderedOutputText(box, 'one'), true);
+    assertEqual(window.markRenderedOutputText(box, 'two **three**'), true);
+    assertEqual(marked(box), ['one', 'two ', 'three']);
+    const overlapping = outputBox('one two three');
+    assertEqual(window.markRenderedOutputText(overlapping, 'two'), true);
+    assertEqual(window.markRenderedOutputText(overlapping, 'one two three'), true);
+    assertEqual(overlapping.text(), 'one two three');
+    assertEqual(marked(overlapping), ['one ', 'two', ' three']);
 });
 
 test('no match leaves the box unchanged', () => {

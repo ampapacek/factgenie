@@ -1387,6 +1387,41 @@ function markAnnotatableRange(box, start, length) {
     return marked;
 }
 
+// Wraps the text offsets [from, to) of `element` in highlight marks, one
+// per text node; text already inside a highlight stays as it is.
+function markSegmentRange(element, from, to) {
+    const nodes = [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let offset = 0;
+    while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const nodeStart = offset;
+        offset += node.data.length;
+        if (offset > from && nodeStart < to) {
+            nodes.push({ node, nodeStart });
+        }
+    }
+    let marked = false;
+    nodes.forEach(function ({ node, nodeStart }) {
+        if (node.parentNode.closest?.("mark.browse-match-highlight")) {
+            marked = true;
+            return;
+        }
+        const startInNode = Math.max(from - nodeStart, 0);
+        const endInNode = Math.min(to - nodeStart, node.data.length);
+        const target = startInNode > 0 ? node.splitText(startInNode) : node;
+        if (endInNode - startInNode < target.data.length) {
+            target.splitText(endInNode - startInNode);
+        }
+        const mark = document.createElement("mark");
+        mark.className = "browse-match-highlight";
+        target.parentNode.replaceChild(mark, target);
+        mark.appendChild(target);
+        marked = true;
+    });
+    return marked;
+}
+
 // Marks a text match in a rendered output box: the match is searched in the
 // raw output, so it can cross formatting and hidden syntax, and then mapped
 // onto the atoms (annotated boxes) or the text segments (original box).
@@ -1417,8 +1452,9 @@ function markRenderedOutputText(box, needle) {
             return;
         }
         (placeholder.data("segments") || []).forEach(function (segment) {
-            // contiguous runs of matching units, wrapped from the end so the
-            // earlier offsets stay valid
+            // contiguous runs of matching units; an earlier search may have
+            // split the segment's text already, so runs are mapped over all
+            // its text nodes
             const runs = [];
             segment.units.forEach(function (unit) {
                 if (!overlaps(unit.start, unit.end)) {
@@ -1431,22 +1467,10 @@ function markRenderedOutputText(box, needle) {
                     runs.push({ from: unit.from, to: unit.to });
                 }
             });
-            segment.element.normalize();
-            const node = segment.element.firstChild;
-            if (!node || node.nodeType !== Node.TEXT_NODE) {
-                return;
-            }
-            runs.reverse().forEach(function (run) {
-                if (run.to > node.data.length) {
-                    return;
+            runs.forEach(function (run) {
+                if (markSegmentRange(segment.element, run.from, run.to)) {
+                    marked = true;
                 }
-                const after = node.splitText(run.from);
-                after.splitText(run.to - run.from);
-                const mark = document.createElement("mark");
-                mark.className = "browse-match-highlight";
-                mark.textContent = after.nodeValue;
-                after.parentNode.replaceChild(mark, after);
-                marked = true;
             });
         });
     });

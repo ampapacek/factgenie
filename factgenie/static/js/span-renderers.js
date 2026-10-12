@@ -289,21 +289,26 @@ class MarkdownRenderer {
             return;
         }
         let [start, end] = range;
-        const firstLine = ctx.chars.slice(start, end).join('').split('\n')[0];
-        const fence = firstLine.match(/^\s*(`{3,}|~{3,})/);
-        if (fence) {
+        const value = String(node.value ?? '');
+        const rawLines = ctx.chars.slice(start, end).join('').split('\n');
+        // An indented code block has one raw line per value line; a fenced
+        // one has an extra opening line (and a closing one if closed). The
+        // line count keeps an indented line like "    ```" from being taken
+        // for a fence; it does not matter for an empty value.
+        const valueLines = value.split('\n').length;
+        const fence = rawLines[0].match(/^ {0,3}(`{3,}|~{3,})/);
+        if (fence && (value === '' || rawLines.length > valueLines)) {
             // fenced: skip the opening fence line and a closing fence line
             // (same character, at least as long as the opening fence)
-            start += Array.from(firstLine).length + 1;
-            const body = ctx.chars.slice(start, end).join('');
-            const lastBreak = body.lastIndexOf('\n');
-            const lastLine = body.slice(lastBreak + 1);
-            const closing = lastLine.match(/^\s*(`+|~+)\s*$/);
-            if (closing && closing[1][0] === fence[1][0] && closing[1].length >= fence[1].length) {
+            start += Array.from(rawLines[0]).length + 1;
+            const lastLine = rawLines[rawLines.length - 1];
+            const closing = lastLine.match(/^[\s>]*(`+|~+)\s*$/);
+            if (rawLines.length > 1 && (value === '' || rawLines.length >= valueLines + 2)
+                && closing && closing[1][0] === fence[1][0] && closing[1].length >= fence[1].length) {
                 end -= Array.from(lastLine).length;
             }
         }
-        this._align(ctx, container, Math.min(start, end), end, String(node.value ?? ''), { code: true, block: true });
+        this._align(ctx, container, Math.min(start, end), end, value, { code: true, block: true });
     }
 
     // Maps the characters of a parsed value onto the raw range [start, end).
