@@ -16,12 +16,12 @@ function createMarkdownWindow() {
 // Renders `text` with `format` (and the citation display `citations`, if set)
 // and returns the atoms (fragments merged), visible units and the runtime
 // check result.
-function renderDocument(window, text, granularity, format = 'markdown', annotations = null, categories = [], citations = null) {
+function renderDocument(window, text, granularity, format = 'markdown', annotations = null, categories = [], citations = null, splitCitations = false) {
     window.__warnings.length = 0;
     const annotator = new window.SpanAnnotator();
     annotator.init(granularity, true, categories, false);
     const element = window.document.createElement('div');
-    annotator.addDocument('doc', element, false, text, { format, citations });
+    annotator.addDocument('doc', element, false, text, { format, citations, splitCitations });
     if (annotations) {
         annotator.addAnnotations('doc', annotations);
     }

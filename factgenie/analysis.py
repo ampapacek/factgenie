@@ -1767,6 +1767,7 @@ def compute_span_index(app, selected_campaigns, campaigns, combinations=None):
         # "annotator_id",
         "annotation_granularity",
         "annotation_overlap_allowed",
+        "citation_display",
         "flags",
         "options",
         "sliders",

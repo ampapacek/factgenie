@@ -149,7 +149,8 @@ class SpanAnnotator {
         const doc = this.documents.get(objectId);
         const format = options.format || 'plain';
         const rendered = SpanRenderers.render(doc.text, format, options);
-        this._createSpans(doc.text, rendered);
+        doc.splitCitations = Boolean(options.splitCitations);
+        this._createSpans(doc.text, rendered, doc.splitCitations);
         const check = this._checkDocument(rendered);
         if (!check.ok) {
             console.warn(`[FactGenie spans] Rendering checks failed for ${objectId} (${format}):`, check.problems);
@@ -160,6 +161,7 @@ class SpanAnnotator {
         doc.element[0]?.appendChild(rendered.root);
 
         doc.format = format;
+        doc.units = rendered.units;
         // plain documents without citations keep the original highlighting
         doc.exactPlain = format === 'plain' && rendered.citations.length === 0;
         doc.check = check;
@@ -334,9 +336,45 @@ class SpanAnnotator {
         return groups;
     }
 
+    // The words-mode tokens of a raw text as [{ part, whitespace }]: the raw
+    // whitespace-delimited tokens, and with splitCitations also split before
+    // and after each citation marker (`budov.` | `[^Z7]` | `[^Z10]`), so a
+    // single citation can be annotated. The split depends only on the raw
+    // text, so the Rendered and Raw views get the same atoms.
+    _wordTokens(text, splitCitations = false) {
+        const parts = text.split(/(\s+)/);
+        const tokens = [];
+        for (let i = 0; i < parts.length; i += 2) {
+            const part = parts[i];
+            const whitespace = i < parts.length - 1 ? parts[i + 1] : '';
+            const pieces = [];
+            if (splitCitations) {
+                let last = 0;
+                for (const match of part.matchAll(CITATION_MARKER)) {
+                    if (match.index > last) {
+                        pieces.push(part.slice(last, match.index));
+                    }
+                    pieces.push(match[0]);
+                    last = match.index + match[0].length;
+                }
+                if (last > 0 && last < part.length) {
+                    pieces.push(part.slice(last));
+                }
+            }
+            if (pieces.length === 0) {
+                tokens.push({ part, whitespace });
+                continue;
+            }
+            pieces.forEach((piece, index) => {
+                tokens.push({ part: piece, whitespace: index === pieces.length - 1 ? whitespace : '' });
+            });
+        }
+        return tokens;
+    }
+
     // Builds the atoms (`.annotatable` spans) for the configured granularity
     // inside the containers of the renderer output.
-    _createSpans(text, rendered) {
+    _createSpans(text, rendered, splitCitations = false) {
         if (this.granularity !== 'words') {
             rendered.units.forEach(unit => {
                 const span = document.createElement('span');
@@ -355,25 +393,20 @@ class SpanAnnotator {
         });
         const unitsIn = (start, end) => unitAt.slice(start, end).filter(unit => unit !== null);
 
-        // Atoms are the raw whitespace-delimited tokens. The visible characters
+        // Atoms are the raw tokens (see _wordTokens). The visible characters
         // of a token may land in several containers; each container gets its
         // own fragment sharing the token's data-index and data-content.
-        const parts = text.split(/(\s+)/);
+        const tokens = this._wordTokens(text, splitCitations);
         let currentIndex = 0;
         let lastContainer = rendered.root;
 
-        parts.forEach((part, arrayIndex) => {
-            if (arrayIndex % 2 === 1) {
-                return;
-            }
-
-            const whitespace = arrayIndex < parts.length - 1 ? parts[arrayIndex + 1] : '';
+        tokens.forEach(({ part, whitespace }, tokenIndex) => {
             const partEnd = currentIndex + this._stringLength(part);
             const wordEnd = partEnd + this._stringLength(whitespace);
             const wordGroups = this._groupUnitsByContainer(unitsIn(currentIndex, partEnd));
             const whitespaceGroups = this._groupUnitsByContainer(unitsIn(partEnd, wordEnd));
 
-            if (wordGroups.length === 0 && part === '' && (whitespaceGroups.length > 0 || arrayIndex > 0 || parts.length === 1)) {
+            if (wordGroups.length === 0 && part === '' && (whitespaceGroups.length > 0 || tokenIndex > 0 || tokens.length === 1)) {
                 // keep the empty token atom (e.g. before leading whitespace)
                 wordGroups.push({ container: whitespaceGroups[0]?.container ?? lastContainer, units: [] });
             }
@@ -385,6 +418,10 @@ class SpanAnnotator {
                 span.dataset.index = String(currentIndex);
                 span.dataset.content = String(part);
                 span.dataset.whitespace = whitespace;
+                if (whitespace === '' && tokenIndex < tokens.length - 1) {
+                    // the next token follows directly (split at a citation)
+                    span.dataset.joined = '';
+                }
                 span.append(document.createTextNode(group.units.map(unit => unit.display).join('')));
                 group.container.append(span);
                 lastSpan = span;
@@ -727,7 +764,32 @@ class SpanAnnotator {
         }
     }
 
+    // The annotated text as the current view shows it (hidden syntax left
+    // out, citations as superscript numbers); the stored text stays raw.
+    _visibleText(objectId, annotation) {
+        const doc = this.documents.get(objectId);
+        const start = annotation.start;
+        const end = start + this._stringLength(annotation.text);
+        const superscript = digits => Array.from(digits, d => '⁰¹²³⁴⁵⁶⁷⁸⁹'[Number(d)] ?? d).join('');
+        let text = '';
+        let previous = null;
+        (doc?.units || []).forEach(unit => {
+            if (unit.start < start || unit.end > end) {
+                return;
+            }
+            if (unit.kind === 'citation') {
+                const stacked = previous?.kind === 'citation' && previous.end === unit.start;
+                text += (stacked ? '˒' : '') + superscript(unit.display);
+            } else {
+                text += unit.display === '\n' ? ' ' : unit.display;
+            }
+            previous = unit;
+        });
+        return text.trim() ? text.trim() : annotation.text;
+    }
+
     _showReasonDialog(annotation) {
+        const shownText = $('<div>').text(this._visibleText(this.pendingAnnotation?.objectId, annotation)).html();
         // Create modal dialog for reason input
         const modalHtml = `
             <div class="modal fade" id="annotation-reason-modal" tabindex="-1" aria-hidden="true">
@@ -738,7 +800,7 @@ class SpanAnnotator {
                             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
                         <div class="modal-body">
-                            <p>Please provide a reason for annotating "<strong>${annotation.text}</strong>":</p>
+                            <p>Please provide a reason for annotating "<strong>${shownText}</strong>":</p>
                             <div id="annotation-reason-presets" class="d-flex flex-wrap gap-2 mb-2"></div>
                             <textarea class="form-control" id="annotation-reason-input" rows="3" placeholder="Enter your reason..."></textarea>
                         </div>
@@ -1075,7 +1137,8 @@ class SpanAnnotator {
                     if (this.granularity === 'words' && $span.children('.whitespace').length > 0) {
                         const whitespace = String($span.attr('data-whitespace') || '');
                         const hasNewline = whitespace.includes('\n');
-                        if (!hasNewline) {
+                        // no gap inside a token split at a citation marker
+                        if (!hasNewline && $span.attr('data-joined') === undefined) {
                             $('.whitespace', $span).addClass('whitespace-hidden');
                             $span.css('margin-right', '9px');
                         }

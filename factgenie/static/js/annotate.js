@@ -842,11 +842,14 @@ function campaignOutputRendering() {
     const hasCitationDisplay = OUTPUT_CITATION_DISPLAYS.includes(config.citation_display);
     const hasRenderedView = format !== "plain" || hasCitationDisplay;
     if (!hasRenderedView) {
-        return { format: "plain", citations: null, hasRenderedView: false, mainView: "raw", viewSwitch: "off" };
+        return { format: "plain", citations: null, splitCitations: false, hasRenderedView: false, mainView: "raw", viewSwitch: "off" };
     }
     return {
         format,
         citations: hasCitationDisplay ? config.citation_display : "superscript",
+        // words mode splits tokens at citation markers in both views, so a
+        // single citation can be annotated (only campaigns with citation_display)
+        splitCitations: hasCitationDisplay,
         hasRenderedView,
         mainView: config.annotation_view === "raw" ? "raw" : "rendered",
         viewSwitch: OUTPUT_VIEW_SWITCH_MODES.includes(config.view_switch) ? config.view_switch : "readonly",
@@ -854,10 +857,11 @@ function campaignOutputRendering() {
 }
 
 function outputRenderOptions(view) {
+    const splitCitations = outputRendering.splitCitations;
     if (view === "rendered") {
-        return { format: outputRendering.format, citations: outputRendering.citations };
+        return { format: outputRendering.format, citations: outputRendering.citations, splitCitations };
     }
-    return { format: "plain", citations: null };
+    return { format: "plain", citations: null, splitCitations };
 }
 
 // Renders the output of `annotationIdx` in the current view with `render`

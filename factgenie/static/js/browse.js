@@ -1779,7 +1779,9 @@ function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
         const parId = `out-text-${annId}-par`;
 
         annotated_content = $(format === "plain" ? '<p>' : '<div>', { id: parId });
-        spanAnnotator.addDocument(parId, annotated_content, false, normalized, renderOptions);
+        // campaigns with citation_display split words-mode tokens at citations
+        const splitCitations = ["superscript", "hidden", "raw"].includes(annotations.citation_display);
+        spanAnnotator.addDocument(parId, annotated_content, false, normalized, { ...renderOptions, splitCitations });
         spanAnnotator.addAnnotations(parId, annotations.annotations);
         problems = spanAnnotator.getDocumentCheck(parId)?.problems || [];
     } else {

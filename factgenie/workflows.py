@@ -224,6 +224,8 @@ def create_annotation_example_record(jsonl_line, jsonl_file, metadata):
         "annotator_group": ann_metadata.get("annotator_group"),
         "annotation_granularity": ann_metadata.get("annotation_granularity"),
         "annotation_overlap_allowed": ann_metadata.get("annotation_overlap_allowed"),
+        # Browse splits words-mode tokens at citation markers for these campaigns
+        "citation_display": ann_metadata.get("citation_display"),
         "campaign_id": slugify(ann_metadata["campaign_id"]),
         "dataset": slugify(jsonl_line["dataset"]),
         "example_idx": int(jsonl_line["example_idx"]),

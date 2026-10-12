@@ -3,8 +3,10 @@
 // `markdown` renderer in both granularities and run the runtime checks 1-3.
 // Also reports text nodes the renderer could not align character by character.
 // With --citations, the citation pass runs on top (superscript | hidden | raw).
+// With --split-citations, words-mode tokens are split at citation markers
+// and the Raw view (plain renderer, same split) is checked too.
 //
-// Usage: node tests/js/verify_markdown_mapping.js <factgenie-dir> [--words-only] [--citations DISPLAY]
+// Usage: node tests/js/verify_markdown_mapping.js <factgenie-dir> [--words-only] [--citations DISPLAY] [--split-citations]
 const path = require('path');
 const env = require('./lib/env');
 const { createMarkdownWindow, renderDocument, distinctTexts } = require('./lib/markdown');
@@ -13,6 +15,7 @@ const factgenieDir = path.resolve(process.argv[2] || path.join(env.REPO_ROOT, 'f
 const granularities = process.argv.includes('--words-only') ? ['words'] : ['words', 'chars'];
 const citationsIndex = process.argv.indexOf('--citations');
 const citations = citationsIndex > 0 ? process.argv[citationsIndex + 1] : null;
+const splitCitations = process.argv.includes('--split-citations');
 
 const window = createMarkdownWindow();
 const normalizeNewlines = env.loadNormalizeNewlines();
@@ -32,7 +35,13 @@ for (const [text, source] of texts) {
         documents++;
         let result;
         try {
-            result = renderDocument(window, text, granularity, 'markdown', null, [], citations);
+            result = renderDocument(window, text, granularity, 'markdown', null, [], citations, splitCitations);
+            if (splitCitations) {
+                const raw = renderDocument(window, text, granularity, 'plain', null, [], null, true);
+                if (!raw.check.ok) {
+                    failures.push({ source, granularity, view: 'raw', problems: raw.check.problems.slice(0, 5) });
+                }
+            }
         } catch (err) {
             failures.push({ source, granularity, problems: [{ message: `exception: ${err.message}` }] });
             continue;
@@ -55,7 +64,7 @@ console.log(`data:                ${factgenieDir}`);
 console.log(`stored outputs:      ${outputs.length}`);
 console.log(`campaign records:    ${records.length}`);
 console.log(`distinct texts:      ${texts.size} (x${granularities.length} granularities)`);
-console.log(`citation display:    ${citations || 'off'} (${citationUnits} superscripts)`);
+console.log(`citation display:    ${citations || 'off'} (${citationUnits} superscripts)${splitCitations ? ', tokens split at citations' : ''}`);
 console.log(`documents checked:   ${documents}`);
 console.log(`hidden characters:   ${hiddenChars} of ${totalChars} (${(100 * hiddenChars / Math.max(totalChars, 1)).toFixed(1)}%)`);
 console.log(`alignment fallbacks: ${alignWarnings.length}`);

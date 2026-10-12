@@ -377,6 +377,77 @@ test('reason edit finds annotations overlapping a rendered atom', () => {
 
 // Annotation page: redo markers search the raw output.
 
+// Single citations as words-mode units (campaigns with citation_display).
+
+test('words tokens split at citation markers only with splitCitations', () => {
+    const annotator = new window.SpanAnnotator();
+    const text = 'Ve budov.[^Z7][^Z10] a[^Z1]b [1] x';
+    assertEqual(annotator._wordTokens(text, true).map(t => [t.part, t.whitespace]), [
+        ['Ve', ' '], ['budov.', ''], ['[^Z7]', ''], ['[^Z10]', ' '], ['a', ''], ['[^Z1]', ''], ['b', ' '], ['[1]', ' '], ['x', ''],
+    ]);
+    assertEqual(annotator._wordTokens(text, false).map(t => t.part), ['Ve', 'budov.[^Z7][^Z10]', 'a[^Z1]b', '[1]', 'x']);
+});
+
+const atomIndexes = paragraph => [...new Set(paragraph.find('.annotatable').map((_, el) => Number(el.dataset.index)).get())];
+
+test('a single citation is its own atom in both views', () => {
+    const text = 'Ve **budov**.[^Z7][^Z10] dnes';
+    const rendered = { format: 'markdown', citations: 'superscript', splitCitations: true };
+    const raw = { format: 'plain', citations: null, splitCitations: true };
+    const { annotator, paragraph } = annotationPageDoc(text, 'words', rendered);
+    assertEqual(atomIndexes(paragraph), [0, 3, 13, 18, 25]);
+    const citation = paragraph.find('.citation[data-label="Z7"] .annotatable');
+    assertEqual(citation.attr('data-content'), '[^Z7]');
+    annotator._createAnnotation('p0', citation, citation);
+    assertEqual(annotator.getAnnotations('p0').map(a => [a.start, a.text]), [[13, '[^Z7]']]);
+    assertEqual(highlighted(paragraph), [13]);
+    annotator.renderDocument('p0', raw);
+    assertEqual(atomIndexes(paragraph), [0, 3, 13, 18, 25]);
+    assertEqual(highlighted(paragraph), [13]);
+    // the same selection in Raw stores the same annotation
+    const rawAtom = paragraph.find('.annotatable[data-index="13"]');
+    annotator._createAnnotation('p0', rawAtom, rawAtom);
+    assertEqual(annotator.getAnnotations('p0').length, 1, 'no duplicate');
+    // without the split the citation stays part of the word
+    annotator.renderDocument('p0', { ...rendered, splitCitations: false });
+    assertEqual(atomIndexes(paragraph), [0, 3, 25]);
+    window.$(window.document.body).empty();
+});
+
+test('no annotation gap inside a token split at a citation', () => {
+    const { annotator, paragraph } = annotationPageDoc('budov.[^Z7] dnes', 'words', { format: 'markdown', citations: 'superscript', splitCitations: true });
+    annotator.addAnnotations('p0', [{ type: 0, start: 0, text: 'budov.' }, { type: 0, start: 6, text: '[^Z7]' }]);
+    const atom = index => paragraph.find(`.annotatable[data-index="${index}"]`);
+    assertEqual(atom(0)[0].style.marginRight, '', 'before the citation');
+    assertEqual(atom(6)[0].style.marginRight, '9px', 'after the token');
+    window.$(window.document.body).empty();
+});
+
+test('the reason dialog quotes the visible text', () => {
+    const text = 'Ve **budov**.[^Z7][^Z10] dnes';
+    const { annotator, paragraph } = annotationPageDoc(text, 'words', { format: 'markdown', citations: 'superscript', splitCitations: true });
+    const shown = annotation => annotator._visibleText('p0', annotation);
+    assertEqual(shown({ start: 3, text: '**budov**.' }), 'budov.');
+    assertEqual(shown({ start: 13, text: '[^Z7]' }), '⁷');
+    assertEqual(shown({ start: 13, text: '[^Z7][^Z10]' }), '⁷˒¹⁰');
+    assertEqual(shown({ start: 0, text: 'Ve **budov**.[^Z7]' }), 'Ve budov.⁷');
+    annotator.renderDocument('p0', { format: 'plain', splitCitations: true });
+    assertEqual(shown({ start: 13, text: '[^Z7]' }), '[^Z7]');
+    // the dialog escapes the text
+    annotator.renderDocument('p0', { format: 'plain' });
+    annotator.documents.get('p0').text = 'Ve <b> x';
+    annotator.renderDocument('p0', { format: 'plain' });
+    annotator.pendingAnnotation = { objectId: 'p0' };
+    window.bootstrap = { Modal: class { show() {} hide() {} static getInstance() { return null; } } };
+    try {
+        annotator._showReasonDialog({ start: 0, text: 'Ve <b>' });
+    } finally {
+        delete window.bootstrap;
+    }
+    assertEqual(window.$('#annotation-reason-modal strong').text(), 'Ve <b>');
+    window.$(window.document.body).empty();
+});
+
 function loadAnnotateFunction(name) {
     const source = env.readStatic('annotate.js');
     const match = source.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`));
