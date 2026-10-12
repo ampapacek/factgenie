@@ -1499,6 +1499,91 @@ body.auth-only #annotator-auth-modal .modal-dialog {
     display: inline;
 }
 
+/* Outputs rendered from Markdown (span-renderers.js) */
+.md-rendered {
+    white-space: normal;
+    line-height: 1.8;
+    overflow-wrap: anywhere;
+}
+
+.md-rendered p,
+.md-rendered ul,
+.md-rendered ol,
+.md-rendered blockquote,
+.md-rendered pre,
+.md-rendered table {
+    margin-bottom: 0.6em;
+}
+
+.md-rendered ul,
+.md-rendered ol {
+    padding-left: 1.5em;
+}
+
+.md-rendered .md-heading {
+    font-size: 1.05em;
+    font-weight: 600;
+    margin: 0.8em 0 0.4em;
+}
+
+.md-rendered h1.md-heading {
+    font-size: 1.25em;
+}
+
+.md-rendered h2.md-heading {
+    font-size: 1.15em;
+}
+
+.md-rendered .md-tight-break {
+    display: block;
+}
+
+.md-rendered blockquote {
+    border-left: 3px solid #dee2e6;
+    padding-left: 0.75em;
+    color: #555;
+}
+
+.md-rendered pre.md-code {
+    white-space: pre-wrap;
+    background: #f6f8fa;
+    padding: 0.4em 0.6em;
+}
+
+.md-rendered code {
+    color: inherit;
+    background: #f6f8fa;
+}
+
+.md-rendered table.md-table {
+    border-collapse: collapse;
+    width: auto;
+    max-width: 100%;
+    display: block;
+    overflow-x: auto;
+}
+
+.md-rendered table.md-table th,
+.md-rendered table.md-table td {
+    border: 1px solid #dee2e6;
+    padding: 0.2em 0.5em;
+    vertical-align: top;
+}
+
+.md-rendered table.md-table th {
+    background: #f6f8fa;
+}
+
+.md-rendered .md-raw {
+    white-space: pre-wrap;
+}
+
+.annotation-marker {
+    font-size: 0.7em;
+    vertical-align: super;
+    cursor: help;
+}
+
 .whitespace-hidden {
     display: none;
     /* background: white;

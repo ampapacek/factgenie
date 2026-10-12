@@ -1,0 +1,15 @@
+{
+  "name": "factgenie-mdast-bundle",
+  "private": true,
+  "description": "Builds factgenie/static/js/lib/mdast-gfm.bundle.js. See REBUILD.md.",
+  "scripts": {
+    "build": "esbuild entry.js --bundle --format=iife --global-name=MdastGfm --target=es2018 --minify --legal-comments=eof --outfile=../../factgenie/static/js/lib/mdast-gfm.bundle.js \"--banner:js=/* mdast-gfm.bundle.js: mdast-util-from-markdown + micromark-extension-gfm + mdast-util-gfm, built with esbuild. All bundled packages are MIT-licensed (most (c) Titus Wormer); see tools/mdast-bundle/ for versions and the rebuild command. */\""
+  },
+  "devDependencies": {
+    "decode-named-character-reference": "1.3.0",
+    "esbuild": "0.28.2",
+    "mdast-util-from-markdown": "2.1.0",
+    "mdast-util-gfm": "3.1.0",
+    "micromark-extension-gfm": "3.0.0"
+  }
+}

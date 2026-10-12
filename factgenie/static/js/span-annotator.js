@@ -122,6 +122,10 @@ class SpanAnnotator {
         const format = options.format || 'plain';
         const rendered = SpanRenderers.get(format).render(text, options);
         this._createSpans(text, rendered);
+        const check = this._checkDocument(rendered);
+        if (!check.ok) {
+            console.warn(`[FactGenie spans] Rendering checks failed for ${objectId} (${format}):`, check.problems);
+        }
 
         $element.empty().append(rendered.root);
 
@@ -129,6 +133,7 @@ class SpanAnnotator {
             element: $element,
             text: text,
             format: format,
+            check: check,
             annotations: []
         });
 
@@ -146,6 +151,86 @@ class SpanAnnotator {
 
     getAnnotations(objectId) {
         return this.documents.get(objectId)?.annotations || [];
+    }
+
+    // Result of the runtime checks: { ok, problems, hiddenAnnotations }.
+    getDocumentCheck(objectId) {
+        return this.documents.get(objectId)?.check || null;
+    }
+
+    // Runtime checks 1-3 on the atoms of a rendered document:
+    // 1. atoms are in raw order, do not overlap and lie inside the text;
+    // 2. each atom's data-content equals the raw slice at its index;
+    // 3. every visible character is inside exactly one atom (or is whitespace
+    //    between atoms), and the atoms show the units in raw order.
+    _checkDocument(rendered) {
+        const chars = rendered.chars;
+        const problems = SpanRenderers.checkUnits(rendered);
+        const atoms = [];
+        rendered.root.querySelectorAll('.annotatable').forEach(span => {
+            const start = Number(span.dataset.index);
+            const content = String(span.dataset.content ?? '');
+            const last = atoms[atoms.length - 1];
+            if (last && last.start === start) {
+                if (last.content !== content) {
+                    problems.push({ check: 2, message: 'fragments of one atom differ', start });
+                }
+                return;
+            }
+            atoms.push({ start, end: start + this._stringLength(content), content });
+        });
+
+        let previousEnd = 0;
+        atoms.forEach(atom => {
+            if (!Number.isInteger(atom.start) || atom.start < previousEnd || atom.end > chars.length) {
+                problems.push({ check: 1, message: 'atom out of order, overlapping or outside the text', start: atom.start, content: atom.content });
+            }
+            previousEnd = Math.max(previousEnd, atom.end);
+            if (chars.slice(atom.start, atom.end).join('') !== atom.content) {
+                problems.push({ check: 2, message: 'data-content differs from the raw text', start: atom.start, content: atom.content });
+            }
+        });
+
+        let atomIndex = 0;
+        rendered.units.forEach(unit => {
+            while (atomIndex < atoms.length && atoms[atomIndex].end <= unit.start) {
+                atomIndex++;
+            }
+            const atom = atoms[atomIndex];
+            const inAtom = atom && atom.start <= unit.start && unit.end <= atom.end;
+            const isWhitespace = /^\s+$/.test(chars.slice(unit.start, unit.end).join(''));
+            if (!inAtom && !isWhitespace) {
+                problems.push({ check: 3, message: 'visible character outside atoms', start: unit.start, display: unit.display });
+            }
+        });
+
+        const expected = rendered.units.map(unit => unit.display === '\n' ? '' : unit.display).join('');
+        let shown = '';
+        const walker = document.createTreeWalker(rendered.root, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+            if (walker.currentNode.parentElement?.closest('.annotatable, .whitespace')) {
+                shown += walker.currentNode.data;
+            }
+        }
+        if (shown !== expected) {
+            problems.push({ check: 3, message: 'shown text differs from the rendered units' });
+        }
+
+        return { ok: problems.length === 0, problems, hiddenAnnotations: [] };
+    }
+
+    // Annotations shown on an atom. Plain documents keep the original rule
+    // (the atom starts inside the annotation); other formats highlight every
+    // atom whose raw range overlaps the annotation.
+    _annotationsForSpan(doc, $span, annotations = doc.annotations) {
+        const position = parseInt($span.data('index'));
+        if (doc.format === 'plain') {
+            return annotations.filter(a =>
+                position >= a.start && position < a.start + this._stringLength(a.text));
+        }
+        const end = position + Math.max(this._stringLength(String($span.data('content') ?? '')), 1);
+        return annotations.filter(a =>
+            a.start < end && a.start + this._stringLength(a.text) > position);
     }
 
     _stringLength(text) {
@@ -249,7 +334,7 @@ class SpanAnnotator {
             const wordGroups = this._groupUnitsByContainer(unitsIn(currentIndex, partEnd));
             const whitespaceGroups = this._groupUnitsByContainer(unitsIn(partEnd, wordEnd));
 
-            if (wordGroups.length === 0 && part === '') {
+            if (wordGroups.length === 0 && part === '' && (whitespaceGroups.length > 0 || arrayIndex > 0 || parts.length === 1)) {
                 // keep the empty token atom (e.g. before leading whitespace)
                 wordGroups.push({ container: whitespaceGroups[0]?.container ?? lastContainer, units: [] });
             }
@@ -423,29 +508,24 @@ class SpanAnnotator {
 
     _previewEraserEffect(objectId, $span) {
         const doc = this.documents.get(objectId);
-        const position = parseInt($span.data('index'));
-
         this.eraserPreviewActive = true;
 
         // Clear previous preview
         this._clearEraserPreview(objectId);
 
         // Find annotations that would be removed
-        const affectedAnnotations = doc.annotations.filter(a =>
-            position >= a.start && position < a.start + this._stringLength(a.text));
+        const affectedAnnotations = this._annotationsForSpan(doc, $span);
 
         // Highlight spans for each affected annotation
-        affectedAnnotations.forEach(ann => {
+        if (affectedAnnotations.length > 0) {
             $('.annotatable', doc.element).each((_, span) => {
-                const $span = $(span);
-                const idx = parseInt($span.data('index'));
-                if (idx >= ann.start && idx < ann.start + this._stringLength(ann.text)) {
-
+                const $other = $(span);
+                if (this._annotationsForSpan(doc, $other, affectedAnnotations).length > 0) {
                     // make the tokens more transparent by applying a filter
-                    $span.css('filter', 'opacity(0.5)');
+                    $other.css('filter', 'opacity(0.5)');
                 }
             });
-        });
+        }
     }
 
     _clearEraserPreview(objectId) {
@@ -493,6 +573,10 @@ class SpanAnnotator {
         $('.annotatable', doc.element).each((_, span) => {
             const $span = $(span);
             const rect = span.getBoundingClientRect();
+            // hidden and zero-size atoms cannot be targeted
+            if (rect.width === 0 || span.getClientRects().length === 0) {
+                return;
+            }
             const left = rect.left;
             const top = rect.top;
             const right = left + $span.width();
@@ -542,7 +626,8 @@ class SpanAnnotator {
         const [min, max] = [Math.min(startIdx, endIdx), Math.max(startIdx, endIdx)];
 
         // Get the actual end position by adding length of the last token
-        const maxWithLength = max + this._stringLength($end.data('content')) - 1;
+        const $last = startIdx > endIdx ? $start : $end;
+        const maxWithLength = max + this._stringLength($last.data('content')) - 1;
 
 
         // Check for exactly matching annotations
@@ -845,17 +930,44 @@ class SpanAnnotator {
         $('.modal-backdrop').remove();
     }
 
+    // Runtime check 4: annotations without any visible atom (e.g. only a link
+    // URL) are shown as a small marker at their raw position.
+    _renderHiddenAnnotationMarkers(doc, shownAnnotations) {
+        const hidden = doc.annotations.filter(ann => !shownAnnotations.has(ann) && this._annotationTypeFor(ann));
+        if (doc.check) {
+            doc.check.hiddenAnnotations = hidden;
+        }
+        const atoms = $('.annotatable', doc.element).toArray();
+        hidden.forEach(ann => {
+            const annotationType = this._annotationTypeFor(ann);
+            const marker = $('<span>', { class: 'annotation-marker' })
+                .text('\u25C6')
+                .css('color', annotationType.color)
+                .attr({
+                    'data-start': ann.start,
+                    'data-bs-toggle': 'tooltip',
+                    'data-bs-placement': 'top',
+                    title: `${annotationType.name}: ${ann.text} (hidden in this view)`,
+                });
+            // place it before the next visible atom, or after the last one
+            const next = atoms.find(atom => parseInt(atom.dataset.index) >= ann.start);
+            if (next) {
+                $(next).before(marker);
+            } else if (atoms.length > 0) {
+                $(atoms[atoms.length - 1]).after(marker);
+            } else {
+                doc.element.append(marker);
+            }
+        });
+    }
+
     _removeAnnotation(objectId, $span) {
         this._addToHistory(objectId);
 
         const doc = this.documents.get(objectId);
-        const position = parseInt($span.data('index'));
+        const removedAnnotations = this._annotationsForSpan(doc, $span);
 
-        const removedAnnotations = doc.annotations.filter(a =>
-            position >= a.start && position < a.start + this._stringLength(a.text));
-
-        doc.annotations = doc.annotations.filter(a =>
-            position < a.start || position >= a.start + this._stringLength(a.text));
+        doc.annotations = doc.annotations.filter(a => !removedAnnotations.includes(a));
 
         this._renderAnnotations(objectId);
         this.emit('annotationRemoved', { objectId, removedAnnotations });
@@ -863,12 +975,14 @@ class SpanAnnotator {
 
     _renderAnnotations(objectId) {
         const doc = this.documents.get(objectId);
+        const shownAnnotations = new Set();
+        $('.annotation-marker', doc.element).remove();
         $('.annotatable', doc.element).each((_, span) => {
             const $span = $(span);
             const position = parseInt($span.data('index'));
 
-            const spanAnnotations = doc.annotations.filter(a =>
-                position >= a.start && position < a.start + this._stringLength(a.text));
+            const spanAnnotations = this._annotationsForSpan(doc, $span);
+            spanAnnotations.forEach(ann => shownAnnotations.add(ann));
             const validSpanAnnotations = spanAnnotations.filter((ann) => this._annotationTypeFor(ann));
 
             // Reset styling
@@ -926,6 +1040,9 @@ class SpanAnnotator {
 
             }
         });
+        if (doc.format !== 'plain') {
+            this._renderHiddenAnnotationMarkers(doc, shownAnnotations);
+        }
         // enable displaying span annotation reasons when howering
         if (typeof enableTooltips === 'function') {
             enableTooltips();

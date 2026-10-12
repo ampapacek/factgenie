@@ -79,6 +79,12 @@
                 style="padding-left: 5px">Show raw data</small>
             </a>
           </li>
+          <li class="page-item" style="display: none;">
+            <a class="page-link" id="toggle-output-view-btn" onclick="toggleOutputView();"
+              title="Switch between the rendered and the raw output text">
+              <i class="fa fa-file-text-o"></i> <small style="padding-left: 5px">Show raw outputs</small>
+            </a>
+          </li>
           {% if show_annotator_toggle %}
           <li class="page-item" style="display: none;">
             <a class="page-link" id="toggle-annotator-names-btn" onclick="toggleAnnotatorNames();"
@@ -328,6 +334,7 @@
 </script>
 
 <script src="{{ host_prefix }}/static/js/utils.js"></script>
+<script src="{{ host_prefix }}/static/js/lib/mdast-gfm.bundle.js"></script>
 <script src="{{ host_prefix }}/static/js/span-renderers.js"></script>
 <script src="{{ host_prefix }}/static/js/span-annotator.js"></script>
 <script src="{{ host_prefix }}/static/js/browse.js"></script>

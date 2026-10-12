@@ -72,6 +72,52 @@ function normalizeNewlines(text) {
         .replace(/\\n/g, "\n");
 }
 
+// Rendered/Raw view of the outputs, remembered per browser. "Rendered" uses
+// the dataset's output_format; "Raw" always uses the plain renderer.
+const OUTPUT_VIEW_STORAGE_KEY = "factgenie.browse.outputView";
+
+function loadOutputView() {
+    try {
+        return window.localStorage.getItem(OUTPUT_VIEW_STORAGE_KEY) === "raw" ? "raw" : "rendered";
+    } catch (err) {
+        return "rendered";
+    }
+}
+
+let outputView = loadOutputView();
+
+function datasetOutputFormat() {
+    const format = datasets?.[$("#dataset-select").val()]?.output_format;
+    return SpanRenderers.get(format) === SpanRenderers.plain ? "plain" : format;
+}
+
+function currentOutputFormat() {
+    return outputView === "raw" ? "plain" : datasetOutputFormat();
+}
+
+function updateOutputViewToggle() {
+    const button = $("#toggle-output-view-btn");
+    button.closest(".page-item").toggle(datasetOutputFormat() !== "plain");
+    button.find("small").text(outputView === "raw" ? "Show rendered outputs" : "Show raw outputs");
+}
+
+function toggleOutputView() {
+    outputView = outputView === "raw" ? "rendered" : "raw";
+    try {
+        window.localStorage.setItem(OUTPUT_VIEW_STORAGE_KEY, outputView);
+    } catch (err) {
+        // the choice then only lasts for this page
+    }
+    updateOutputViewToggle();
+    if (window.generated_outputs) {
+        createOutputBoxes(window.generated_outputs);
+        setActiveAnnotatorButtons(selected_campaigns);
+        updateDisplayedAnnotations();
+        highlightSetup();
+        applyBrowseMatchHighlights();
+    }
+}
+
 function escapeHtml(text) {
     return $('<div>').text(String(text ?? "")).html();
 }
@@ -1294,6 +1340,12 @@ function markAnnotatableText(box, text) {
     const spans = [];
     box.find(".annotatable").each(function () {
         const span = $(this);
+        const previous = spans[spans.length - 1];
+        if (previous && String(previous.span.data("index")) === String(span.data("index"))) {
+            // another fragment of the same atom (rendered views)
+            spans.push({ span, start: previous.start, end: previous.end });
+            return;
+        }
         const chunk = String(span.data("content") || "");
         spans.push({ span, start: fullText.length, end: fullText.length + chunk.length });
         fullText += chunk + String(span.data("whitespace") || "");
@@ -1527,6 +1579,7 @@ function fetchExample(dataset, split, example_idx, options = {}) {
 
         total_examples = datasets[dataset].example_count[split];
         renderBrowseNavigationState();
+        updateOutputViewToggle();
 
         window.generated_outputs = data.generated_outputs;
 
@@ -1546,13 +1599,23 @@ function fetchExample(dataset, split, example_idx, options = {}) {
     });
 }
 
+function unverifiedRenderingNotice(problems) {
+    return $('<div>', {
+        class: "small text-warning-emphasis mb-1 md-unverified",
+        title: "The rendered text failed the offset checks; see the browser console. Use the raw view to be sure.",
+    }).text(`Unverified rendering (${problems.length} check problem${problems.length === 1 ? "" : "s"})`);
+}
+
 function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
     const setup_id = output.setup_id;
     const normalized = normalizeNewlines(output.output);
-    const contentHtml = normalized.replace(/\n/g, '<br>');
+    const format = currentOutputFormat();
 
-    var placeholder = $('<pre>', { id: `out-${setup_id}-${annId}-placeholder`, class: `font-mono out-placeholder out-${annId}-placeholder` });
+    var placeholder = format === "plain"
+        ? $('<pre>', { id: `out-${setup_id}-${annId}-placeholder`, class: `font-mono out-placeholder out-${annId}-placeholder` })
+        : $('<div>', { id: `out-${setup_id}-${annId}-placeholder`, class: `out-placeholder out-${annId}-placeholder md-rendered` });
     var annotated_content;
+    var problems = [];
 
     if (annotations !== null && annotations !== undefined) {
         const annotation_span_categories = annotations.annotation_span_categories;
@@ -1565,17 +1628,26 @@ function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
 
         const parId = `out-text-${annId}-par`;
 
-        annotated_content = $('<p>', { id: parId });
-        spanAnnotator.addDocument(parId, annotated_content, false, normalized);
+        annotated_content = $(format === "plain" ? '<p>' : '<div>', { id: parId });
+        spanAnnotator.addDocument(parId, annotated_content, false, normalized, { format });
         spanAnnotator.addAnnotations(parId, annotations.annotations);
+        problems = spanAnnotator.getDocumentCheck(parId)?.problems || [];
     } else {
         // we do not have outputs for the particular campaign -> grey out the text
         if (annId != "original" && muteMissing) {
             placeholder.css("color", "#c2c2c2");
         }
-        annotated_content = contentHtml;
+        const rendered = SpanRenderers.renderStatic(normalized, format);
+        annotated_content = rendered.root;
+        problems = rendered.problems;
+        if (problems.length > 0) {
+            console.warn(`[FactGenie spans] Rendering checks failed for ${setup_id}/${annId} (${format}):`, problems);
+        }
     }
-    placeholder.html(annotated_content);
+    placeholder.empty().append(annotated_content);
+    if (format !== "plain" && problems.length > 0) {
+        placeholder.prepend(unverifiedRenderingNotice(problems));
+    }
     // placeholder.hide();
     return placeholder;
 }
