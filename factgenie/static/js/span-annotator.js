@@ -124,7 +124,8 @@ class SpanAnnotator {
             element: $element,
             text: text,
             annotations: [],
-            readOnly: false
+            readOnly: false,
+            dynamic: Boolean(dynamic)
         });
         this._renderDocument(objectId, options);
 
@@ -172,6 +173,8 @@ class SpanAnnotator {
         }
         doc.readOnly = Boolean(readOnly);
         doc.element.parent().toggleClass('annotate-box-readonly', doc.readOnly);
+        // the marker tooltips mention the actions
+        this._renderAnnotations(objectId);
     }
 
     getDocumentText(objectId) {
@@ -439,6 +442,15 @@ class SpanAnnotator {
             if (this.currentType === -2 || this.documents.get(objectId).readOnly) {
                 return;
             }
+            // a marker stands in for annotations with no visible character:
+            // right-click or the eraser removes them, a click edits the reason
+            const $marker = $(e.target).closest('.annotation-marker');
+            if ($marker.length > 0) {
+                if (e.button === 2 || this.currentType === -1) {
+                    this._removeAnnotations(objectId, $marker.data('annotations') || []);
+                }
+                return;
+            }
 
             if (e.button === 2) { // Right click
                 const span = this._findClosestSpan(objectId, e.clientX, e.clientY);
@@ -462,12 +474,15 @@ class SpanAnnotator {
             if (!this.annotateReason || this.documents.get(objectId).readOnly || e.ctrlKey || e.metaKey) {
                 return;
             }
+            const doc = this.documents.get(objectId);
+            const $marker = $(e.target).closest('.annotation-marker');
             const $target = $(e.target).closest('.annotatable');
-            if ($target.length === 0) {
+            if ($marker.length === 0 && $target.length === 0) {
                 return;
             }
-            const doc = this.documents.get(objectId);
-            const matching = this._annotationsForSpan(doc, $target);
+            const matching = $marker.length > 0
+                ? ($marker.data('annotations') || [])
+                : this._annotationsForSpan(doc, $target);
             if (matching.length === 0) {
                 return;
             }
@@ -480,6 +495,11 @@ class SpanAnnotator {
         });
 
         $element.on('mousemove', (e) => {
+            if (!this.isSelecting && $(e.target).closest('.annotation-marker').length > 0) {
+                // over a marker the eraser targets the marker, not the closest atom
+                this._clearEraserPreview(objectId);
+                return;
+            }
             if (e.buttons === 2) { // Right button pressed
                 if (this.documents.get(objectId).readOnly) {
                     return;
@@ -980,17 +1000,24 @@ class SpanAnnotator {
             doc.check.hiddenAnnotations = hidden;
         }
         const atoms = $('.annotatable', doc.element).toArray();
+        const editable = doc.dynamic && !doc.readOnly;
         hidden.forEach(ann => {
             const annotationType = this._annotationTypeFor(ann);
+            const note = this._formatReasonForDisplay(ann.reason || ann.note);
+            const actions = editable
+                ? (this.annotateReason ? '; right-click to remove, click to edit the reason' : '; right-click to remove')
+                : '';
             const marker = $('<span>', { class: 'annotation-marker' })
                 .text('\u25C6')
                 .css('color', annotationType.color)
+                .toggleClass('annotation-marker-editable', editable)
                 .attr({
                     'data-start': ann.start,
                     'data-bs-toggle': 'tooltip',
                     'data-bs-placement': 'top',
-                    title: `${annotationType.name}: ${ann.text} (hidden in this view)`,
-                });
+                    title: `${annotationType.name}${note ? ` (${note})` : ''}: ${ann.text} (hidden in this view${actions})`,
+                })
+                .data('annotations', [ann]);
             // place it before the next visible atom, or after the last one
             const next = atoms.find(atom => parseInt(atom.dataset.index) >= ann.start);
             if (next) {
@@ -1004,11 +1031,14 @@ class SpanAnnotator {
     }
 
     _removeAnnotation(objectId, $span) {
+        const doc = this.documents.get(objectId);
+        this._removeAnnotations(objectId, this._annotationsForSpan(doc, $span));
+    }
+
+    _removeAnnotations(objectId, removedAnnotations) {
         this._addToHistory(objectId);
 
         const doc = this.documents.get(objectId);
-        const removedAnnotations = this._annotationsForSpan(doc, $span);
-
         doc.annotations = doc.annotations.filter(a => !removedAnnotations.includes(a));
 
         this._renderAnnotations(objectId);

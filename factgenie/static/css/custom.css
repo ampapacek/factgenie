@@ -1607,6 +1607,10 @@ body.auth-only #annotator-auth-modal .modal-dialog {
     cursor: help;
 }
 
+.annotation-marker-editable {
+    cursor: pointer;
+}
+
 /* Citation superscripts ([^Z7] -> 7) and the source they point to */
 .citation-group {
     line-height: 0;

@@ -321,6 +321,35 @@ test('read-only documents ignore annotating and erasing', () => {
     $(window.document.body).empty();
 });
 
+test('a marker for a hidden annotation can be edited and removed', () => {
+    const $ = window.$;
+    const text = 'See [docs](https://example.org) now';
+    const { annotator, paragraph } = annotationPageDoc(text, 'chars', { format: 'markdown' });
+    annotator.annotateReason = true;
+    const url = { type: 0, start: 11, text: 'https://example.org' };
+    annotator.addAnnotations('p0', [url, { type: 0, start: 0, text: 'See' }]);
+    const marker = () => paragraph.find('.annotation-marker');
+    assertEqual(marker().length, 1, 'markers');
+    assertEqual(marker().hasClass('annotation-marker-editable'), true, 'editable');
+    const shown = [];
+    annotator._showReasonDialog = annotation => shown.push(annotation.text);
+    marker().trigger($.Event('mousedown', { button: 0 }));
+    assertEqual(annotator.isSelecting, false, 'selecting');
+    marker().trigger('click');
+    assertEqual(shown, ['https://example.org']);
+    marker().trigger($.Event('mousedown', { button: 2 }));
+    assertEqual(annotator.getAnnotations('p0').map(a => a.text), ['See']);
+    assertEqual(marker().length, 0, 'markers after removal');
+    annotator.undo('p0');
+    assertEqual(annotator.getAnnotations('p0').length, 2, 'undo');
+    // read-only views keep the marker passive
+    annotator.setDocumentReadOnly('p0', true);
+    assertEqual(marker().hasClass('annotation-marker-editable'), false, 'read-only');
+    marker().trigger($.Event('mousedown', { button: 2 }));
+    assertEqual(annotator.getAnnotations('p0').length, 2, 'read-only removal');
+    $(window.document.body).empty();
+});
+
 test('ctrl/cmd+click on a citation reports its label', () => {
     const $ = window.$;
     const { annotator, paragraph } = annotationPageDoc('Text.[^Z7][^Z10]', 'words', { format: 'markdown', citations: 'superscript' });
