@@ -115,12 +115,13 @@ class SpanAnnotator {
         }
     }
 
-    // options.format selects the renderer from SpanRenderers (default: plain)
+    // options.format selects the renderer from SpanRenderers (default: plain);
+    // options.citations is the citation display (see CitationPass)
     addDocument(objectId, htmlObject, dynamic = false, rawText = null, options = {}) {
         const $element = $(htmlObject);
         const text = rawText ?? $element.text();
         const format = options.format || 'plain';
-        const rendered = SpanRenderers.get(format).render(text, options);
+        const rendered = SpanRenderers.render(text, format, options);
         this._createSpans(text, rendered);
         const check = this._checkDocument(rendered);
         if (!check.ok) {
@@ -135,6 +136,8 @@ class SpanAnnotator {
             element: $element,
             text: text,
             format: format,
+            // plain documents without citations keep the original highlighting
+            exactPlain: format === 'plain' && rendered.citations.length === 0,
             check: check,
             annotations: []
         });
@@ -222,11 +225,11 @@ class SpanAnnotator {
     }
 
     // Annotations shown on an atom. Plain documents keep the original rule
-    // (the atom starts inside the annotation); other formats highlight every
+    // (the atom starts inside the annotation); other renderings highlight every
     // atom whose raw range overlaps the annotation.
     _annotationsForSpan(doc, $span, annotations = doc.annotations) {
         const position = parseInt($span.data('index'));
-        if (doc.format === 'plain') {
+        if (doc.exactPlain) {
             return annotations.filter(a =>
                 position >= a.start && position < a.start + this._stringLength(a.text));
         }
@@ -1000,7 +1003,9 @@ class SpanAnnotator {
 
                 if (isLastInAnyAnnotation && !hasMultipleAnnotations) {
                     // add right padding to the last span in the annotation
-                    if (this.granularity === 'words') {
+                    // (in rendered views only to the token's last fragment,
+                    // which holds the whitespace)
+                    if (this.granularity === 'words' && $span.children('.whitespace').length > 0) {
                         const whitespace = String($span.attr('data-whitespace') || '');
                         const hasNewline = whitespace.includes('\n');
                         if (!hasNewline) {
@@ -1042,7 +1047,7 @@ class SpanAnnotator {
 
             }
         });
-        if (doc.format !== 'plain') {
+        if (!doc.exactPlain) {
             this._renderHiddenAnnotationMarkers(doc, shownAnnotations);
         }
         // enable displaying span annotation reasons when howering

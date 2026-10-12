@@ -475,6 +475,7 @@ def get_local_dataset_overview(app):
         description = dataset_config.get("description", "")
         splits = dataset_config.get("splits", [])
         output_format = dataset_config.get("output_format", "plain")
+        citation_display = dataset_config.get("citation_display")
 
         if is_enabled:
             dataset = app.db["datasets_obj"].get(dataset_id)
@@ -503,6 +504,7 @@ def get_local_dataset_overview(app):
             "example_count": example_count,
             "hidden_from_regular_users": hidden_from_regular_users,
             "output_format": output_format,
+            "citation_display": citation_display,
         }
 
     return overview

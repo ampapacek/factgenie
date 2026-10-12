@@ -13,14 +13,15 @@ function createMarkdownWindow() {
     return window;
 }
 
-// Renders `text` with `format` and returns the atoms (fragments merged),
-// visible units and the runtime check result.
-function renderDocument(window, text, granularity, format = 'markdown', annotations = null, categories = []) {
+// Renders `text` with `format` (and the citation display `citations`, if set)
+// and returns the atoms (fragments merged), visible units and the runtime
+// check result.
+function renderDocument(window, text, granularity, format = 'markdown', annotations = null, categories = [], citations = null) {
     window.__warnings.length = 0;
     const annotator = new window.SpanAnnotator();
     annotator.init(granularity, true, categories, false);
     const element = window.document.createElement('div');
-    annotator.addDocument('doc', element, false, text, { format });
+    annotator.addDocument('doc', element, false, text, { format, citations });
     if (annotations) {
         annotator.addAnnotations('doc', annotations);
     }
@@ -36,8 +37,8 @@ function renderDocument(window, text, granularity, format = 'markdown', annotati
         atoms.push({ start, end: start + length });
     });
     // units are rebuilt from a second render (the annotator does not keep them)
-    const units = window.SpanRenderers.get(format).render(text).units
-        .map(unit => ({ start: unit.start, end: unit.end, display: unit.display }));
+    const units = window.SpanRenderers.render(text, format, { citations }).units
+        .map(unit => ({ start: unit.start, end: unit.end, display: unit.display, kind: unit.kind }));
     return {
         atoms,
         units,

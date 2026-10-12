@@ -1600,6 +1600,39 @@ body.auth-only #annotator-auth-modal .modal-dialog {
     cursor: help;
 }
 
+/* Citation superscripts ([^Z7] -> 7) and the source they point to */
+.citation-group {
+    line-height: 0;
+}
+
+.citation {
+    color: var(--bs-link-color, #0d6efd);
+    cursor: pointer;
+}
+
+.citation:hover {
+    text-decoration: underline;
+}
+
+.citation-unresolved {
+    color: var(--bs-secondary-color, #6c757d);
+    cursor: help;
+    text-decoration: underline dotted;
+}
+
+.citation-source-flash {
+    animation: citation-source-flash 2s ease-out;
+}
+
+@keyframes citation-source-flash {
+    0%, 40% {
+        background-color: rgba(255, 193, 7, 0.45);
+    }
+    100% {
+        background-color: transparent;
+    }
+}
+
 .whitespace-hidden {
     display: none;
     /* background: white;

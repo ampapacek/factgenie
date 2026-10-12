@@ -73,41 +73,75 @@ function normalizeNewlines(text) {
 }
 
 // Rendered/Raw view of the outputs, remembered per browser. "Rendered" uses
-// the dataset's output_format; "Raw" always uses the plain renderer.
+// the dataset's output_format and the citation display; "Raw" always uses the
+// plain renderer without citations.
 const OUTPUT_VIEW_STORAGE_KEY = "factgenie.browse.outputView";
+const CITATION_DISPLAY_STORAGE_KEY = "factgenie.browse.citationDisplay";
+const CITATION_DISPLAYS = ["superscript", "hidden", "raw"];
 
-function loadOutputView() {
+function loadStoredSetting(key) {
     try {
-        return window.localStorage.getItem(OUTPUT_VIEW_STORAGE_KEY) === "raw" ? "raw" : "rendered";
+        return window.localStorage.getItem(key);
     } catch (err) {
-        return "rendered";
+        return null;
     }
 }
 
-let outputView = loadOutputView();
-
-function datasetOutputFormat() {
-    const format = datasets?.[$("#dataset-select").val()]?.output_format;
-    return SpanRenderers.get(format) === SpanRenderers.plain ? "plain" : format;
-}
-
-function currentOutputFormat() {
-    return outputView === "raw" ? "plain" : datasetOutputFormat();
-}
-
-function updateOutputViewToggle() {
-    const button = $("#toggle-output-view-btn");
-    button.closest(".page-item").toggle(datasetOutputFormat() !== "plain");
-    button.find("small").text(outputView === "raw" ? "Show rendered outputs" : "Show raw outputs");
-}
-
-function toggleOutputView() {
-    outputView = outputView === "raw" ? "rendered" : "raw";
+function storeSetting(key, value) {
     try {
-        window.localStorage.setItem(OUTPUT_VIEW_STORAGE_KEY, outputView);
+        window.localStorage.setItem(key, value);
     } catch (err) {
         // the choice then only lasts for this page
     }
+}
+
+let outputView = loadStoredSetting(OUTPUT_VIEW_STORAGE_KEY) === "raw" ? "raw" : "rendered";
+// null = the dataset's citation_display
+let citationDisplayChoice = CITATION_DISPLAYS.includes(loadStoredSetting(CITATION_DISPLAY_STORAGE_KEY))
+    ? loadStoredSetting(CITATION_DISPLAY_STORAGE_KEY)
+    : null;
+
+function currentDatasetConfig() {
+    return datasets?.[$("#dataset-select").val()] || {};
+}
+
+function datasetOutputFormat() {
+    const format = currentDatasetConfig().output_format;
+    return SpanRenderers.get(format) === SpanRenderers.plain ? "plain" : format;
+}
+
+// Plain datasets have a rendered view only when they set citation_display.
+function datasetHasRenderedView() {
+    return datasetOutputFormat() !== "plain" || CITATION_DISPLAYS.includes(currentDatasetConfig().citation_display);
+}
+
+function currentCitationDisplay() {
+    if (citationDisplayChoice) {
+        return citationDisplayChoice;
+    }
+    const datasetDisplay = currentDatasetConfig().citation_display;
+    return CITATION_DISPLAYS.includes(datasetDisplay) ? datasetDisplay : "superscript";
+}
+
+// Renderer options for the output boxes: { format, citations }.
+function currentRenderOptions() {
+    if (outputView === "raw" || !datasetHasRenderedView()) {
+        return { format: "plain", citations: null };
+    }
+    return { format: datasetOutputFormat(), citations: currentCitationDisplay() };
+}
+
+function updateOutputViewToggle() {
+    const hasRenderedView = datasetHasRenderedView();
+    const button = $("#toggle-output-view-btn");
+    button.closest(".page-item").toggle(hasRenderedView);
+    button.find("small").text(outputView === "raw" ? "Show rendered outputs" : "Show raw outputs");
+    const citationButton = $("#toggle-citation-display-btn");
+    citationButton.closest(".page-item").toggle(hasRenderedView && outputView !== "raw");
+    citationButton.find("small").text(`Citations: ${currentCitationDisplay()}`);
+}
+
+function rebuildOutputBoxes() {
     updateOutputViewToggle();
     if (window.generated_outputs) {
         createOutputBoxes(window.generated_outputs);
@@ -117,6 +151,70 @@ function toggleOutputView() {
         applyBrowseMatchHighlights();
     }
 }
+
+function toggleOutputView() {
+    outputView = outputView === "raw" ? "rendered" : "raw";
+    storeSetting(OUTPUT_VIEW_STORAGE_KEY, outputView);
+    rebuildOutputBoxes();
+}
+
+function cycleCitationDisplay() {
+    const index = CITATION_DISPLAYS.indexOf(currentCitationDisplay());
+    citationDisplayChoice = CITATION_DISPLAYS[(index + 1) % CITATION_DISPLAYS.length];
+    storeSetting(CITATION_DISPLAY_STORAGE_KEY, citationDisplayChoice);
+    rebuildOutputBoxes();
+}
+
+// The source item for a citation label: the list item whose <code> starts
+// with "[Z7]", else the nth item of the first source list, else null.
+function citationSource(label) {
+    const code = $("#examplearea code").filter(function () {
+        return $(this).text().trim().startsWith(`[${label}]`);
+    }).first();
+    if (code.length) {
+        const item = code.closest("li");
+        return { item: item.length ? item : code, path: code.text().trim().slice(label.length + 2).trim() };
+    }
+    const number = Number(String(label).match(/\d+$/)?.[0]);
+    const item = $("#examplearea ol").first().children("li").eq(number - 1);
+    if (number > 0 && item.length) {
+        return { item, path: item.find("code").first().text().trim() };
+    }
+    return null;
+}
+
+// Adds the source tooltip to the superscripts in `container` and marks the
+// ones without a source as unresolved.
+function resolveCitations(container) {
+    $(container).find(".citation").each(function () {
+        const citation = $(this);
+        const label = citation.data("label");
+        const source = citationSource(label);
+        citation.toggleClass("citation-unresolved", !source);
+        citation.attr("title", source ? `${label}: ${source.path || "source"}` : `${label}: source not found in the input`);
+    });
+}
+
+function showCitationSource(label) {
+    const source = citationSource(label);
+    if (!source) {
+        return;
+    }
+    const element = source.item[0];
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    source.item.removeClass("citation-source-flash");
+    // restart the animation
+    void element.offsetWidth;
+    source.item.addClass("citation-source-flash");
+    clearTimeout(element.citationFlashTimer);
+    element.citationFlashTimer = setTimeout(() => source.item.removeClass("citation-source-flash"), 2000);
+}
+
+$(document).on("click", ".out-placeholder .citation", function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    showCitationSource($(this).data("label"));
+});
 
 function escapeHtml(text) {
     return $('<div>').text(String(text ?? "")).html();
@@ -1609,7 +1707,8 @@ function unverifiedRenderingNotice(problems) {
 function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
     const setup_id = output.setup_id;
     const normalized = normalizeNewlines(output.output);
-    const format = currentOutputFormat();
+    const renderOptions = currentRenderOptions();
+    const format = renderOptions.format;
 
     var placeholder = format === "plain"
         ? $('<pre>', { id: `out-${setup_id}-${annId}-placeholder`, class: `font-mono out-placeholder out-${annId}-placeholder` })
@@ -1629,7 +1728,7 @@ function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
         const parId = `out-text-${annId}-par`;
 
         annotated_content = $(format === "plain" ? '<p>' : '<div>', { id: parId });
-        spanAnnotator.addDocument(parId, annotated_content, false, normalized, { format });
+        spanAnnotator.addDocument(parId, annotated_content, false, normalized, renderOptions);
         spanAnnotator.addAnnotations(parId, annotations.annotations);
         problems = spanAnnotator.getDocumentCheck(parId)?.problems || [];
     } else {
@@ -1637,15 +1736,25 @@ function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
         if (annId != "original" && muteMissing) {
             placeholder.css("color", "#c2c2c2");
         }
-        const rendered = SpanRenderers.renderStatic(normalized, format);
-        annotated_content = rendered.root;
-        problems = rendered.problems;
-        if (problems.length > 0) {
-            console.warn(`[FactGenie spans] Rendering checks failed for ${setup_id}/${annId} (${format}):`, problems);
+        if (!datasetHasRenderedView()) {
+            // datasets without a rendered view keep the original HTML display
+            annotated_content = normalized.replace(/\n/g, '<br>');
+        } else {
+            const rendered = SpanRenderers.renderStatic(normalized, format, renderOptions);
+            annotated_content = rendered.root;
+            problems = rendered.problems;
+            if (problems.length > 0) {
+                console.warn(`[FactGenie spans] Rendering checks failed for ${setup_id}/${annId} (${format}):`, problems);
+            }
         }
     }
-    placeholder.empty().append(annotated_content);
-    if (format !== "plain" && problems.length > 0) {
+    if (typeof annotated_content === "string") {
+        placeholder.html(annotated_content);
+    } else {
+        placeholder.empty().append(annotated_content);
+    }
+    resolveCitations(placeholder);
+    if (problems.length > 0 && (format !== "plain" || renderOptions.citations)) {
         placeholder.prepend(unverifiedRenderingNotice(problems));
     }
     // placeholder.hide();

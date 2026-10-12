@@ -12,6 +12,7 @@
 // A unit covers the raw code points [start, end) and shows `display` inside
 // `container` (an element of `root`, or `root` itself). A display of "\n" is
 // shown as <br>. Raw code points not covered by any unit are hidden syntax.
+// A unit with kind "citation" shows a citation label instead of its raw text.
 // Units must come in raw order, and text inside one container must not be
 // followed by element children of that container (renderers use one slot
 // element per text run). The annotator builds atoms (`.annotatable` spans)
@@ -385,6 +386,121 @@ class MarkdownRenderer {
     }
 }
 
+// Citation markers as produced by CZD-Avatar: `[^Z7]` or `[Z7]`, one label
+// per marker, stacked without spaces for several sources. A bare `[1]` and
+// footnotes like `[^1]` are not citations.
+const CITATION_MARKER = /\[\^?([A-Z]{1,3}\d+)\]/g;
+const CITATION_MARKER_EXACT = /^\[\^?([A-Z]{1,3}\d+)\]$/;
+
+// A pass over the units of any renderer. With display "superscript" each
+// marker becomes one unit shown as its label number in a <sup>; adjacent
+// markers share one <sup> separated by commas. With "hidden" the markers
+// become hidden syntax. Any other display leaves the units unchanged.
+// Markers are converted only where all their characters are visible as
+// written in one container outside code.
+const CitationPass = {
+    apply(rendered, display) {
+        rendered.citations = [];
+        if (display !== 'superscript' && display !== 'hidden') {
+            return rendered;
+        }
+        const groups = this._groups(rendered);
+        if (groups.length === 0) {
+            return rendered;
+        }
+        const groupAt = new Map(groups.map(group => [group.start, group]));
+        const touched = new Set(groups.map(group => group.container));
+        const runs = new Map();
+        const runSlot = container => {
+            if (!runs.has(container)) {
+                const slot = document.createElement('span');
+                slot.className = 'citation-run';
+                container.append(slot);
+                runs.set(container, slot);
+            }
+            return runs.get(container);
+        };
+
+        const units = [];
+        let skipUntil = 0;
+        rendered.units.forEach(unit => {
+            if (unit.start < skipUntil) {
+                return;
+            }
+            const group = groupAt.get(unit.start);
+            if (group) {
+                skipUntil = group.end;
+                rendered.citations.push(...group.markers);
+                if (display === 'superscript') {
+                    units.push(...this._superscript(group));
+                    // text after the superscript goes into a new run
+                    runs.delete(group.container);
+                }
+                return;
+            }
+            units.push(touched.has(unit.container) ? { ...unit, container: runSlot(unit.container) } : unit);
+        });
+        rendered.units = units;
+        return rendered;
+    },
+
+    // Markers whose characters are all visible as written in one container,
+    // grouped when they follow each other directly.
+    _groups(rendered) {
+        const text = rendered.chars.join('');
+        const unitAt = new Map(rendered.units.map(unit => [unit.start, unit]));
+        const groups = [];
+        let cp = 0;
+        let last = 0;
+        for (const match of text.matchAll(CITATION_MARKER)) {
+            cp += Array.from(text.slice(last, match.index)).length;
+            last = match.index;
+            const start = cp;
+            const end = start + Array.from(match[0]).length;
+            const container = unitAt.get(start)?.container;
+            let visible = Boolean(container) && !(container.nodeType === 1 && container.closest('code, pre'));
+            for (let i = start; visible && i < end; i++) {
+                const unit = unitAt.get(i);
+                visible = unit && unit.end === i + 1 && unit.container === container && unit.display === rendered.chars[i];
+            }
+            if (!visible) {
+                continue;
+            }
+            const marker = { start, end, label: match[1] };
+            const previous = groups[groups.length - 1];
+            if (previous && previous.end === start && previous.container === container) {
+                previous.markers.push(marker);
+                previous.end = end;
+            } else {
+                groups.push({ start, end, container, markers: [marker] });
+            }
+        }
+        return groups;
+    },
+
+    _superscript(group) {
+        const sup = document.createElement('sup');
+        sup.className = 'citation-group';
+        group.container.append(sup);
+        return group.markers.map((marker, index) => {
+            if (index > 0) {
+                sup.append(document.createTextNode(','));
+            }
+            const citation = document.createElement('span');
+            citation.className = 'citation';
+            citation.dataset.label = marker.label;
+            sup.append(citation);
+            return {
+                start: marker.start,
+                end: marker.end,
+                container: citation,
+                display: marker.label.match(/\d+$/)[0],
+                kind: 'citation',
+            };
+        });
+    },
+};
+
 const SpanRenderers = {
     plain: new PlainRenderer(),
     markdown: new MarkdownRenderer(),
@@ -394,10 +510,17 @@ const SpanRenderers = {
         return typeof renderer?.render === 'function' ? renderer : this.plain;
     },
 
+    // Renders with the renderer for `format`, then applies the citation pass
+    // (options.citations: superscript | hidden | raw; unset = raw).
+    render(rawText, format = 'plain', options = {}) {
+        const rendered = this.get(format).render(String(rawText), options);
+        return CitationPass.apply(rendered, options.citations);
+    },
+
     // Renders text without atoms (e.g. the Browse "original" box).
     // Returns { root, problems } where problems lists failed unit checks.
-    renderStatic(rawText, format = 'plain') {
-        const rendered = this.get(format).render(String(rawText));
+    renderStatic(rawText, format = 'plain', options = {}) {
+        const rendered = this.render(rawText, format, options);
         let lastContainer = null;
         let textNode = null;
         rendered.units.forEach(unit => {
@@ -418,7 +541,7 @@ const SpanRenderers = {
 
     // Renderer-level checks: units lie inside the text, are in raw order, do
     // not overlap, and show their raw characters (or the decoded form of an
-    // escape or entity).
+    // escape or entity, or the label of a citation marker).
     checkUnits(rendered) {
         const problems = [];
         let previousEnd = 0;
@@ -429,7 +552,9 @@ const SpanRenderers = {
                 problems.push({ check: 1, message: 'units out of order or overlapping', index, start: unit.start });
             } else {
                 const raw = rendered.chars.slice(unit.start, unit.end).join('');
-                const decoded = raw === `\\${unit.display}`
+                const citation = unit.kind === 'citation' && CITATION_MARKER_EXACT.test(raw);
+                const decoded = citation
+                    || raw === `\\${unit.display}`
                     || (raw.startsWith('&') && raw.endsWith(';'))
                     || (raw === '\n' && unit.display === ' ');
                 if (unit.display !== raw && !decoded) {
@@ -443,5 +568,5 @@ const SpanRenderers = {
 };
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { SpanRenderers, PlainRenderer, MarkdownRenderer };
+    module.exports = { SpanRenderers, PlainRenderer, MarkdownRenderer, CitationPass };
 }

@@ -5,7 +5,9 @@
 // hidden syntax. Differences that the plain view already has (annotations not
 // aligned to atoms) are counted separately.
 //
-// Usage: node tests/js/verify_markdown_annotations.js <factgenie-dir> [--list N]
+// With --citations, the citation pass runs on top (superscript | hidden | raw).
+//
+// Usage: node tests/js/verify_markdown_annotations.js <factgenie-dir> [--list N] [--citations DISPLAY]
 const path = require('path');
 const env = require('./lib/env');
 const { createMarkdownWindow, renderDocument } = require('./lib/markdown');
@@ -13,6 +15,8 @@ const { createMarkdownWindow, renderDocument } = require('./lib/markdown');
 const factgenieDir = path.resolve(process.argv[2] || path.join(env.REPO_ROOT, 'factgenie'));
 const listIndex = process.argv.indexOf('--list');
 const listLimit = listIndex > 0 ? Number(process.argv[listIndex + 1]) : 30;
+const citationsIndex = process.argv.indexOf('--citations');
+const citations = citationsIndex > 0 ? process.argv[citationsIndex + 1] : null;
 
 const window = createMarkdownWindow();
 const normalizeNewlines = env.loadNormalizeNewlines();
@@ -66,7 +70,7 @@ const markdownOnly = [];
 for (const record of records) {
     const key = `${record.granularity}\u0000${record.text}`;
     if (!cache.has(key)) {
-        const rendered = renderDocument(window, record.text, record.granularity);
+        const rendered = renderDocument(window, record.text, record.granularity, 'markdown', null, [], citations);
         cache.set(key, {
             chars: Array.from(record.text),
             mdAtoms: rendered.atoms,
@@ -110,6 +114,7 @@ for (const record of records) {
 }
 
 console.log(`data:                          ${factgenieDir}`);
+console.log(`citation display:              ${citations || 'off'}`);
 console.log(`campaign records:              ${records.length}`);
 console.log(`annotations:                   ${stats.annotations}`);
 console.log(`stored text != raw slice:      ${stats.textMismatch} (pre-existing data issue, not caused by rendering)`);
