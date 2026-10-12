@@ -5,7 +5,7 @@
 // hidden syntax. Differences that the plain view already has (annotations not
 // aligned to atoms) are counted separately.
 //
-// With --citations, the citation pass runs on top (superscript | hidden | raw).
+// With --citations superscript, the citation pass runs on top.
 //
 // Usage: node tests/js/verify_markdown_annotations.js <factgenie-dir> [--list N] [--citations DISPLAY]
 const path = require('path');

@@ -820,13 +820,13 @@ function normalizeNewlines(text) {
 // Output rendering on the annotation page. A campaign uses only its own
 // config keys, not the dataset's:
 //   output_format: plain | markdown (default plain)
-//   citation_display: superscript | hidden | raw (default superscript)
+//   citation_display: superscript (the only format for now; an unknown
+//     value is used as superscript)
 //   annotation_view: rendered | raw, the view annotators annotate in
 //     (default rendered)
 //   view_switch: off | readonly | full (default readonly); readonly shows
 //     the other view with the annotations but without annotating
 // Campaigns without these keys show plain text as before.
-const OUTPUT_CITATION_DISPLAYS = ["superscript", "hidden", "raw"];
 const OUTPUT_VIEW_SWITCH_MODES = ["off", "readonly", "full"];
 const CITATION_SOURCE_HINT = " (Ctrl/Cmd+click to show the source)";
 
@@ -839,14 +839,15 @@ const plainFallbackOutputs = new Set();
 function campaignOutputRendering() {
     const config = metadata.config || {};
     const format = SpanRenderers.get(config.output_format) === SpanRenderers.plain ? "plain" : config.output_format;
-    const hasCitationDisplay = OUTPUT_CITATION_DISPLAYS.includes(config.citation_display);
+    const citations = SpanRenderers.citationDisplay(config.citation_display);
+    const hasCitationDisplay = citations !== null;
     const hasRenderedView = format !== "plain" || hasCitationDisplay;
     if (!hasRenderedView) {
         return { format: "plain", citations: null, splitCitations: false, hasRenderedView: false, mainView: "raw", viewSwitch: "off" };
     }
     return {
         format,
-        citations: hasCitationDisplay ? config.citation_display : "superscript",
+        citations: citations ?? "superscript",
         // words mode splits tokens at citation markers in both views, so a
         // single citation can be annotated (only campaigns with citation_display)
         splitCitations: hasCitationDisplay,

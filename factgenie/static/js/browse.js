@@ -73,11 +73,9 @@ function normalizeNewlines(text) {
 }
 
 // Rendered/Raw view of the outputs, remembered per browser. "Rendered" uses
-// the dataset's output_format and the citation display; "Raw" always uses the
+// the dataset's output_format and citation_display; "Raw" always uses the
 // plain renderer without citations.
 const OUTPUT_VIEW_STORAGE_KEY = "factgenie.browse.outputView";
-const CITATION_DISPLAY_STORAGE_KEY = "factgenie.browse.citationDisplay";
-const CITATION_DISPLAYS = ["superscript", "hidden", "raw"];
 
 function loadStoredSetting(key) {
     try {
@@ -96,10 +94,6 @@ function storeSetting(key, value) {
 }
 
 let outputView = loadStoredSetting(OUTPUT_VIEW_STORAGE_KEY) === "raw" ? "raw" : "rendered";
-// null = the dataset's citation_display
-let citationDisplayChoice = CITATION_DISPLAYS.includes(loadStoredSetting(CITATION_DISPLAY_STORAGE_KEY))
-    ? loadStoredSetting(CITATION_DISPLAY_STORAGE_KEY)
-    : null;
 
 function currentDatasetConfig() {
     return datasets?.[$("#dataset-select").val()] || {};
@@ -112,15 +106,12 @@ function datasetOutputFormat() {
 
 // Plain datasets have a rendered view only when they set citation_display.
 function datasetHasRenderedView() {
-    return datasetOutputFormat() !== "plain" || CITATION_DISPLAYS.includes(currentDatasetConfig().citation_display);
+    return datasetOutputFormat() !== "plain" || currentCitationDisplay() !== null;
 }
 
+// The dataset's citation format, or null without citations.
 function currentCitationDisplay() {
-    if (citationDisplayChoice) {
-        return citationDisplayChoice;
-    }
-    const datasetDisplay = currentDatasetConfig().citation_display;
-    return CITATION_DISPLAYS.includes(datasetDisplay) ? datasetDisplay : "superscript";
+    return SpanRenderers.citationDisplay(currentDatasetConfig().citation_display);
 }
 
 // Renderer options for the output boxes: { format, citations }.
@@ -136,9 +127,6 @@ function updateOutputViewToggle() {
     const button = $("#toggle-output-view-btn");
     button.closest(".page-item").toggle(hasRenderedView);
     button.find("small").text(outputView === "raw" ? "Show rendered outputs" : "Show raw outputs");
-    const citationButton = $("#toggle-citation-display-btn");
-    citationButton.closest(".page-item").toggle(hasRenderedView && outputView !== "raw");
-    citationButton.find("small").text(`Citations: ${currentCitationDisplay()}`);
 }
 
 function rebuildOutputBoxes() {
@@ -155,13 +143,6 @@ function rebuildOutputBoxes() {
 function toggleOutputView() {
     outputView = outputView === "raw" ? "rendered" : "raw";
     storeSetting(OUTPUT_VIEW_STORAGE_KEY, outputView);
-    rebuildOutputBoxes();
-}
-
-function cycleCitationDisplay() {
-    const index = CITATION_DISPLAYS.indexOf(currentCitationDisplay());
-    citationDisplayChoice = CITATION_DISPLAYS[(index + 1) % CITATION_DISPLAYS.length];
-    storeSetting(CITATION_DISPLAY_STORAGE_KEY, citationDisplayChoice);
     rebuildOutputBoxes();
 }
 
@@ -1780,7 +1761,7 @@ function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
 
         annotated_content = $(format === "plain" ? '<p>' : '<div>', { id: parId });
         // campaigns with citation_display split words-mode tokens at citations
-        const splitCitations = ["superscript", "hidden", "raw"].includes(annotations.citation_display);
+        const splitCitations = SpanRenderers.citationDisplay(annotations.citation_display) !== null;
         spanAnnotator.addDocument(parId, annotated_content, false, normalized, { ...renderOptions, splitCitations });
         spanAnnotator.addAnnotations(parId, annotations.annotations);
         problems = spanAnnotator.getDocumentCheck(parId)?.problems || [];

@@ -238,8 +238,17 @@ test('stacked citations share one superscript', () => {
     const groups = result.element.querySelectorAll('sup.citation-group');
     assertEqual(groups.length, 1, 'superscripts');
     assertEqual(groups[0].textContent, '7,10');
-    assertEqual(citationUnits('Text.[^Z7][^Z10] end', 'hidden'), []);
-    assertEqual(units('Text.[^Z7] end', 'markdown', 'hidden').map(unit => unit[0]), [0, 1, 2, 3, 4, 10, 11, 12, 13]);
+    // without a citation format the markers stay as written
+    assertEqual(citationUnits('Text.[^Z7] end', null), []);
+    assertEqual(units('Text.[^Z7] end', 'markdown', null).length, 14);
+});
+
+test('citation_display values', () => {
+    const display = value => window.SpanRenderers.citationDisplay(value);
+    assertEqual([display(undefined), display(null), display(''), display(NaN)], [null, null, null, null]);
+    assertEqual(display('superscript'), 'superscript');
+    // old or unknown values are used as superscript
+    assertEqual([display('hidden'), display('raw')], ['superscript', 'superscript']);
 });
 
 test('citations inside table cells', () => {

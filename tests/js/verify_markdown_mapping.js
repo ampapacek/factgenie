@@ -2,7 +2,7 @@
 // Verification 2 (mapping checks): render every stored output with the
 // `markdown` renderer in both granularities and run the runtime checks 1-3.
 // Also reports text nodes the renderer could not align character by character.
-// With --citations, the citation pass runs on top (superscript | hidden | raw).
+// With --citations superscript, the citation pass runs on top.
 // With --split-citations, words-mode tokens are split at citation markers
 // and the Raw view (plain renderer, same split) is checked too.
 //

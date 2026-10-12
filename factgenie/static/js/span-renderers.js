@@ -439,16 +439,21 @@ class MarkdownRenderer {
 const CITATION_MARKER = /\[\^?([A-Z]{1,3}\d+)\]/g;
 const CITATION_MARKER_EXACT = /^\[\^?([A-Z]{1,3}\d+)\]$/;
 
+// Citation formats a dataset or campaign can set with `citation_display`.
+// Only "superscript" exists for now; other formats (e.g. author-year) would
+// be further values.
+const CITATION_DISPLAYS = ['superscript'];
+
 // A pass over the units of any renderer. With display "superscript" each
 // marker becomes one unit shown as its label number in a <sup>; adjacent
-// markers share one <sup> separated by commas. With "hidden" the markers
-// become hidden syntax. Any other display leaves the units unchanged.
+// markers share one <sup> separated by commas. Any other display leaves the
+// units unchanged (the Raw view).
 // Markers are converted only where all their characters are visible as
 // written in one container outside code.
 const CitationPass = {
     apply(rendered, display) {
         rendered.citations = [];
-        if (display !== 'superscript' && display !== 'hidden') {
+        if (display !== 'superscript') {
             return rendered;
         }
         const groups = this._groups(rendered);
@@ -478,11 +483,9 @@ const CitationPass = {
             if (group) {
                 skipUntil = group.end;
                 rendered.citations.push(...group.markers);
-                if (display === 'superscript') {
-                    units.push(...this._superscript(group));
-                    // text after the superscript goes into a new run
-                    runs.delete(group.container);
-                }
+                units.push(...this._superscript(group));
+                // text after the superscript goes into a new run
+                runs.delete(group.container);
                 return;
             }
             units.push(touched.has(unit.container) ? { ...unit, container: runSlot(unit.container) } : unit);
@@ -552,13 +555,30 @@ const SpanRenderers = {
     plain: new PlainRenderer(),
     markdown: new MarkdownRenderer(),
 
+    // The citation format for a `citation_display` config value: null when
+    // unset (no citations), an unknown value falls back to "superscript".
+    citationDisplay(value) {
+        if (typeof value !== 'string' || value === '') {
+            return null;
+        }
+        if (CITATION_DISPLAYS.includes(value)) {
+            return value;
+        }
+        this._warnedDisplays = this._warnedDisplays || new Set();
+        if (!this._warnedDisplays.has(value)) {
+            this._warnedDisplays.add(value);
+            console.warn(`[FactGenie citations] Unknown citation_display "${value}", using "superscript".`);
+        }
+        return 'superscript';
+    },
+
     get(format) {
         const renderer = this[format];
         return typeof renderer?.render === 'function' ? renderer : this.plain;
     },
 
     // Renders with the renderer for `format`, then applies the citation pass
-    // (options.citations: superscript | hidden | raw; unset = raw).
+    // (options.citations: superscript; unset = markers as written).
     render(rawText, format = 'plain', options = {}) {
         const rendered = this.get(format).render(String(rawText), options);
         return CitationPass.apply(rendered, options.citations);
