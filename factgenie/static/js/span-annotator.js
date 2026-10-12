@@ -120,31 +120,62 @@ class SpanAnnotator {
     addDocument(objectId, htmlObject, dynamic = false, rawText = null, options = {}) {
         const $element = $(htmlObject);
         const text = rawText ?? $element.text();
+        this.documents.set(objectId, {
+            element: $element,
+            text: text,
+            annotations: [],
+            readOnly: false
+        });
+        this._renderDocument(objectId, options);
+
+        if (dynamic) {
+            this._attachEventHandlers(objectId);
+        }
+    }
+
+    // Renders a document again with other renderer options (e.g. a view
+    // switch). Annotations and the undo history are raw offsets, so both
+    // are kept.
+    renderDocument(objectId, options = {}) {
+        if (!this.documents.has(objectId)) {
+            return;
+        }
+        this._renderDocument(objectId, options);
+        this._renderAnnotations(objectId);
+    }
+
+    _renderDocument(objectId, options) {
+        const doc = this.documents.get(objectId);
         const format = options.format || 'plain';
-        const rendered = SpanRenderers.render(text, format, options);
-        this._createSpans(text, rendered);
+        const rendered = SpanRenderers.render(doc.text, format, options);
+        this._createSpans(doc.text, rendered);
         const check = this._checkDocument(rendered);
         if (!check.ok) {
             console.warn(`[FactGenie spans] Rendering checks failed for ${objectId} (${format}):`, check.problems);
         }
 
         // native append: moving a large fragment through jQuery is slow
-        $element.empty();
-        $element[0]?.appendChild(rendered.root);
+        doc.element.empty();
+        doc.element[0]?.appendChild(rendered.root);
 
-        this.documents.set(objectId, {
-            element: $element,
-            text: text,
-            format: format,
-            // plain documents without citations keep the original highlighting
-            exactPlain: format === 'plain' && rendered.citations.length === 0,
-            check: check,
-            annotations: []
-        });
+        doc.format = format;
+        // plain documents without citations keep the original highlighting
+        doc.exactPlain = format === 'plain' && rendered.citations.length === 0;
+        doc.check = check;
+    }
 
-        if (dynamic) {
-            this._attachEventHandlers(objectId);
+    // A read-only document shows its annotations but cannot be annotated.
+    setDocumentReadOnly(objectId, readOnly) {
+        const doc = this.documents.get(objectId);
+        if (!doc) {
+            return;
         }
+        doc.readOnly = Boolean(readOnly);
+        doc.element.parent().toggleClass('annotate-box-readonly', doc.readOnly);
+    }
+
+    getDocumentText(objectId) {
+        return this.documents.get(objectId)?.text ?? null;
     }
 
     // used to add annotations externally
@@ -397,8 +428,15 @@ class SpanAnnotator {
         });
 
         $element.on('mousedown', (e) => {
-            // Skip annotation logic in select mode
-            if (this.currentType === -2) {
+            // Ctrl/Cmd+click on a citation shows its source instead
+            const $citation = $(e.target).closest('.citation');
+            if ((e.ctrlKey || e.metaKey) && $citation.length > 0) {
+                e.preventDefault();
+                this.emit('citationClicked', { objectId, label: String($citation.data('label')) });
+                return;
+            }
+            // Skip annotation logic in select mode and read-only documents
+            if (this.currentType === -2 || this.documents.get(objectId).readOnly) {
                 return;
             }
 
@@ -421,7 +459,7 @@ class SpanAnnotator {
                 this.suppressClickOnce = false;
                 return;
             }
-            if (!this.annotateReason) {
+            if (!this.annotateReason || this.documents.get(objectId).readOnly || e.ctrlKey || e.metaKey) {
                 return;
             }
             const $target = $(e.target).closest('.annotatable');
@@ -429,9 +467,7 @@ class SpanAnnotator {
                 return;
             }
             const doc = this.documents.get(objectId);
-            const position = parseInt($target.data('index'));
-            const matching = doc.annotations.filter(a =>
-                position >= a.start && position < a.start + a.text.length);
+            const matching = this._annotationsForSpan(doc, $target);
             if (matching.length === 0) {
                 return;
             }
@@ -445,6 +481,9 @@ class SpanAnnotator {
 
         $element.on('mousemove', (e) => {
             if (e.buttons === 2) { // Right button pressed
+                if (this.documents.get(objectId).readOnly) {
+                    return;
+                }
                 const closestSpan = this._findClosestSpan(objectId, e.clientX, e.clientY);
                 if (closestSpan) {
                     this._previewEraserEffect(objectId, closestSpan);
@@ -457,7 +496,7 @@ class SpanAnnotator {
                 if (closestSpan) {
                     this._updateHighlight(objectId, this.startSpan, closestSpan);
                 }
-            } else if (this.currentType === -1) {
+            } else if (this.currentType === -1 && !this.documents.get(objectId).readOnly) {
                 const closestSpan = this._findClosestSpan(objectId, e.clientX, e.clientY);
                 if (closestSpan) {
                     this._previewEraserEffect(objectId, closestSpan);
@@ -477,9 +516,7 @@ class SpanAnnotator {
                 } else {
                     if (this.annotateReason && this.startSpan.is(endSpan)) {
                         const doc = this.documents.get(objectId);
-                        const position = parseInt(endSpan.data('index'));
-                        const matching = doc.annotations.filter(a =>
-                            position >= a.start && position < a.start + a.text.length);
+                        const matching = this._annotationsForSpan(doc, endSpan);
                         if (matching.length > 0) {
                             const annotation = matching[matching.length - 1];
                             if (annotation.type === this.currentType) {

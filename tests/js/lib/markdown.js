@@ -5,7 +5,7 @@ const env = require('./env');
 function createMarkdownWindow() {
     const window = env.createWindow(
         ['lib/mdast-gfm.bundle.js', 'span-renderers.js', 'span-annotator.js'].map(env.readStatic),
-        { expose: ['SpanAnnotator', 'SpanRenderers'] }
+        { expose: ['SpanAnnotator', 'SpanRenderers', 'CitationSources'] }
     );
     // collect renderer warnings (e.g. text nodes that could not be aligned)
     window.__warnings = [];

@@ -404,7 +404,7 @@ function markRedoAnnotatableRange(box, start, length) {
     box.find(".annotatable").each(function () {
         const span = $(this);
         const idx = Number(span.data("index"));
-        const contentLength = String(span.data("content") || "").length;
+        const contentLength = Array.from(String(span.data("content") ?? "")).length;
         if (Number.isFinite(idx) && idx < end && idx + Math.max(contentLength, 1) > numericStart) {
             span.addClass("browse-match-span");
             marked = true;
@@ -413,40 +413,20 @@ function markRedoAnnotatableRange(box, start, length) {
     return marked;
 }
 
-function markRedoAnnotatableText(box, text) {
+// Marks the atoms covering the matches of `text` in the raw output, so a
+// match can cross formatting and hidden syntax in the rendered view.
+function markRedoAnnotatableText(box, text, rawText) {
     const needle = String(text || "");
-    if (!needle) {
+    if (!needle || typeof rawText !== "string") {
         return false;
     }
-    let fullText = "";
-    const spans = [];
-    box.find(".annotatable").each(function () {
-        const span = $(this);
-        const chunk = String(span.data("content") || "");
-        spans.push({ span, start: fullText.length, end: fullText.length + chunk.length });
-        fullText += chunk + String(span.data("whitespace") || "");
-    });
-    const ranges = [];
-    const haystack = fullText.toLowerCase();
-    const loweredNeedle = needle.toLowerCase();
-    let searchFrom = 0;
-    while (searchFrom <= haystack.length) {
-        const index = haystack.indexOf(loweredNeedle, searchFrom);
-        if (index < 0) {
-            break;
-        }
-        ranges.push({ start: index, end: index + needle.length });
-        searchFrom = index + Math.max(needle.length, 1);
-    }
-    if (!ranges.length) {
-        return false;
-    }
-    spans.forEach(function (item) {
-        if (ranges.some((range) => item.start < range.end && item.end > range.start)) {
-            item.span.addClass("browse-match-span");
+    let marked = false;
+    SpanRenderers.findText(rawText, needle).forEach(function (range) {
+        if (markRedoAnnotatableRange(box, range.start, range.end - range.start)) {
+            marked = true;
         }
     });
-    return true;
+    return marked;
 }
 
 function redoMatchLabel(detail) {
@@ -468,21 +448,22 @@ function redoMatchEvidence(detail) {
 
 function applyRedoMatchDetail(detail) {
     const outputBox = $(`#out-text-${current_example_idx}`);
+    const outputText = spanAnnotator.getDocumentText(`p${current_example_idx}`);
     if (detail.target === "question") {
         return markRedoTextNodes($("#examplearea"), detail.matched_text || detail.value);
     }
     if (detail.target === "output") {
-        if (markRedoAnnotatableText(outputBox, detail.matched_text || detail.value)) {
+        if (markRedoAnnotatableText(outputBox, detail.matched_text || detail.value, outputText)) {
             return true;
         }
         return markRedoTextNodes(outputBox, detail.matched_text || detail.value);
     }
     if (detail.target === "span") {
-        const marked = markRedoAnnotatableRange(outputBox, detail.start, String(detail.span_text || "").length);
+        const marked = markRedoAnnotatableRange(outputBox, detail.start, Array.from(String(detail.span_text || "")).length);
         if (marked) {
             return true;
         }
-        return markRedoAnnotatableText(outputBox, detail.span_text || detail.matched_text);
+        return markRedoAnnotatableText(outputBox, detail.span_text || detail.matched_text, outputText);
     }
     if (detail.target === "slider") {
         const label = String(detail.slider_label || detail.sliderLabel || "");
@@ -725,6 +706,8 @@ function goToAnnotation(example_idx) {
         return;
     }
     $("#examplearea").html(data.html);
+    CitationSources.resolve($(`#out-text-${example_idx}`)[0], $("#examplearea")[0], CITATION_SOURCE_HINT);
+    updateOutputViewControls();
 
     const flags = annotation_set[example_idx].flags;
     const options = annotation_set[example_idx].options;
@@ -834,6 +817,138 @@ function normalizeNewlines(text) {
 }
 
 
+// Output rendering on the annotation page. A campaign uses only its own
+// config keys, not the dataset's:
+//   output_format: plain | markdown (default plain)
+//   citation_display: superscript | hidden | raw (default superscript)
+//   annotation_view: rendered | raw, the view annotators annotate in
+//     (default rendered)
+//   view_switch: off | readonly | full (default readonly); readonly shows
+//     the other view with the annotations but without annotating
+// Campaigns without these keys show plain text as before.
+const OUTPUT_CITATION_DISPLAYS = ["superscript", "hidden", "raw"];
+const OUTPUT_VIEW_SWITCH_MODES = ["off", "readonly", "full"];
+const CITATION_SOURCE_HINT = " (Ctrl/Cmd+click to show the source)";
+
+let outputRendering = { format: "plain", citations: null, hasRenderedView: false, mainView: "raw", viewSwitch: "off" };
+let outputView = "raw";
+// annotation indexes whose rendered view failed the runtime checks; they
+// stay in the raw view and can be annotated there
+const plainFallbackOutputs = new Set();
+
+function campaignOutputRendering() {
+    const config = metadata.config || {};
+    const format = SpanRenderers.get(config.output_format) === SpanRenderers.plain ? "plain" : config.output_format;
+    const hasCitationDisplay = OUTPUT_CITATION_DISPLAYS.includes(config.citation_display);
+    const hasRenderedView = format !== "plain" || hasCitationDisplay;
+    if (!hasRenderedView) {
+        return { format: "plain", citations: null, hasRenderedView: false, mainView: "raw", viewSwitch: "off" };
+    }
+    return {
+        format,
+        citations: hasCitationDisplay ? config.citation_display : "superscript",
+        hasRenderedView,
+        mainView: config.annotation_view === "raw" ? "raw" : "rendered",
+        viewSwitch: OUTPUT_VIEW_SWITCH_MODES.includes(config.view_switch) ? config.view_switch : "readonly",
+    };
+}
+
+function outputRenderOptions(view) {
+    if (view === "rendered") {
+        return { format: outputRendering.format, citations: outputRendering.citations };
+    }
+    return { format: "plain", citations: null };
+}
+
+// Renders the output of `annotationIdx` in the current view with `render`
+// (addDocument or renderDocument). An output whose rendered view fails the
+// runtime checks is shown in the raw view instead.
+function renderOutputDocument(annotationIdx, render) {
+    const docId = `p${annotationIdx}`;
+    const paragraph = $(`#out-text-${annotationIdx}-par`);
+    const show = function (view) {
+        const options = outputRenderOptions(view);
+        paragraph.toggleClass("md-rendered", options.format !== "plain");
+        return options;
+    };
+    if (plainFallbackOutputs.has(Number(annotationIdx))) {
+        render(show("raw"));
+        spanAnnotator.setDocumentReadOnly(docId, false);
+        return;
+    }
+    render(show(outputView));
+    if (outputView === "rendered" && spanAnnotator.getDocumentCheck(docId)?.ok === false) {
+        console.warn(`[FactGenie spans] Output ${annotationIdx} is shown as plain text because its rendered view failed the checks above.`);
+        plainFallbackOutputs.add(Number(annotationIdx));
+        spanAnnotator.renderDocument(docId, show("raw"));
+        spanAnnotator.setDocumentReadOnly(docId, false);
+        return;
+    }
+    const readOnly = outputRendering.viewSwitch === "readonly" && outputView !== outputRendering.mainView;
+    spanAnnotator.setDocumentReadOnly(docId, readOnly);
+}
+
+function setOutputView(view) {
+    if (view === outputView || !outputRendering.hasRenderedView || outputRendering.viewSwitch === "off") {
+        return;
+    }
+    outputView = view;
+    getLoadedExampleIndexes().forEach(function (annotationIdx) {
+        renderOutputDocument(annotationIdx, (options) => spanAnnotator.renderDocument(`p${annotationIdx}`, options));
+    });
+    CitationSources.resolve($(`#out-text-${current_example_idx}`)[0], $("#examplearea")[0], CITATION_SOURCE_HINT);
+    updateOutputViewControls();
+    applyRedoMatchHighlights();
+}
+
+function initOutputViewControls() {
+    if (!outputRendering.hasRenderedView) {
+        return;
+    }
+    const info = $("#text-type-info").addClass("d-flex flex-wrap align-items-center gap-2");
+    info.append($("<span>", { id: "output-view-note", class: "small text-muted" }));
+    if (outputRendering.viewSwitch === "off") {
+        return;
+    }
+    const group = $("<div>", { id: "output-view-switch", class: "btn-group btn-group-sm ms-auto", role: "group", "aria-label": "Output view" });
+    ["rendered", "raw"].forEach(function (view) {
+        const viewOnly = outputRendering.viewSwitch === "readonly" && view !== outputRendering.mainView;
+        $("<button>", { type: "button", class: "btn btn-outline-secondary", "data-view": view })
+            .text((view === "rendered" ? "Rendered" : "Raw") + (viewOnly ? " (view only)" : ""))
+            .attr("title", view === "rendered" ? "Show the outputs with formatting" : "Show the outputs as written")
+            .on("click", () => setOutputView(view))
+            .appendTo(group);
+    });
+    info.append(group);
+}
+
+// Shows the view switch and the note for the current example.
+function updateOutputViewControls() {
+    if (!outputRendering.hasRenderedView) {
+        return;
+    }
+    const fallback = plainFallbackOutputs.has(Number(current_example_idx));
+    $("#output-view-switch").toggle(!fallback);
+    $("#output-view-switch button").each(function () {
+        const active = $(this).data("view") === outputView;
+        $(this).toggleClass("active", active).attr("aria-pressed", active ? "true" : "false");
+    });
+    const note = $("#output-view-note").empty().removeAttr("title");
+    if (fallback) {
+        note.text("Shown as plain text")
+            .attr("title", "The formatted view of this output could not be checked, so it is shown as written. Details are in the browser console.");
+    } else if (outputRendering.viewSwitch === "readonly" && outputView !== outputRendering.mainView) {
+        note.append(
+            "View only. ",
+            $("<a>", { href: "#" }).text("Switch back to annotate.").on("click", function (event) {
+                event.preventDefault();
+                setOutputView(outputRendering.mainView);
+            })
+        );
+    }
+}
+
+
 function loadAnnotations() {
     $("#dataset-spinner").show();
     initializeRedoControls();
@@ -876,13 +991,19 @@ function loadAnnotations() {
             const annotationOverlapAllowed = metadata.config.annotation_overlap_allowed || false;
             const annotateReason = metadata.config.annotate_reason || false;
             spanAnnotator.init(metadata.config.annotation_granularity, annotationOverlapAllowed, annotation_span_categories, annotateReason);
+            outputRendering = campaignOutputRendering();
+            outputView = outputRendering.mainView;
+            initOutputViewControls();
+            spanAnnotator.addEventListener("citationClicked", function ({ label }) {
+                CitationSources.show(label, $("#examplearea")[0]);
+            });
 
             for (const annotation_idx of loadedIndexes) {
                 const data = examples_cached[annotation_idx];
                 const normalizedOutput = normalizeNewlines(data.generated_outputs.output);
                 const p = $('<p>', { id: `out-text-${annotation_idx}-par`, class: 'annotatable-paragraph' });
                 $(`#out-text-${annotation_idx}`).append(p);
-                spanAnnotator.addDocument(`p${annotation_idx}`, p, true, normalizedOutput);
+                renderOutputDocument(annotation_idx, (options) => spanAnnotator.addDocument(`p${annotation_idx}`, p, true, normalizedOutput, options));
                 if (Array.isArray(annotation_set[annotation_idx].annotations)) {
                     spanAnnotator.addAnnotations(`p${annotation_idx}`, annotation_set[annotation_idx].annotations);
                 }

@@ -1499,6 +1499,13 @@ body.auth-only #annotator-auth-modal .modal-dialog {
     display: inline;
 }
 
+/* Annotation page: an output view that can be looked at but not annotated
+   (view_switch: readonly) */
+.annotate-box.annotate-box-readonly {
+    cursor: default !important;
+    background: #fafbfc;
+}
+
 /* Outputs rendered from Markdown (span-renderers.js) */
 .md-rendered {
     white-space: normal;

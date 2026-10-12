@@ -165,55 +165,10 @@ function cycleCitationDisplay() {
     rebuildOutputBoxes();
 }
 
-// The source item for a citation label: the list item whose <code> starts
-// with "[Z7]", else the nth item of the first source list, else null.
-function citationSource(label) {
-    const code = $("#examplearea code").filter(function () {
-        return $(this).text().trim().startsWith(`[${label}]`);
-    }).first();
-    if (code.length) {
-        const item = code.closest("li");
-        return { item: item.length ? item : code, path: code.text().trim().slice(label.length + 2).trim() };
-    }
-    const number = Number(String(label).match(/\d+$/)?.[0]);
-    const item = $("#examplearea ol").first().children("li").eq(number - 1);
-    if (number > 0 && item.length) {
-        return { item, path: item.find("code").first().text().trim() };
-    }
-    return null;
-}
-
-// Adds the source tooltip to the superscripts in `container` and marks the
-// ones without a source as unresolved.
-function resolveCitations(container) {
-    $(container).find(".citation").each(function () {
-        const citation = $(this);
-        const label = citation.data("label");
-        const source = citationSource(label);
-        citation.toggleClass("citation-unresolved", !source);
-        citation.attr("title", source ? `${label}: ${source.path || "source"}` : `${label}: source not found in the input`);
-    });
-}
-
-function showCitationSource(label) {
-    const source = citationSource(label);
-    if (!source) {
-        return;
-    }
-    const element = source.item[0];
-    element.scrollIntoView({ behavior: "smooth", block: "center" });
-    source.item.removeClass("citation-source-flash");
-    // restart the animation
-    void element.offsetWidth;
-    source.item.addClass("citation-source-flash");
-    clearTimeout(element.citationFlashTimer);
-    element.citationFlashTimer = setTimeout(() => source.item.removeClass("citation-source-flash"), 2000);
-}
-
 $(document).on("click", ".out-placeholder .citation", function (event) {
     event.preventDefault();
     event.stopPropagation();
-    showCitationSource($(this).data("label"));
+    CitationSources.show(String($(this).data("label")), $("#examplearea")[0]);
 });
 
 function escapeHtml(text) {
@@ -1432,33 +1387,6 @@ function markAnnotatableRange(box, start, length) {
     return marked;
 }
 
-// Code-point ranges of the case-insensitive matches of `needle` in `rawText`.
-function rawTextMatches(rawText, needle) {
-    const starts = new Map();
-    let haystack = "";
-    Array.from(rawText).forEach((char, index) => {
-        starts.set(haystack.length, index);
-        haystack += char.toLowerCase();
-    });
-    starts.set(haystack.length, starts.size);
-    const loweredNeedle = needle.toLowerCase();
-    const ranges = [];
-    let searchFrom = 0;
-    while (searchFrom <= haystack.length) {
-        const index = haystack.indexOf(loweredNeedle, searchFrom);
-        if (index < 0) {
-            break;
-        }
-        const start = starts.get(index);
-        const end = starts.get(index + loweredNeedle.length);
-        if (start !== undefined && end !== undefined) {
-            ranges.push({ start, end });
-        }
-        searchFrom = index + Math.max(loweredNeedle.length, 1);
-    }
-    return ranges;
-}
-
 // Marks a text match in a rendered output box: the match is searched in the
 // raw output, so it can cross formatting and hidden syntax, and then mapped
 // onto the atoms (annotated boxes) or the text segments (original box).
@@ -1470,7 +1398,7 @@ function markRenderedOutputText(box, needle) {
         if (typeof rawText !== "string") {
             return;
         }
-        const ranges = rawTextMatches(rawText, needle);
+        const ranges = SpanRenderers.findText(rawText, needle);
         if (!ranges.length) {
             return;
         }
@@ -1855,7 +1783,7 @@ function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
     }
     // for search highlights (see markRenderedOutputText)
     placeholder.data("rawText", normalized);
-    resolveCitations(placeholder);
+    CitationSources.resolve(placeholder[0], $("#examplearea")[0]);
     if (problems.length > 0 && (format !== "plain" || renderOptions.citations)) {
         placeholder.prepend(unverifiedRenderingNotice(problems));
     }

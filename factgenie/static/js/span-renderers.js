@@ -624,8 +624,90 @@ const SpanRenderers = {
         });
         return problems;
     },
+
+    // Case-insensitive matches of `needle` in `rawText` as code-point ranges
+    // [{ start, end }], i.e. in the offsets of atoms and annotations.
+    findText(rawText, needle) {
+        const starts = new Map();
+        let haystack = '';
+        Array.from(String(rawText)).forEach((char, index) => {
+            starts.set(haystack.length, index);
+            haystack += char.toLowerCase();
+        });
+        starts.set(haystack.length, starts.size);
+        const loweredNeedle = String(needle).toLowerCase();
+        const ranges = [];
+        let searchFrom = 0;
+        while (searchFrom <= haystack.length) {
+            const index = haystack.indexOf(loweredNeedle, searchFrom);
+            if (index < 0) {
+                break;
+            }
+            const start = starts.get(index);
+            const end = starts.get(index + loweredNeedle.length);
+            if (start !== undefined && end !== undefined) {
+                ranges.push({ start, end });
+            }
+            searchFrom = index + Math.max(loweredNeedle.length, 1);
+        }
+        return ranges;
+    },
+};
+
+// The sources that citation superscripts point to, in the input panel
+// (`area`, e.g. #examplearea) of Browse and the annotation page.
+const CitationSources = {
+    // The list item whose <code> starts with "[Z7]", else the nth item of the
+    // first source list, else null. Returns { item, path }.
+    find(label, area) {
+        if (!area) {
+            return null;
+        }
+        const code = Array.from(area.querySelectorAll('code'))
+            .find(element => element.textContent.trim().startsWith(`[${label}]`));
+        if (code) {
+            return { item: code.closest('li') ?? code, path: code.textContent.trim().slice(label.length + 2).trim() };
+        }
+        const number = Number(String(label).match(/\d+$/)?.[0]);
+        const list = area.querySelector('ol');
+        const item = list ? Array.from(list.children).filter(child => child.tagName === 'LI')[number - 1] : null;
+        if (number > 0 && item) {
+            return { item, path: item.querySelector('code')?.textContent.trim() ?? '' };
+        }
+        return null;
+    },
+
+    // Adds the source tooltip (followed by `hint`) to the superscripts in
+    // `container` and marks the ones without a source as unresolved.
+    resolve(container, area, hint = '') {
+        container?.querySelectorAll('.citation').forEach(citation => {
+            const label = citation.dataset.label;
+            const source = this.find(label, area);
+            citation.classList.toggle('citation-unresolved', !source);
+            citation.title = source
+                ? `${label}: ${source.path || 'source'}${hint}`
+                : `${label}: source not found in the input`;
+        });
+    },
+
+    // Scrolls to the source of `label` and flashes it.
+    show(label, area) {
+        const source = this.find(label, area);
+        if (!source) {
+            return false;
+        }
+        const element = source.item;
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        element.classList.remove('citation-source-flash');
+        // restart the animation
+        void element.offsetWidth;
+        element.classList.add('citation-source-flash');
+        clearTimeout(element.citationFlashTimer);
+        element.citationFlashTimer = setTimeout(() => element.classList.remove('citation-source-flash'), 2000);
+        return true;
+    },
 };
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { SpanRenderers, PlainRenderer, MarkdownRenderer, CitationPass };
+    module.exports = { SpanRenderers, PlainRenderer, MarkdownRenderer, CitationPass, CitationSources };
 }
