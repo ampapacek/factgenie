@@ -115,16 +115,20 @@ class SpanAnnotator {
         }
     }
 
-    addDocument(objectId, htmlObject, dynamic = false, rawText = null) {
+    // options.format selects the renderer from SpanRenderers (default: plain)
+    addDocument(objectId, htmlObject, dynamic = false, rawText = null, options = {}) {
         const $element = $(htmlObject);
         const text = rawText ?? $element.text();
-        const spans = this._createSpans(text);
+        const format = options.format || 'plain';
+        const rendered = SpanRenderers.get(format).render(text, options);
+        this._createSpans(text, rendered);
 
-        $element.empty().append(spans);
+        $element.empty().append(rendered.root);
 
         this.documents.set(objectId, {
             element: $element,
             text: text,
+            format: format,
             annotations: []
         });
 
@@ -142,16 +146,6 @@ class SpanAnnotator {
 
     getAnnotations(objectId) {
         return this.documents.get(objectId)?.annotations || [];
-    }
-
-    _appendWhitespace($element, whitespace) {
-        for (const char of whitespace) {
-            if (char === '\n') {
-                $element.append($('<br>'));
-            } else {
-                $element.append(document.createTextNode(char));
-            }
-        }
     }
 
     _stringLength(text) {
@@ -193,51 +187,105 @@ class SpanAnnotator {
         });
     }
 
-    _createSpans(text) {
-        const fragment = document.createDocumentFragment();
+    _appendUnitDisplays(element, units) {
+        units.forEach(unit => {
+            if (unit.display === '\n') {
+                element.append(document.createElement('br'));
+            } else {
+                element.append(document.createTextNode(unit.display));
+            }
+        });
+    }
+
+    _groupUnitsByContainer(units) {
+        const groups = [];
+        units.forEach(unit => {
+            const last = groups[groups.length - 1];
+            if (last && last.container === unit.container) {
+                last.units.push(unit);
+            } else {
+                groups.push({ container: unit.container, units: [unit] });
+            }
+        });
+        return groups;
+    }
+
+    // Builds the atoms (`.annotatable` spans) for the configured granularity
+    // inside the containers of the renderer output.
+    _createSpans(text, rendered) {
+        if (this.granularity !== 'words') {
+            rendered.units.forEach(unit => {
+                const span = document.createElement('span');
+                span.className = 'annotatable';
+                span.dataset.index = String(unit.start);
+                span.dataset.content = rendered.chars.slice(unit.start, unit.end).join('');
+                this._appendUnitDisplays(span, [unit]);
+                unit.container.append(span);
+            });
+            return;
+        }
+
+        const unitAt = new Array(rendered.chars.length).fill(null);
+        rendered.units.forEach(unit => {
+            unitAt[unit.start] = unit;
+        });
+        const unitsIn = (start, end) => unitAt.slice(start, end).filter(unit => unit !== null);
+
+        // Atoms are the raw whitespace-delimited tokens. The visible characters
+        // of a token may land in several containers; each container gets its
+        // own fragment sharing the token's data-index and data-content.
+        const parts = text.split(/(\s+)/);
         let currentIndex = 0;
-        if (this.granularity === 'words') {
-            const parts = text.split(/(\s+)/);
+        let lastContainer = rendered.root;
 
-            parts.forEach((part, arrayIndex) => {
-                if (arrayIndex % 2 === 1) {
-                    return;
-                }
+        parts.forEach((part, arrayIndex) => {
+            if (arrayIndex % 2 === 1) {
+                return;
+            }
 
-                const whitespace = arrayIndex < parts.length - 1 ? parts[arrayIndex + 1] : '';
-                const fullContent = String(part) + whitespace;
+            const whitespace = arrayIndex < parts.length - 1 ? parts[arrayIndex + 1] : '';
+            const partEnd = currentIndex + this._stringLength(part);
+            const wordEnd = partEnd + this._stringLength(whitespace);
+            const wordGroups = this._groupUnitsByContainer(unitsIn(currentIndex, partEnd));
+            const whitespaceGroups = this._groupUnitsByContainer(unitsIn(partEnd, wordEnd));
+
+            if (wordGroups.length === 0 && part === '') {
+                // keep the empty token atom (e.g. before leading whitespace)
+                wordGroups.push({ container: whitespaceGroups[0]?.container ?? lastContainer, units: [] });
+            }
+
+            let lastSpan = null;
+            wordGroups.forEach(group => {
                 const span = document.createElement('span');
                 span.className = 'annotatable';
                 span.dataset.index = String(currentIndex);
                 span.dataset.content = String(part);
                 span.dataset.whitespace = whitespace;
-                span.append(document.createTextNode(part));
+                span.append(document.createTextNode(group.units.map(unit => unit.display).join('')));
+                group.container.append(span);
+                lastSpan = span;
+                lastContainer = group.container;
+            });
 
+            if (lastSpan) {
                 const whitespaceSpan = document.createElement('span');
                 whitespaceSpan.className = 'whitespace';
-                this._appendWhitespace($(whitespaceSpan), whitespace);
-                span.append(whitespaceSpan);
-
-                currentIndex += this._stringLength(fullContent);
-                fragment.append(span);
-            });
-        } else {
-            Array.from(text).forEach(char => {
-                const span = document.createElement('span');
-                span.className = 'annotatable';
-                span.dataset.index = String(currentIndex);
-                span.dataset.content = char;
-                if (char === '\n') {
-                    span.append(document.createElement('br'));
-                } else {
-                    span.append(document.createTextNode(char));
+                lastSpan.append(whitespaceSpan);
+                if (whitespaceGroups[0]?.container === lastContainer) {
+                    this._appendUnitDisplays(whitespaceSpan, whitespaceGroups.shift().units);
                 }
-                currentIndex += 1;
-                fragment.append(span);
+            }
+            // visible whitespace outside the token's last container
+            whitespaceGroups.forEach(group => {
+                const whitespaceSpan = document.createElement('span');
+                whitespaceSpan.className = 'whitespace';
+                this._appendUnitDisplays(whitespaceSpan, group.units);
+                group.container.append(whitespaceSpan);
+                lastContainer = group.container;
             });
-        }
 
-        return fragment;
+            currentIndex = wordEnd;
+        });
     }
 
     _attachEventHandlers(objectId) {

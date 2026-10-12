@@ -44,3 +44,6 @@ reason_presets.txt
 factgenie/static/img/zavislostni_graf.png
 factgenie/static/img/zavislostni_graf*
 
+
+# Node test dependencies
+tests/js/node_modules/

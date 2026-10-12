@@ -1,0 +1,8 @@
+{
+  "name": "factgenie-js-tests",
+  "private": true,
+  "description": "Node checks for the span renderers and annotator (not part of the Python package).",
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}
