@@ -127,7 +127,9 @@ class SpanAnnotator {
             console.warn(`[FactGenie spans] Rendering checks failed for ${objectId} (${format}):`, check.problems);
         }
 
-        $element.empty().append(rendered.root);
+        // native append: moving a large fragment through jQuery is slow
+        $element.empty();
+        $element[0]?.appendChild(rendered.root);
 
         this.documents.set(objectId, {
             element: $element,

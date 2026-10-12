@@ -47,3 +47,4 @@ factgenie/static/img/zavislostni_graf*
 
 # Node test dependencies
 tests/js/node_modules/
+tests/js/.cache/
