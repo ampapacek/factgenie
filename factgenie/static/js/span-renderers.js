@@ -116,12 +116,14 @@ class MarkdownRenderer {
                 this._blocks(node, this._el('blockquote', parent, 'md-blockquote'), ctx);
                 return;
             case 'list': {
-                const list = this._el(node.ordered ? 'ol' : 'ul', parent);
-                if (node.ordered && Number.isInteger(node.start) && node.start !== 1) {
-                    list.setAttribute('start', String(node.start));
-                }
+                // ordered lists show their numbers as written (visible text
+                // that can be annotated); bullets are drawn by the <ul>
+                const list = this._el(node.ordered ? 'ol' : 'ul', parent, node.ordered ? 'md-ol' : null);
                 (node.children || []).forEach(item => {
                     const li = this._el('li', list);
+                    if (node.ordered) {
+                        this._listNumber(item, this._slot(li, 'span', 'md-list-number'), ctx);
+                    }
                     if (typeof item.checked === 'boolean') {
                         this._el('span', li, 'md-task').textContent = item.checked ? '☑ ' : '☐ ';
                     }
@@ -145,6 +147,21 @@ class MarkdownRenderer {
                 // html, definitions, footnote definitions, anything unknown:
                 // the raw text stays visible as written
                 this._rawVisible(node, this._slot(parent, 'div', 'md-raw'), ctx);
+        }
+    }
+
+    _listNumber(item, container, ctx) {
+        const range = this._range(item, ctx);
+        if (!range) {
+            return;
+        }
+        const head = ctx.chars.slice(range[0], Math.min(range[1], range[0] + 11)).join('');
+        const marker = head.match(/^\d{1,9}[.)]/);
+        if (!marker) {
+            return;
+        }
+        for (let i = range[0]; i < range[0] + marker[0].length; i++) {
+            this._push(ctx, container, i, i + 1, ctx.chars[i]);
         }
     }
 
