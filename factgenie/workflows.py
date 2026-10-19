@@ -233,6 +233,8 @@ def create_annotation_example_record(jsonl_line, jsonl_file, metadata):
         "options": jsonl_line.get("options", []),
         "sliders": jsonl_line.get("sliders", []),
         "text_fields": jsonl_line.get("text_fields", []),
+        "text_lists": jsonl_line.get("text_lists", []),
+        "text_list_definitions": ann_metadata.get("text_lists", []),
         "jsonl_file": jsonl_file,
     }
 
@@ -1020,6 +1022,8 @@ def save_record(mode, campaign, row, result):
         record["options"] = result.get("options", [])
         record["sliders"] = result.get("sliders", [])
         record["text_fields"] = result.get("text_fields", [])
+        if "text_lists" in result:
+            record["text_lists"] = result["text_lists"]
 
     if mode == CampaignMode.LLM_EVAL:
         record["metadata"] |= result.get("metadata", {})  # Typical workflows contain result["metadata"]["prompt"]

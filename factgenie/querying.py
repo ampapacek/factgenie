@@ -329,6 +329,7 @@ def _build_submissions(annotation_index, campaign_index):
         "options",
         "sliders",
         "text_fields",
+        "text_lists",
         "annotations",
         "jsonl_file",
     ]
@@ -364,7 +365,10 @@ def _build_submissions(annotation_index, campaign_index):
         span_count = len([ann for ann in annotations if isinstance(ann, dict) and ann.get("text")])
         if is_skipped:
             state = "skipped"
-        elif span_count == 0:
+        elif span_count == 0 and not any(
+            entry.get("items") or entry.get("empty_confirmed")
+            for entry in _safe_list(row.get("text_lists")) if isinstance(entry, dict)
+        ):
             state = "empty"
         else:
             state = "done"
@@ -388,6 +392,7 @@ def _build_submissions(annotation_index, campaign_index):
                 "options": _safe_list(row.get("options")),
                 "sliders": _safe_list(row.get("sliders")),
                 "text_fields": _safe_list(row.get("text_fields")),
+                "text_lists": _safe_list(row.get("text_lists")),
                 "annotations": annotations,
                 "jsonl_file": row.get("jsonl_file"),
             }

@@ -765,6 +765,12 @@ def _has_filled_extra_field(fields):
     return False
 
 
+def _has_text_list_content(lists):
+    return isinstance(lists, list) and any(
+        isinstance(entry, dict) and (entry.get("items") or entry.get("empty_confirmed")) for entry in lists
+    )
+
+
 def _coverage_status(annotated_count, expected_count):
     if annotated_count <= 0:
         return "missing"
@@ -1072,6 +1078,8 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
             submitted["has_extra_fields"] = submitted["sliders"].apply(_has_filled_extra_field) | submitted[
                 "text_fields"
             ].apply(_has_filled_extra_field)
+            if "text_lists" in submitted.columns:
+                submitted["has_extra_fields"] |= submitted["text_lists"].apply(_has_text_list_content)
             submitted["has_completed_content"] = submitted["has_annotations"] | submitted["has_extra_fields"]
             submitted["skip_selected"] = submitted["flags"].apply(_is_skip_selected)
             submitted["span_count"] = submitted["annotations"].apply(len)
@@ -1203,7 +1211,10 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
             if field not in example_index.columns:
                 example_index[field] = [[] for _ in range(len(example_index))]
 
-        ann_df = example_index[key_cols + ["annotator_id", "annotations", "flags", "sliders", "text_fields"]].copy()
+        list_cols = ["text_lists"] if "text_lists" in example_index.columns else []
+        ann_df = example_index[
+            key_cols + ["annotator_id", "annotations", "flags", "sliders", "text_fields"] + list_cols
+        ].copy()
         ann_df["annotator_id"] = ann_df["annotator_id"].apply(_normalize_annotator_id)
         ann_df = ann_df[ann_df["annotator_id"] != ""]
 
@@ -1217,6 +1228,8 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
             ann_df["has_extra_fields"] = ann_df["sliders"].apply(_has_filled_extra_field) | ann_df[
                 "text_fields"
             ].apply(_has_filled_extra_field)
+            if list_cols:
+                ann_df["has_extra_fields"] |= ann_df["text_lists"].apply(_has_text_list_content)
             ann_df["has_completed_content"] = ann_df["has_annotations"] | ann_df["has_extra_fields"]
             ann_df["skip_selected"] = ann_df["flags"].apply(_is_skip_selected)
             ann_df["has_annotations_excluding_skipped"] = ann_df["has_completed_content"] & (~ann_df["skip_selected"])

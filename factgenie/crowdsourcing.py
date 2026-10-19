@@ -15,6 +15,7 @@ import pandas as pd
 from flask import jsonify
 from jinja2 import Template
 
+from factgenie.text_lists import normalize_config, submission_lists
 import factgenie.utils as utils
 import factgenie.redo as redo
 import factgenie.workflows as workflows
@@ -65,6 +66,7 @@ def _sanitize_redo_annotations_for_campaign(campaign, item, annotations):
 
 
 def create_crowdsourcing_campaign(app, campaign_id, config, campaign_data):
+    config = {**config, "text_lists": normalize_config(config.get("text_lists", []))}
     # create a new directory
     if os.path.exists(os.path.join(CAMPAIGN_DIR, campaign_id)):
         return jsonify({"error": "Campaign already exists"})
@@ -345,6 +347,7 @@ def parse_crowdsourcing_config(config):
         "options": config.get("options"),
         "sliders": config.get("sliders"),
         "text_fields": config.get("textFields"),
+        "text_lists": normalize_config(config.get("text_lists", config.get("textLists", []))),
     }
 
     return config
@@ -456,6 +459,7 @@ def get_examples_for_batch(db, batch_idx, campaign=None, annotator_id=None, incl
                         "options": active_record.get("options", []),
                         "sliders": active_record.get("sliders", []),
                         "textFields": active_record.get("text_fields", []),
+                        "text_lists": active_record.get("text_lists", []),
                         "per_example_saved": row.get("status") == ExampleStatus.FINISHED,
                     }
                 )
@@ -488,6 +492,8 @@ def select_preview_batch(db):
 
 
 def get_redo_annotation_set(app, campaign, db, annotator_id, include_completed=False):
+    if campaign.metadata.get("config", {}).get("text_lists"):
+        raise ValueError(redo.TEXT_LISTS_UNSUPPORTED)
     items = redo.list_items_for_annotator(campaign.campaign_id, annotator_id, include_completed=include_completed)
     annotation_set = []
 
@@ -508,6 +514,7 @@ def get_redo_annotation_set(app, campaign, db, annotator_id, include_completed=F
                 "options": active_record.get("options", []),
                 "sliders": active_record.get("sliders", []),
                 "textFields": active_record.get("text_fields", []),
+                "text_lists": active_record.get("text_lists", []),
                 "redo": True,
                 "redo_id": item["redo_id"],
                 "redo_status": item.get("status", redo.STATUS_PENDING),
@@ -548,7 +555,8 @@ def get_annotator_batch(
         seed = int(hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:8], 16)
 
         should_serve_redo = False
-        if annotator_id != PREVIEW_STUDY_ID and (batch_idx is None or batch_idx == ""):
+        if (not campaign.metadata.get("config", {}).get("text_lists")
+                and annotator_id != PREVIEW_STUDY_ID and (batch_idx is None or batch_idx == "")):
             should_serve_redo = redo.is_redo_mode(campaign.campaign_id, annotator_id)
             if include_completed_redo and not should_serve_redo:
                 should_serve_redo = bool(
@@ -688,6 +696,7 @@ def _save_annotation_item_locked(app, campaign, db, row_idx, annotation, annotat
         force_reload=False,
     )["output"]
 
+    validated_lists = submission_lists(campaign.metadata["config"], annotation)
     annotations = [a for a in annotation.get("annotations", []) if a.get("text")]
     result = {
         "annotations": annotations,
@@ -695,6 +704,7 @@ def _save_annotation_item_locked(app, campaign, db, row_idx, annotation, annotat
         "options": annotation.get("options", []),
         "sliders": annotation.get("sliders", []),
         "text_fields": annotation.get("textFields", annotation.get("text_fields", [])),
+        "text_lists": validated_lists,
         "time_last_saved": annotation.get("timeLastSaved", annotation.get("time_last_saved")),
         "time_last_accessed": annotation.get("timeLastAccessed", annotation.get("time_last_accessed")),
         "output": output,
@@ -795,6 +805,8 @@ def save_redo_annotation(app, campaign_id, redo_id, annotation, annotator_id):
 
     now = int(time.time())
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    if campaign.metadata.get("config", {}).get("text_lists"):
+        return utils.error(redo.TEXT_LISTS_UNSUPPORTED)
 
     with app.db["lock"]:
         queue_path = redo.queue_path(campaign_id)
@@ -938,6 +950,8 @@ def keep_redo_annotation(app, campaign_id, redo_id, annotator_id):
         return utils.error("Missing campaign_id, redo_id, or annotator_id")
 
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    if campaign.metadata.get("config", {}).get("text_lists"):
+        return utils.error(redo.TEXT_LISTS_UNSUPPORTED)
 
     with app.db["lock"]:
         queue = redo.load_queue(campaign_id)
@@ -966,8 +980,13 @@ def keep_redo_annotation(app, campaign_id, redo_id, annotator_id):
     )
 
 
-def preview_submission_response(app, campaign_id):
+def preview_submission_response(app, campaign_id, annotation_set=None):
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    try:
+        for annotation in annotation_set or []:
+            submission_lists(campaign.metadata["config"], annotation)
+    except ValueError as exc:
+        return utils.error(str(exc))
     final_message_html = markdown.markdown(campaign.metadata["config"].get("final_message", "Thank you."))
     preview_message = (
         '<div class="alert alert-info mt-3" role="alert">'
@@ -989,6 +1008,10 @@ def save_annotations(app, campaign_id, annotation_set, annotator_id, is_backup_i
     save_dir = os.path.join(CAMPAIGN_DIR, campaign_id, "files")
     os.makedirs(save_dir, exist_ok=True)
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    try:
+        validated_lists = [submission_lists(campaign.metadata["config"], ann) for ann in annotation_set]
+    except ValueError as exc:
+        return utils.error(str(exc))
 
     with app.db["lock"]:
         campaign.load_db()
@@ -1038,6 +1061,7 @@ def save_annotations(app, campaign_id, annotation_set, annotator_id, is_backup_i
                 "options": ann["options"],
                 "sliders": ann["sliders"],
                 "text_fields": ann["textFields"],
+                "text_lists": validated_lists[i],
                 "time_last_saved": ann.get("timeLastSaved"),
                 "time_last_accessed": ann.get("timeLastAccessed"),
                 "output": output,

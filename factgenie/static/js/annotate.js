@@ -3,7 +3,7 @@ const annotator_id = window.annotator_id;
 const metadata = window.metadata;
 const redo_context = window.redo_context || {};
 const INVALID_ANNOTATOR_IDS = ["", "FILL_YOUR_NAME_HERE", null, undefined];
-const perExampleSaveMode = metadata?.config?.save_mode === "per_example";
+const perExampleSaveMode = metadata?.config?.save_mode === "per_example" && annotator_id !== "factgenie_preview";
 
 var current_example_idx = 0;
 var redoFinalMessage = "";
@@ -736,6 +736,7 @@ function goToAnnotation(example_idx) {
     annotation_set[example_idx]["timeLastAccessed"] = Math.floor(Date.now() / 1000);
 
     clearExampleLevelFields();
+    textListsUI.load(annotation_set[example_idx].text_lists || annotation_set[example_idx].textLists || []);
 
     if (flags !== undefined) {
         $(".crowdsourcing-flag").each(function (i) {
@@ -834,7 +835,24 @@ function normalizeNewlines(text) {
 }
 
 
+function restoreTextListsFromLocalStorage() {
+    try {
+        const backup = JSON.parse(localStorage.getItem('factgenie_annotation_backup') || 'null');
+        if (!backup || backup.campaign_id !== metadata.id || backup.annotator_id !== annotator_id) return;
+        for (const annotation of annotation_set) {
+            if (annotation.per_example_saved || annotation.redo_id) continue;
+            const saved = backup.annotation_set?.find(record =>
+                ['dataset', 'split', 'setup_id', 'example_idx', 'batch_idx', 'annotator_group']
+                    .every(key => String(record[key] ?? '') === String(annotation[key] ?? '')));
+            if (Array.isArray(saved?.text_lists)) annotation.text_lists = structuredClone(saved.text_lists);
+        }
+    } catch (error) {
+        console.warn('Could not restore text lists from the browser backup.', error);
+    }
+}
+
 function loadAnnotations() {
+    restoreTextListsFromLocalStorage();
     $("#dataset-spinner").show();
     initializeRedoControls();
     initializePerExampleControls();
@@ -1088,6 +1106,8 @@ function hasStoredAnnotationContent(annotation) {
     if (!annotation) {
         return false;
     }
+    if ((annotation.text_lists || annotation.textLists || []).some(list =>
+        list.empty_confirmed || list.items?.some(item => `${item.text || ""}`.trim()))) return true;
     if (Array.isArray(annotation.annotations) && annotation.annotations.some(item => (item?.text || "").trim() !== "")) {
         return true;
     }
@@ -1126,6 +1146,7 @@ function preparePerExampleFinishSubmission() {
 }
 
 function validateCurrentAnnotationComplete() {
+    if (!textListsUI.validate()) return false;
     const skipSelected = isSkipAnnotationSelected();
 
     // if skip flag was set, dont check initialization of the values
@@ -1561,6 +1582,7 @@ function saveCurrentAnnotations(example_idx) {
     annotation_set[example_idx]["options"] = collectOptions();
     annotation_set[example_idx]["sliders"] = collectSliders();
     annotation_set[example_idx]["textFields"] = collectTextFields();
+    annotation_set[example_idx]["text_lists"] = textListsUI.collect();
     annotation_set[example_idx]["timeLastSaved"] = Math.floor(Date.now() / 1000);
 }
 
@@ -1609,6 +1631,14 @@ function submitAnnotations(campaign_id, options) {
         preparePerExampleFinishSubmission();
     }
 
+    for (const index of getLoadedExampleIndexes()) {
+        if (textListsUI.errors(annotation_set[index].text_lists || []).some(Boolean)) {
+            goToPage(index);
+            textListsUI.validate();
+            return;
+        }
+    }
+
     // Save to local storage before attempting submission
     saveAnnotationsToLocalStorage();
 
@@ -1627,14 +1657,13 @@ function submitAnnotations(campaign_id, options) {
         timeout: 30000, // 30 second timeout
         success: function (response) {
             console.log(response);
-            window.onbeforeunload = null;
-
-            // Clear local storage backup on successful submission
-            clearAnnotationsFromLocalStorage();
 
             if (response.success !== true) {
                 handleSubmissionError(response.error, submissionData);
             } else {
+                window.onbeforeunload = null;
+                // Keep the recovery backup when the server rejects a submission.
+                clearAnnotationsFromLocalStorage();
                 if (perExampleSaveMode) {
                     annotation_set.forEach((annotation) => {
                         annotation.per_example_saved = true;

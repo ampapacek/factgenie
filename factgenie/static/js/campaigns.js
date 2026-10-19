@@ -453,8 +453,10 @@ function duplicateEval(inputDuplicateId, campaignId) {
 }
 
 
+let configuredTextLists = [];
+
 function gatherConfig() {
-    var config = {};
+    var config = {text_lists: structuredClone(configuredTextLists)};
 
     if (window.mode == "crowdsourcing") {
         config.annotatorInstructions = annotatorInstructionsMDE.value();
@@ -947,6 +949,7 @@ function setCampaignPseudonymizeAnnotators(campaignId, pseudonymizeAnnotators) {
 }
 
 function updateCrowdsourcingConfig() {
+    configuredTextLists = [];
     const crowdsourcingConfig = $('#crowdsourcingConfig').val();
 
     if (crowdsourcingConfig === "[None]") {
@@ -968,6 +971,7 @@ function updateCrowdsourcingConfig() {
         return;
     }
     const cfg = window.configs[crowdsourcingConfig];
+    configuredTextLists = structuredClone(cfg.text_lists || []);
 
     const annotatorInstructions = cfg.annotator_instructions;
     const finalMessage = cfg.final_message;
@@ -1060,6 +1064,11 @@ function importCrowdsourcingConfigToLLM() {
         return;
     }
 
+    if (cfg.text_lists?.length) {
+        alert("Text lists are not supported in LLM campaigns yet.");
+        return;
+    }
+    configuredTextLists = [];
     const annotationSpanCategories = cfg.annotation_span_categories || [];
     const annotationGranularity = cfg.annotation_granularity || "words";
     const annotationOverlapAllowed = cfg.annotation_overlap_allowed || false;
@@ -1127,6 +1136,7 @@ function importCrowdsourcingConfigToLLM() {
 
 
 function updateLLMMetricConfig() {
+    configuredTextLists = [];
     const llmConfigValue = $('#llmConfig').val();
 
     if (llmConfigValue === "[None]") {
@@ -1155,6 +1165,7 @@ function updateLLMMetricConfig() {
         return;
     }
     const cfg = window.configs[llmConfigValue];
+    configuredTextLists = structuredClone(cfg.text_lists || []);
 
     // Supporting a deprecated `type` field
     const api_provider = cfg.api_provider || cfg.type;

@@ -1027,6 +1027,10 @@ def redo_filter(campaign_id):
 @app.route("/redo/<campaign_id>/items", methods=["POST"])
 @login_required
 def redo_add_items(campaign_id):
+    try:
+        redo.require_supported_campaign(campaign_id)
+    except ValueError as exc:
+        return utils.error(str(exc))
     data = request.get_json() or {}
     include_skipped = bool(data.get("includeSkipped", False))
     include_completed = bool(data.get("includeCompleted", False))
@@ -1075,6 +1079,10 @@ def redo_cancel_items(campaign_id):
 @app.route("/redo/<campaign_id>/items/restore_original", methods=["POST"])
 @login_required
 def redo_restore_original_items(campaign_id):
+    try:
+        redo.require_supported_campaign(campaign_id)
+    except ValueError as exc:
+        return utils.error(str(exc))
     data = request.get_json() or {}
     result = redo.restore_original_annotations(campaign_id, data.get("redo_ids", []), restored_by="admin")
     if result["restored"]:
@@ -1146,7 +1154,10 @@ def crowdsourcing_create():
     campaign_data = data.get("campaignData")
     config = data.get("config")
 
-    config = crowdsourcing.parse_crowdsourcing_config(config)
+    try:
+        config = crowdsourcing.parse_crowdsourcing_config(config)
+    except ValueError as exc:
+        return utils.error(str(exc))
 
     try:
         crowdsourcing.create_crowdsourcing_campaign(app, campaign_id, config, campaign_data)
@@ -1410,10 +1421,13 @@ def llm_campaign_create():
     campaign_data = data.get("campaignData")
     config = data.get("config")
 
-    if mode == CampaignMode.LLM_EVAL:
-        config = llm_campaign.parse_llm_eval_config(config)
-    elif mode == CampaignMode.LLM_GEN:
-        config = llm_campaign.parse_llm_gen_config(config)
+    try:
+        if mode == CampaignMode.LLM_EVAL:
+            config = llm_campaign.parse_llm_eval_config(config)
+        elif mode == CampaignMode.LLM_GEN:
+            config = llm_campaign.parse_llm_gen_config(config)
+    except ValueError as exc:
+        return utils.error(str(exc))
 
     datasets = app.db["datasets_obj"]
 
@@ -1640,14 +1654,17 @@ def save_config():
     config = data.get("config")
     mode = data.get("mode")
 
-    if mode == CampaignMode.LLM_EVAL:
-        config = llm_campaign.parse_llm_eval_config(config)
-    elif mode == CampaignMode.LLM_GEN:
-        config = llm_campaign.parse_llm_gen_config(config)
-    elif mode == CampaignMode.CROWDSOURCING:
-        config = crowdsourcing.parse_crowdsourcing_config(config)
-    else:
-        return utils.error(f"Invalid mode: {mode}")
+    try:
+        if mode == CampaignMode.LLM_EVAL:
+            config = llm_campaign.parse_llm_eval_config(config)
+        elif mode == CampaignMode.LLM_GEN:
+            config = llm_campaign.parse_llm_gen_config(config)
+        elif mode == CampaignMode.CROWDSOURCING:
+            config = crowdsourcing.parse_crowdsourcing_config(config)
+        else:
+            return utils.error(f"Invalid mode: {mode}")
+    except ValueError as exc:
+        return utils.error(str(exc))
 
     utils.save_config(filename, config, mode=mode)
 
@@ -1675,7 +1692,7 @@ def submit_annotations():
 
     logger.info(f"Received annotations for {campaign_id} by {annotator_id}")
     if crowdsourcing.is_preview_annotator(annotator_id):
-        return crowdsourcing.preview_submission_response(app, campaign_id)
+        return crowdsourcing.preview_submission_response(app, campaign_id, annotation_set)
     if any(annotation.get("redo_id") for annotation in annotation_set):
         return utils.error("Redo annotations must be saved with Save current item.")
 

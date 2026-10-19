@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from factgenie.text_lists import reject_llm_lists
 import ast
 import datetime
 import difflib
@@ -36,6 +37,7 @@ def format_campaign_processing_error(dataset_id, split, example_idx, error):
 
 
 def create_llm_campaign(app, mode, campaign_id, config, campaign_data, datasets, overwrite=False):
+    reject_llm_lists(config)
     campaign_id = slugify(campaign_id)
 
     # create a new directory
@@ -401,6 +403,7 @@ def validate_openrouter_model(model_name):
 
 
 def parse_llm_gen_config(config):
+    reject_llm_lists(config)
     config = {
         "api_provider": config.get("apiProvider"),
         "model": config.get("modelName"),
@@ -416,6 +419,7 @@ def parse_llm_gen_config(config):
 
 
 def parse_llm_eval_config(config):
+    reject_llm_lists(config)
     config = {
         "api_provider": config.get("apiProvider"),
         "model": config.get("modelName"),
@@ -439,6 +443,7 @@ def parse_llm_eval_config(config):
 
 
 def parse_campaign_config(config):
+    reject_llm_lists(config)
     def parse_value(value):
         try:
             # Try to parse the value as a literal (int, list, dict, etc.)
