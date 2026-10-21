@@ -481,6 +481,18 @@ def _browse_annotator_key(campaign_id, annotator_id):
     return f"{campaign_id}-ann-{key}"
 
 
+def classify_text_list_item_codes(codes):
+    """List items need the Top 10 answer before any bucket is established.
+
+    Spans keep the lenient classify_rag_mistake_reason rules (a bare InSeafile counts as generation); a list item
+    with Top 10 left on "?" may still be a search error, so it stays unclassified.
+    """
+    text = str(codes or "")
+    if not (RAG_MISTAKE_TOKEN_PATTERNS["InTop10"].search(text) or RAG_MISTAKE_TOKEN_PATTERNS["NotInTop10"].search(text)):
+        return None
+    return classify_rag_mistake_reason(text)
+
+
 def classify_rag_mistake_reason(reason):
     text = str(reason or "")
     tokens = {name for name, pattern in RAG_MISTAKE_TOKEN_PATTERNS.items() if pattern.search(text)}
@@ -582,14 +594,20 @@ def compute_rag_mistake_stats(
         "unclassified": {
             "label": "Nezařazeno",
             "short_label": "?",
-            "description": "Položky seznamu, u kterých není vyplněné Top 10 ani Seafile, takže je nelze zařadit.",
-            "lead": "Položka seznamu bez vyplněného Top 10 / Seafile.",
+            "description": (
+                "Položky seznamu, které nelze zařadit, protože chybí vyplnění Top 10 "
+                "(nebo Seafile, když je Top 10 Ne)."
+            ),
+            "lead": "Položka seznamu s nevyplněným Top 10 / Seafile.",
         },
     }
 
     grouped_examples = {}
     for row in rows:
-        mistake_key = classify_rag_mistake_reason(row["codes"])
+        if row["kind"] == "item":
+            mistake_key = classify_text_list_item_codes(row["codes"])
+        else:
+            mistake_key = classify_rag_mistake_reason(row["codes"])
         if mistake_key is None:
             # Spans without markers are ordinary span notes; only list items are reported as unclassified.
             if row["kind"] != "item":

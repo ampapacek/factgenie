@@ -309,6 +309,9 @@ def _text_list_fixture():
                             item("search miss", ["Ne"], ["Ano"]),
                             item("collection gap", ["Ne"], ["Ne"]),
                             item("not filled", [], []),
+                            item("only seafile", [], ["Ano"]),
+                            item("only top10 no", ["Ne"], []),
+                            item("only top10 yes", ["Ano"], []),
                         ],
                     }
                 ],
@@ -342,7 +345,13 @@ def test_rag_summary_classifies_text_list_items_by_choice_codes(monkeypatch):
     ]
     # Browse links preselect this campaign's annotator, not a same-named annotator from another campaign.
     assert by_key["search"]["examples"][0]["browse_url"].endswith("&ann_campaign=mock-campaign-ann-alice")
-    assert by_key["generation"]["span_count"] == 0
+    # Partially answered toggles: a bucket needs the Top 10 answer (and Seafile when Top 10 is Ne).
+    assert [span["text"] for span in by_key["generation"]["examples"][0]["spans"]] == ["only top10 yes"]
+    assert [span["text"] for span in by_key["unclassified"]["examples"][0]["spans"]] == [
+        "not filled",
+        "only seafile",
+        "only top10 no",
+    ]
     assert by_key["unclassified"]["examples"][0]["spans"][0]["reason"] == "Top 10: — · Seafile: —"
 
     # A span category selection leaves the list items out.
@@ -359,9 +368,9 @@ def test_rag_summary_classifies_text_list_items_by_choice_codes(monkeypatch):
 def test_extra_fields_stats_count_text_list_items_and_choices():
     campaign, example_index = _text_list_fixture()
     stats = analysis.compute_extra_fields_stats(example_index, campaign.metadata["config"]["text_lists"])
-    assert stats["Chybí"] == {"items": 3, "Nic nechybí": 1}
-    assert stats["Chybí / Top 10"] == {"Ne": 2, "—": 1}
-    assert stats["Chybí / Seafile"] == {"Ano": 1, "Ne": 1, "—": 1}
+    assert stats["Chybí"] == {"items": 6, "Nic nechybí": 1}
+    assert stats["Chybí / Top 10"] == {"Ne": 3, "Ano": 1, "—": 2}
+    assert stats["Chybí / Seafile"] == {"Ano": 2, "Ne": 1, "—": 3}
 
 
 def test_rag_summary_ignores_lists_without_rag_codes(monkeypatch):
@@ -384,4 +393,4 @@ def test_rag_summary_ignores_lists_without_rag_codes(monkeypatch):
         defaults=defaults,
         example_index=example_index,
     )
-    assert {row["key"]: row["span_count"] for row in stats}["unclassified"] == 1
+    assert {row["key"]: row["span_count"] for row in stats}["unclassified"] == 3  # "web" is not counted
