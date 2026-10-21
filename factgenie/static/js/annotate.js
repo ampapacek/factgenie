@@ -820,8 +820,8 @@ function normalizeNewlines(text) {
 // Output rendering on the annotation page. A campaign uses only its own
 // config keys, not the dataset's:
 //   output_format: plain | markdown (default plain)
-//   citation_display: superscript (the only format for now; an unknown
-//     value is used as superscript)
+//   citation_display: superscript (the only format for now and the default
+//     in the rendered view; an unknown value is used as superscript)
 //   annotation_view: rendered | raw, the view annotators annotate in
 //     (default rendered)
 //   view_switch: off | readonly | full (default readonly); readonly shows
@@ -847,10 +847,11 @@ function campaignOutputRendering() {
     }
     return {
         format,
+        // the rendered view shows citations as superscripts by default
         citations: citations ?? "superscript",
         // words mode splits tokens at citation markers in both views, so a
-        // single citation can be annotated (only campaigns with citation_display)
-        splitCitations: hasCitationDisplay,
+        // single citation can be annotated
+        splitCitations: true,
         hasRenderedView,
         mainView: config.annotation_view === "raw" ? "raw" : "rendered",
         viewSwitch: OUTPUT_VIEW_SWITCH_MODES.includes(config.view_switch) ? config.view_switch : "readonly",

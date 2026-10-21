@@ -114,12 +114,22 @@ function currentCitationDisplay() {
     return SpanRenderers.citationDisplay(currentDatasetConfig().citation_display);
 }
 
-// Renderer options for the output boxes: { format, citations }.
+// Renderer options for the output boxes: { format, citations }. The
+// rendered view shows citations as superscripts by default.
 function currentRenderOptions() {
     if (outputView === "raw" || !datasetHasRenderedView()) {
         return { format: "plain", citations: null };
     }
-    return { format: datasetOutputFormat(), citations: currentCitationDisplay() };
+    return { format: datasetOutputFormat(), citations: currentCitationDisplay() ?? "superscript" };
+}
+
+// Campaigns with a rendered view (a non-plain output_format or a
+// citation_display) split words-mode tokens at citation markers, as their
+// annotation page does (campaignOutputRendering in annotate.js).
+function campaignHasRenderedView(annotations) {
+    const format = annotations?.output_format;
+    return (SpanRenderers.get(format) !== SpanRenderers.plain)
+        || SpanRenderers.citationDisplay(annotations?.citation_display) !== null;
 }
 
 function updateOutputViewToggle() {
@@ -1424,7 +1434,7 @@ function markRenderedOutputText(box, needle) {
             atoms.each(function () {
                 const span = $(this);
                 const start = Number(span.data("index"));
-                const length = Array.from(String(span.data("content") ?? "")).length;
+                const length = String(span.data("content") || "").length;
                 if (Number.isFinite(start) && overlaps(start, start + Math.max(length, 1))) {
                     span.addClass("browse-match-span");
                     marked = true;
@@ -1760,8 +1770,7 @@ function getAnnotatedOutput(output, annId, annotations, muteMissing = true) {
         const parId = `out-text-${annId}-par`;
 
         annotated_content = $(format === "plain" ? '<p>' : '<div>', { id: parId });
-        // campaigns with citation_display split words-mode tokens at citations
-        const splitCitations = SpanRenderers.citationDisplay(annotations.citation_display) !== null;
+        const splitCitations = campaignHasRenderedView(annotations);
         spanAnnotator.addDocument(parId, annotated_content, false, normalized, { ...renderOptions, splitCitations });
         spanAnnotator.addAnnotations(parId, annotations.annotations);
         problems = spanAnnotator.getDocumentCheck(parId)?.problems || [];

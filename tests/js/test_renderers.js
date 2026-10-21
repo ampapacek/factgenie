@@ -529,6 +529,39 @@ test('a plain click on a link annotates without navigating; ctrl/cmd+click opens
 });
 
 ['campaignOutputRendering'].forEach(loadAnnotateFunction);
+
+test('the annotation page shows citations by default in the rendered view', () => {
+    window.OUTPUT_VIEW_SWITCH_MODES = ['off', 'readonly', 'full'];
+    const rendering = config => {
+        window.metadata = { config };
+        const { citations, splitCitations, hasRenderedView } = window.campaignOutputRendering();
+        return { citations, splitCitations, hasRenderedView };
+    };
+    assertEqual(rendering({ output_format: 'markdown' }), { citations: 'superscript', splitCitations: true, hasRenderedView: true });
+    assertEqual(rendering({ citation_display: 'superscript' }), { citations: 'superscript', splitCitations: true, hasRenderedView: true });
+    assertEqual(rendering({}), { citations: null, splitCitations: false, hasRenderedView: false });
+});
+
+['currentDatasetConfig', 'datasetOutputFormat', 'datasetHasRenderedView', 'currentCitationDisplay',
+    'currentRenderOptions', 'campaignHasRenderedView', 'markAnnotatableRange'].forEach(loadBrowseFunction);
+
+test('Browse shows citations by default in the rendered view', () => {
+    const $ = window.$;
+    $('<select id="dataset-select"><option value="md">md</option><option value="plain">plain</option></select>').appendTo(window.document.body);
+    window.datasets = { md: { output_format: 'markdown' }, plain: {} };
+    window.eval('var outputView = "rendered";');
+    $('#dataset-select').val('md');
+    assertEqual(window.currentRenderOptions(), { format: 'markdown', citations: 'superscript' }, 'markdown dataset');
+    window.eval('outputView = "raw";');
+    assertEqual(window.currentRenderOptions(), { format: 'plain', citations: null }, 'raw view');
+    window.eval('outputView = "rendered";');
+    $('#dataset-select').val('plain');
+    assertEqual(window.currentRenderOptions(), { format: 'plain', citations: null }, 'plain dataset');
+    assertEqual(window.campaignHasRenderedView({ output_format: 'markdown' }), true, 'markdown campaign');
+    assertEqual(window.campaignHasRenderedView({ citation_display: 'superscript' }), true, 'citation campaign');
+    assertEqual(window.campaignHasRenderedView({}), false, 'plain campaign');
+    $(window.document.body).empty();
+});
 console.log(`passed: ${passed}, failed: ${failures.length}`);
 failures.forEach(failure => console.log(`FAIL ${failure}`));
 process.exit(failures.length === 0 ? 0 : 1);
