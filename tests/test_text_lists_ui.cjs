@@ -19,7 +19,8 @@ class Node {
 const definitions = [{label: 'List', placeholder: '', max_items: 2, empty_confirmation: true,
     empty_label: 'Nothing', required: true, choice_groups: [
         {label: 'Single', multiple: false, required: false, default_values: ['Unknown'], options: [{label: 'Yes'}, {label: 'Unknown'}]},
-        {label: 'Multi', multiple: true, required: true, default_values: ['A', 'B'], options: [{label: 'A'}, {label: 'B'}]}]}];
+        {label: 'Multi', multiple: true, required: true, default_values: ['A', 'B'], options: [{label: 'A'}, {label: 'B'}]},
+        {label: 'Switch', multiple: false, required: false, display: 'toggle', default_values: [], options: [{label: 'Ano'}, {label: 'Ne'}]}]}];
 const root = new Node('div'); root.dataset = {config: JSON.stringify(definitions)};
 const doc = {getElementById: () => root, createElement: tag => new Node(tag), createTextNode: text => new Node('text', text), activeElement: null};
 const context = {document: doc, crypto: {randomUUID}, structuredClone, setTimeout: callback => callback(), window: {}};
@@ -38,6 +39,14 @@ assert.equal(rows().length, 2);
 assert.equal(ui.collect()[0].items[0].text, 'item');
 assert.deepEqual(Array.from(ui.collect()[0].items[0].choices[1].values), ['A', 'B']);
 assert.equal(ui.validate(), true);
+// Toggle: Ano | ? | Ne, starting in the neutral middle, which stores no value.
+const toggleInputs = descendants(first.parent.parent, 'input').filter(node => node.className === 'btn-check');
+assert.deepEqual(toggleInputs.map(node => node.value), ['Ano', '', 'Ne']);
+assert.deepEqual(toggleInputs.map(node => node.checked), [false, true, false]);
+toggleInputs[0].events.change();
+assert.deepEqual(Array.from(ui.collect()[0].items[0].choices[2].values), ['Ano']);
+toggleInputs[1].events.change();
+assert.deepEqual(Array.from(ui.collect()[0].items[0].choices[2].values), []);
 const second = rows()[1]; type(second, 'second');
 assert.equal(rows().length, 2); // finite maximum removes placeholder row
 assert.equal(ui.collect()[0].items[0].id, firstId);
@@ -56,6 +65,10 @@ assert.equal(rows()[1].value, '');
 const deletion = descendants(rows()[0].parent, 'button').find(node => node.textContent === 'Delete');
 deletion.events.click();
 assert.equal(ui.collect()[0].items.length, 0);
+// Skipped examples waive the required list but keep structural checks.
+assert.equal(ui.errors([{label: 'List', items: []}], true)[0], '');
+assert.notEqual(ui.errors([{label: 'List', items: []}])[0], '');
+assert.notEqual(ui.errors([{label: 'List', items: [{text: 'x', choices: [{label: 'Single', values: ['bad']}]}]}], true)[0], '');
 const confirmation = descendants(root, 'input')[0];
 assert.equal(confirmation.disabled, false);
 confirmation.checked = true; confirmation.events.change();
@@ -64,6 +77,18 @@ assert.equal(rows().length, 1);
 type(rows()[0], 'new item');
 assert.equal(confirmation.checked, false);
 assert.equal(confirmation.disabled, true);
+// Plain-HTTP (non-secure) origins have no crypto.randomUUID; IDs fall back to getRandomValues.
+{
+    const insecureRoot = new Node('div'); insecureRoot.dataset = {config: JSON.stringify(definitions)};
+    const insecure = {...context, document: {...doc, getElementById: () => insecureRoot},
+        crypto: {getRandomValues: array => require('node:crypto').getRandomValues(array)}};
+    vm.createContext(insecure);
+    vm.runInContext(fs.readFileSync('factgenie/static/js/text-lists.js', 'utf8') + '\nglobalThis.ui = textListsUI;', insecure);
+    insecure.ui.load([]);
+    const area = descendants(insecureRoot, 'textarea')[0];
+    insecure.document.activeElement = area; area.value = 'item'; area.events.input();
+    assert.match(insecure.ui.collect()[0].items[0].id, /^[0-9a-f]{32}$/);
+}
 console.log('Text-list DOM behavior checks passed: rows, defaults, IDs, clearing, blur, limits, delete and empty confirmation.');
 // Exercise annotation-content detection and browser recovery using the production functions.
 const annotate = fs.readFileSync('factgenie/static/js/annotate.js', 'utf8');

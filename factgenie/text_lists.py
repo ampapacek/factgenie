@@ -68,11 +68,22 @@ def normalize_config(definitions):
             _unique(defaults, "default values")
             if any(value not in labels for value in defaults) or (not multiple and len(defaults) > 1):
                 raise ValueError("Invalid choice defaults")
+            group_label = _string(group.get("label"), "Group label")
+            group_required = _bool(group, "required")
+            display = group.get("display", "choices")
+            if display not in ("choices", "toggle"):
+                raise ValueError(f"{group_label}: display must be 'choices' or 'toggle'")
+            # A toggle is option 1 | unanswered | option 2; the neutral middle stores no value.
+            if display == "toggle" and (multiple or group_required or defaults or len(options) != 2):
+                raise ValueError(
+                    f"{group_label}: toggle needs exactly two options and must be single-select, optional, without defaults"
+                )
             groups.append(
                 {
-                    "label": _string(group.get("label"), "Group label"),
+                    "label": group_label,
                     "multiple": multiple,
-                    "required": _bool(group, "required"),
+                    "required": group_required,
+                    "display": display,
                     "default_values": defaults,
                     "options": options,
                 }
@@ -94,8 +105,11 @@ def normalize_config(definitions):
     return result
 
 
-def normalize_annotation(definitions, records):
-    """Validate a submission, dropping blank rows and allocating only missing IDs."""
+def normalize_annotation(definitions, records, skipped=False):
+    """Validate a submission, dropping blank rows and allocating only missing IDs.
+
+    A skipped example keeps the structural checks but waives required lists and choices.
+    """
     records = _array(records, "text_lists")
     supplied_ids = []
     for record in records:
@@ -137,7 +151,7 @@ def normalize_annotation(definitions, records):
                 if (
                     any(value not in [option["label"] for option in group["options"]] for value in values)
                     or (not group["multiple"] and len(values) > 1)
-                    or (group["required"] and not values)
+                    or (group["required"] and not values and not skipped)
                 ):
                     raise ValueError(f"{label} / {group['label']}: invalid or missing choice")
                 normalized_choices.append({"label": group["label"], "values": values})
@@ -154,15 +168,28 @@ def normalize_annotation(definitions, records):
         confirmed = _bool(record, "empty_confirmed")
         if confirmed and (items or not definition["empty_confirmation"]):
             raise ValueError(f"{label}: invalid empty confirmation")
-        if definition["required"] and not items and not confirmed:
+        if definition["required"] and not items and not confirmed and not skipped:
             raise ValueError(f"{label}: add an item or confirm the list is empty")
         result.append({"label": label, "empty_confirmed": confirmed, "items": items})
     return result
 
 
+def is_skipped(annotation):
+    """Same skip-flag convention as querying.is_skip_selected (labels containing skip/přeskoč)."""
+    for flag in annotation.get("flags") or []:
+        if not isinstance(flag, dict):
+            continue
+        label = str(flag.get("label", "")).lower()
+        if ("skip" in label or "přeskoč" in label or "preskoc" in label) and flag.get("value") is True:
+            return True
+    return False
+
+
 def submission_lists(config, annotation):
     return normalize_annotation(
-        normalize_config(config.get("text_lists", [])), annotation.get("text_lists", annotation.get("textLists", []))
+        normalize_config(config.get("text_lists", [])),
+        annotation.get("text_lists", annotation.get("textLists", [])),
+        skipped=is_skipped(annotation),
     )
 
 

@@ -30,9 +30,12 @@ const textListsUI = (() => {
             grow(target);
         });
     }) : null;
+    // crypto.randomUUID needs a secure context (HTTPS or localhost); plain-HTTP servers fall back to getRandomValues.
+    const randomId = () => typeof crypto.randomUUID === 'function' ? crypto.randomUUID()
+        : Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
     const makeId = () => {
         let id;
-        do { id = crypto.randomUUID(); } while (usedIds.has(id));
+        do { id = randomId(); } while (usedIds.has(id));
         usedIds.add(id);
         return id;
     };
@@ -63,6 +66,11 @@ const textListsUI = (() => {
             const legend = element('legend', group.label + (group.required ? ' *' : '') + ':');
             fieldset.append(legend);
             const choice = row.item.choices.find(value => value.label === group.label);
+            if (group.display === 'toggle') {
+                fieldset.append(renderToggle(list, row, group, groupIndex, choice));
+                row.choices.append(fieldset);
+                return;
+            }
             group.options.forEach(option => {
                 const label = element('label', '', 'text-nowrap');
                 const input = document.createElement('input');
@@ -81,6 +89,31 @@ const textListsUI = (() => {
             });
             row.choices.append(fieldset);
         });
+    }
+    // Three-position switch: first option | neutral (no value) | second option.
+    function renderToggle(list, row, group, groupIndex, choice) {
+        const toggle = element('div', '', 'btn-group btn-group-sm text-list-toggle');
+        toggle.setAttribute('role', 'group');
+        [group.options[0], null, group.options[1]].forEach((option, position) => {
+            const input = document.createElement('input');
+            input.type = 'radio';
+            input.className = 'btn-check';
+            input.name = `text-list-${row.item.id}-${groupIndex}`;
+            input.id = `${input.name}-${position}`;
+            input.value = option?.label ?? '';
+            input.checked = option ? choice.values.includes(option.label) : !choice.values.length;
+            input.addEventListener('change', () => {
+                choice.values = option ? [option.label] : [];
+                list.error.textContent = '';
+                changed();
+            });
+            const label = element('label', option?.label ?? '?',
+                option ? 'btn btn-outline-primary' : 'btn btn-outline-secondary text-list-toggle-neutral');
+            label.htmlFor = input.id;
+            if (!option) label.title = 'Nevyplněno';
+            toggle.append(input, label);
+        });
+        return toggle;
     }
     function addRow(list, savedItem = null) {
         const node = element('div', '', 'text-list-item border rounded px-2 py-1 mb-1');
@@ -190,13 +223,14 @@ const textListsUI = (() => {
             empty_confirmed: list.confirmation?.checked === true,
             items: list.rows.filter(row => row.item).map(row => structuredClone(row.item))}));
     }
-    function errors(records) {
+    // Skipped examples keep structural checks but waive required lists and choices.
+    function errors(records, skipped = false) {
         const ids = records.flatMap(record => (record.items || []).map(item => item.id).filter(Boolean));
         return config.map(definition => {
             if (ids.length !== new Set(ids).size) return 'Duplicate item IDs. Please correct the recovery data.';
             const record = records.find(value => value.label === definition.label) || {items: []};
             const items = (record.items || []).filter(item => item.text?.trim());
-            if (definition.required && !items.length && !record.empty_confirmed)
+            if (definition.required && !skipped && !items.length && !record.empty_confirmed)
                 return 'Add an item or confirm that there is nothing to add.';
             if (definition.max_items !== null && items.length > definition.max_items)
                 return 'Maximum number of items exceeded.';
@@ -205,7 +239,7 @@ const textListsUI = (() => {
             for (const item of items) {
                 for (const group of definition.choice_groups) {
                     const values = item.choices?.find(choice => choice.label === group.label)?.values || [];
-                    if ((group.required && !values.length) || (!group.multiple && values.length > 1) ||
+                    if ((group.required && !skipped && !values.length) || (!group.multiple && values.length > 1) ||
                         new Set(values).size !== values.length ||
                         values.some(value => !group.options.some(option => option.label === value)))
                         return `Select valid choices for ${group.label}.`;
@@ -214,8 +248,8 @@ const textListsUI = (() => {
             return '';
         });
     }
-    function validate() {
-        const messages = errors(collect());
+    function validate(skipped = false) {
+        const messages = errors(collect(), skipped);
         lists.forEach((list, index) => { list.error.textContent = messages[index]; });
         const first = lists.find((list, index) => messages[index]);
         if (first) first.error.scrollIntoView({block: 'center'});

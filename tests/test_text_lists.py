@@ -14,7 +14,7 @@ from flask import Flask, render_template_string
 
 from factgenie import analysis, crowdsourcing, llm_campaign, querying, redo, workflows
 from factgenie.campaign import CampaignMode, ExampleStatus
-from factgenie.text_lists import normalize_config, normalize_annotation
+from factgenie.text_lists import normalize_config, normalize_annotation, submission_lists
 from test_redo import configure_campaign_dir, make_campaign, make_per_example_campaign
 
 
@@ -86,6 +86,11 @@ def test_yaml_config_round_trip(definitions):
         lambda x: x[0]["choice_groups"][0].update(default_values=["Ano", "Ne"]),
         lambda x: x[0]["choice_groups"][0]["options"].append("Nevím"),
         lambda x: x[0]["choice_groups"].append(deepcopy(x[0]["choice_groups"][0])),
+        lambda x: x[0]["choice_groups"][0].update(display="slider"),
+        lambda x: x[0]["choice_groups"][0].update(display="toggle"),  # three options and a default
+        lambda x: x[0]["choice_groups"][0].update(display="toggle", options=["Ano", "Ne"], default_values=["Ne"]),
+        lambda x: x[0]["choice_groups"][0].update(display="toggle", options=["Ano", "Ne"], default_values=[], required=True),
+        lambda x: x[0]["choice_groups"][0].update(display="toggle", options=["Ano", "Ne"], default_values=[], multiple=True),
     ],
 )
 def test_invalid_configuration(definitions, mutation):
@@ -354,3 +359,35 @@ def test_question_coverage_counts_list_only_submissions(monkeypatch, tmp_path):
     statuses = {row["setup_id"]: row["statuses"]["ann-a"] for row in stats["matrix"]["rows"]}
 
     assert statuses == {"items": "done", "confirmed": "done", "unfilled": "todo"}
+
+
+def test_toggle_neutral_middle_stores_no_value(definitions):
+    for group in definitions[0]["choice_groups"]:
+        group.update(display="toggle", default_values=[], options=group["options"][:2])
+    config = normalize_config(definitions)
+    assert [group["display"] for group in config[0]["choice_groups"]] == ["toggle", "toggle"]
+    records = filled(definitions)
+    records[0]["items"][0]["choices"][0]["values"] = []
+    assert normalize_annotation(config, records) == records
+    # Frozen configurations from before `display` existed keep plain choices.
+    assert normalize_config([{"label": "L", "choice_groups": [{"label": "G", "options": ["a"]}]}])[0][
+        "choice_groups"
+    ][0]["display"] == "choices"
+
+
+def test_skipped_example_waives_required_lists_and_choices(definitions):
+    definitions[0].update(required=True)
+    definitions[0]["choice_groups"][0].update(required=True, default_values=[])
+    config = {"text_lists": definitions}
+    empty = {"text_lists": [{"label": definitions[0]["label"], "empty_confirmed": False, "items": []}]}
+    with pytest.raises(ValueError):
+        submission_lists(config, empty)
+    skipped = {**empty, "flags": [{"label": "Přeskočit tuto otázku", "value": True}]}
+    assert submission_lists(config, skipped)[0]["items"] == []
+    records = filled(definitions)
+    records[0]["items"][0]["choices"][0]["values"] = []
+    assert submission_lists(config, {"text_lists": records, "flags": skipped["flags"]}) == records
+    # Skipping waives only completeness, not structure.
+    records[0]["items"][0]["choices"][0]["values"] = ["missing"]
+    with pytest.raises(ValueError):
+        submission_lists(config, {"text_lists": records, "flags": skipped["flags"]})

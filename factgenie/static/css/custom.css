@@ -1611,3 +1611,7 @@ body.auth-only #annotator-auth-modal .modal-dialog {
 .browse-text-list-text {
     white-space: pre-wrap;
 }
+
+.text-list-toggle .btn {
+    padding: 0 0.6rem;
+}

@@ -1084,6 +1084,10 @@ function flagDefinitionsFromTemplate() {
     return flags;
 }
 
+function isAnnotationSkipped(annotation) {
+    return Array.isArray(annotation?.flags) && annotation.flags.some(flag => isSkipFlagLabel(flag?.label) && flag.value === true);
+}
+
 function hasSkipFlagAvailable(annotation) {
     const flags = Array.isArray(annotation?.flags) && annotation.flags.length > 0
         ? annotation.flags
@@ -1146,8 +1150,8 @@ function preparePerExampleFinishSubmission() {
 }
 
 function validateCurrentAnnotationComplete() {
-    if (!textListsUI.validate()) return false;
     const skipSelected = isSkipAnnotationSelected();
+    if (!textListsUI.validate(skipSelected)) return false;
 
     // if skip flag was set, dont check initialization of the values
     if (!skipSelected) {
@@ -1632,9 +1636,10 @@ function submitAnnotations(campaign_id, options) {
     }
 
     for (const index of getLoadedExampleIndexes()) {
-        if (textListsUI.errors(annotation_set[index].text_lists || []).some(Boolean)) {
+        const skipped = isAnnotationSkipped(annotation_set[index]);
+        if (textListsUI.errors(annotation_set[index].text_lists || [], skipped).some(Boolean)) {
             goToPage(index);
-            textListsUI.validate();
+            textListsUI.validate(skipped);
             return;
         }
     }
