@@ -404,7 +404,7 @@ function markRedoAnnotatableRange(box, start, length) {
     box.find(".annotatable").each(function () {
         const span = $(this);
         const idx = Number(span.data("index"));
-        const contentLength = Array.from(String(span.data("content") ?? "")).length;
+        const contentLength = Array.from(String(span.attr("data-content") ?? "")).length;
         if (Number.isFinite(idx) && idx < end && idx + Math.max(contentLength, 1) > numericStart) {
             span.addClass("browse-match-span");
             marked = true;

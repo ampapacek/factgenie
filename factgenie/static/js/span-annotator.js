@@ -272,7 +272,7 @@ class SpanAnnotator {
             return annotations.filter(a =>
                 position >= a.start && position < a.start + this._stringLength(a.text));
         }
-        const end = position + Math.max(this._stringLength(String($span.data('content') ?? '')), 1);
+        const end = position + Math.max(this._stringLength(String($span.attr('data-content') ?? '')), 1);
         return annotations.filter(a =>
             a.start < end && a.start + this._stringLength(a.text) > position);
     }
@@ -738,7 +738,7 @@ class SpanAnnotator {
 
         // Get the actual end position by adding length of the last token
         const $last = startIdx > endIdx ? $start : $end;
-        const maxWithLength = max + this._stringLength($last.data('content')) - 1;
+        const maxWithLength = max + this._stringLength(String($last.attr('data-content') ?? '')) - 1;
 
 
         // Check for exactly matching annotations
@@ -1137,7 +1137,7 @@ class SpanAnnotator {
             $('.whitespace', $span).removeClass('whitespace-hidden');
 
             if (validSpanAnnotations.length > 0) {
-                const content = String($span.data('content'));
+                const content = String($span.attr('data-content') ?? '');
                 const isLastInAnyAnnotation = validSpanAnnotations.some(ann =>
                     position + this._stringLength(content) >= ann.start + this._stringLength(ann.text));
                 const hasMultipleAnnotations = validSpanAnnotations.length > 1;

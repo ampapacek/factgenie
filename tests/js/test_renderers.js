@@ -569,6 +569,16 @@ test('Browse range highlights use code points', () => {
     assertEqual([...new Set(markedAtoms(box))], [1]);
 });
 
+test('tokens that look like JSON keep their raw text', () => {
+    const { annotator, paragraph } = annotationPageDoc('see [1] {} 0 end', 'words', { format: 'plain' });
+    const atom = index => paragraph.find(`.annotatable[data-index="${index}"]`).last();
+    annotator._createAnnotation('p0', atom(4), atom(4));
+    annotator._createAnnotation('p0', atom(8), atom(8));
+    annotator._createAnnotation('p0', atom(11), atom(11));
+    assertEqual(annotator.getAnnotations('p0').map(a => [a.start, a.text]), [[4, '[1]'], [8, '{}'], [11, '0']]);
+    window.$(window.document.body).empty();
+});
+
 console.log(`passed: ${passed}, failed: ${failures.length}`);
 failures.forEach(failure => console.log(`FAIL ${failure}`));
 process.exit(failures.length === 0 ? 0 : 1);
