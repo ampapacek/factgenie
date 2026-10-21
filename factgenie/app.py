@@ -29,6 +29,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import factgenie.analysis as analysis
 import factgenie.crowdsourcing as crowdsourcing
 import factgenie.llm_campaign as llm_campaign
+import factgenie.text_lists as text_lists
 import factgenie.querying as querying
 import factgenie.redo as redo
 import factgenie.utils as utils
@@ -1554,6 +1555,15 @@ def llm_campaign_update_config():
 
     config = llm_campaign.parse_campaign_config(config)
     campaign = workflows.load_campaign(app, campaign_id=campaign_id)
+    try:
+        # The config modal sends every value as text, so check lists only after parsing them back.
+        if campaign.metadata.get("mode") == CampaignMode.CROWDSOURCING:
+            if "text_lists" in config:
+                config["text_lists"] = text_lists.normalize_config(config["text_lists"])
+        else:
+            text_lists.reject_llm_lists(config)
+    except ValueError as e:
+        return utils.error(f"Invalid configuration: {e}")
     campaign.metadata["config"] = config
     campaign.update_metadata()
 

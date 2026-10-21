@@ -391,3 +391,51 @@ def test_skipped_example_waives_required_lists_and_choices(definitions):
     records[0]["items"][0]["choices"][0]["values"] = ["missing"]
     with pytest.raises(ValueError):
         submission_lists(config, {"text_lists": records, "flags": skipped["flags"]})
+
+
+@pytest.mark.parametrize("lists", [[], "definitions"])
+def test_config_modal_round_trip_keeps_crowdsourcing_lists(definitions, lists, monkeypatch):
+    import factgenie.app as app_mod
+
+    lists = normalize_config(definitions) if lists == "definitions" else lists
+    saved = []
+    campaign = SimpleNamespace(
+        metadata={"mode": CampaignMode.CROWDSOURCING, "config": {"final_message": "Thanks", "text_lists": lists}},
+        update_metadata=lambda: saved.append(deepcopy(campaign.metadata["config"])),
+    )
+    monkeypatch.setattr(workflows, "load_campaign", lambda *args, **kwargs: campaign)
+    app_mod.app.config.update(login={"active": False}, host_prefix="")
+    # The modal renders each value with {{ value }} into a textarea and posts the text back.
+    modal = {key: str(value) for key, value in campaign.metadata["config"].items()}
+    response = app_mod.app.test_client().post(
+        "/llm_campaign/update_metadata", json={"campaignId": "c", "config": modal}
+    )
+    assert response.get_json()["success"]
+    assert saved == [{"final_message": "Thanks", "text_lists": lists}]
+
+    modal["text_lists"] = "[{'label': ''}]"
+    response = app_mod.app.test_client().post(
+        "/llm_campaign/update_metadata", json={"campaignId": "c", "config": modal}
+    )
+    assert not response.get_json()["success"]
+    assert len(saved) == 1
+
+
+def test_config_modal_rejects_lists_in_llm_campaigns(definitions, monkeypatch):
+    import factgenie.app as app_mod
+
+    saved = []
+    campaign = SimpleNamespace(
+        metadata={"mode": CampaignMode.LLM_EVAL, "config": {}}, update_metadata=lambda: saved.append(True)
+    )
+    monkeypatch.setattr(workflows, "load_campaign", lambda *args, **kwargs: campaign)
+    app_mod.app.config.update(login={"active": False}, host_prefix="")
+    client = app_mod.app.test_client()
+    ok = client.post("/llm_campaign/update_metadata", json={"campaignId": "c", "config": {"text_lists": "[]"}})
+    assert ok.get_json()["success"]
+    bad = client.post(
+        "/llm_campaign/update_metadata",
+        json={"campaignId": "c", "config": {"text_lists": str(normalize_config(definitions))}},
+    )
+    assert not bad.get_json()["success"]
+    assert saved == [True]

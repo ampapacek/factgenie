@@ -916,7 +916,10 @@ function updateCampaignConfig(campaignId) {
             config: config
         }),
         success: function (response) {
-            console.log(response);
+            if (response.success !== true) {
+                alert(response.error);
+                return;
+            }
             $(".update-config-btn").removeClass("btn-danger").addClass("btn-success").text("Saved!");
 
             setTimeout(function () {

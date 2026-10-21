@@ -443,7 +443,6 @@ def parse_llm_eval_config(config):
 
 
 def parse_campaign_config(config):
-    reject_llm_lists(config)
     def parse_value(value):
         try:
             # Try to parse the value as a literal (int, list, dict, etc.)
