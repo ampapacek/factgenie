@@ -1369,7 +1369,7 @@ function markAnnotatableRange(box, start, length) {
     box.find(".annotatable").each(function () {
         const span = $(this);
         const idx = Number(span.data("index"));
-        const contentLength = String(span.data("content") || "").length;
+        const contentLength = Array.from(String(span.data("content") ?? "")).length;
         if (Number.isFinite(idx) && idx < end && idx + Math.max(contentLength, 1) > numericStart) {
             span.addClass("browse-match-span");
             marked = true;
@@ -1434,7 +1434,7 @@ function markRenderedOutputText(box, needle) {
             atoms.each(function () {
                 const span = $(this);
                 const start = Number(span.data("index"));
-                const length = String(span.data("content") || "").length;
+                const length = Array.from(String(span.data("content") ?? "")).length;
                 if (Number.isFinite(start) && overlaps(start, start + Math.max(length, 1))) {
                     span.addClass("browse-match-span");
                     marked = true;
@@ -1516,7 +1516,7 @@ function markAnnotatableText(box, text) {
 function applyBrowseDetailHighlight(detail) {
     const box = browseDetailBox(detail);
     if (detail.target === "span") {
-        const marked = markAnnotatableRange(box, detail.start, String(detail.span_text || "").length);
+        const marked = markAnnotatableRange(box, detail.start, Array.from(String(detail.span_text || "")).length);
         if (!marked) {
             markAnnotatableText(box, detail.span_text || detail.matched_text);
         }

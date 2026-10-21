@@ -562,6 +562,13 @@ test('Browse shows citations by default in the rendered view', () => {
     assertEqual(window.campaignHasRenderedView({}), false, 'plain campaign');
     $(window.document.body).empty();
 });
+
+test('Browse range highlights use code points', () => {
+    const box = outputBox('😀a b', 'chars');
+    assertEqual(window.markAnnotatableRange(box, 1, 1), true);
+    assertEqual([...new Set(markedAtoms(box))], [1]);
+});
+
 console.log(`passed: ${passed}, failed: ${failures.length}`);
 failures.forEach(failure => console.log(`FAIL ${failure}`));
 process.exit(failures.length === 0 ? 0 : 1);
