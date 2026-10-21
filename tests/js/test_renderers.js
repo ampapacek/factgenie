@@ -509,6 +509,26 @@ test('only a complete entity counts as decoded text', () => {
     assertEqual(check('&#128; hello &amp;', '� hello &'), 1, 'several entities and text');
     assertEqual(check('&bogus;', 'x'), 1, 'unknown name');
 });
+
+test('a plain click on a link annotates without navigating; ctrl/cmd+click opens it', () => {
+    const $ = window.$;
+    const { annotator, paragraph } = annotationPageDoc('Viz [docs](https://example.org) dál', 'words', { format: 'markdown' });
+    const link = paragraph.find('a.md-link');
+    assertEqual(link.attr('title'), 'Ctrl/Cmd+click to open the link', 'title');
+    const atom = link.find('.annotatable')[0];
+    const fire = (type, init = {}) => atom.dispatchEvent(new window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, ...init }));
+    // (creating the annotation needs layout; checked in a real browser)
+    assertEqual(fire('click'), false, 'plain click navigates');
+    fire('mousedown', { metaKey: true });
+    assertEqual(annotator.isSelecting, false, 'selecting after cmd+mousedown');
+    fire('mouseup', { metaKey: true });
+    assertEqual(fire('click', { metaKey: true }), true, 'cmd+click navigates');
+    assertEqual(fire('click', { ctrlKey: true }), true, 'ctrl+click navigates');
+    assertEqual(annotator.getAnnotations('p0').length, 0, 'annotations after cmd+click');
+    $(window.document.body).empty();
+});
+
+['campaignOutputRendering'].forEach(loadAnnotateFunction);
 console.log(`passed: ${passed}, failed: ${failures.length}`);
 failures.forEach(failure => console.log(`FAIL ${failure}`));
 process.exit(failures.length === 0 ? 0 : 1);

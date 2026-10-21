@@ -159,6 +159,9 @@ class SpanAnnotator {
         // native append: moving a large fragment through jQuery is slow
         doc.element.empty();
         doc.element[0]?.appendChild(rendered.root);
+        if (doc.dynamic) {
+            doc.element.find('a[href]').attr('title', 'Ctrl/Cmd+click to open the link');
+        }
 
         doc.format = format;
         doc.units = rendered.units;
@@ -475,6 +478,10 @@ class SpanAnnotator {
                 this.emit('citationClicked', { objectId, label: String($citation.data('label')) });
                 return;
             }
+            // Ctrl/Cmd+click on a link opens it (see the click handler)
+            if ((e.ctrlKey || e.metaKey) && $(e.target).closest('a[href]').length > 0) {
+                return;
+            }
             // Skip annotation logic in select mode and read-only documents
             if (this.currentType === -2 || this.documents.get(objectId).readOnly) {
                 return;
@@ -501,6 +508,11 @@ class SpanAnnotator {
         });
 
         $element.on('click', (e) => {
+            // links in an annotatable output open only with Ctrl/Cmd+click, so
+            // annotating a link does not navigate away
+            if (!(e.ctrlKey || e.metaKey) && $(e.target).closest('a[href]').length > 0) {
+                e.preventDefault();
+            }
             if (this.isSelecting || this.currentType === -2 || this.currentType === -1) {
                 return;
             }
