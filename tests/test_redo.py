@@ -1242,6 +1242,23 @@ def test_parse_crowdsourcing_config_defaults_to_batch_save_mode():
     assert parsed["save_mode"] == "per_example"
 
 
+def test_parse_crowdsourcing_config_keeps_rendering_keys():
+    parsed = crowdsourcing.parse_crowdsourcing_config({})
+    assert "output_format" not in parsed and "view_switch" not in parsed
+    parsed = crowdsourcing.parse_crowdsourcing_config(
+        {
+            "outputFormat": "markdown",
+            "citationDisplay": "superscript",
+            "annotation_view": "raw",
+            "view_switch": "full",
+        }
+    )
+    assert parsed["output_format"] == "markdown"
+    assert parsed["citation_display"] == "superscript"
+    assert parsed["annotation_view"] == "raw"
+    assert parsed["view_switch"] == "full"
+
+
 def test_archive_replace_archives_duplicates_and_active_index_skips_revisions(monkeypatch, tmp_path):
     configure_campaign_dir(monkeypatch, tmp_path)
     make_campaign(tmp_path)

@@ -453,6 +453,12 @@ function duplicateEval(inputDuplicateId, campaignId) {
 }
 
 
+// Output rendering keys of the selected crowdsourcing config (output_format,
+// citation_display, annotation_view, view_switch). They have no form fields
+// yet, so they are carried over from the loaded config as they are.
+const CROWDSOURCING_RENDERING_KEYS = ["output_format", "citation_display", "annotation_view", "view_switch"];
+let crowdsourcingRenderingConfig = {};
+
 function gatherConfig() {
     var config = {};
 
@@ -475,6 +481,7 @@ function gatherConfig() {
         config.options = getOptions();
         config.sliders = getSliders();
         config.textFields = getKeys($("#textFields"));
+        Object.assign(config, crowdsourcingRenderingConfig);
     } else if (window.mode == "llm_eval" || window.mode == "llm_gen") {
         config.promptStrat = $("#prompt-strat").val();
         config.modelName = $("#model-name").val();
@@ -948,6 +955,7 @@ function setCampaignPseudonymizeAnnotators(campaignId, pseudonymizeAnnotators) {
 
 function updateCrowdsourcingConfig() {
     const crowdsourcingConfig = $('#crowdsourcingConfig').val();
+    crowdsourcingRenderingConfig = {};
 
     if (crowdsourcingConfig === "[None]") {
         annotatorInstructionsMDE.value("");
@@ -968,6 +976,11 @@ function updateCrowdsourcingConfig() {
         return;
     }
     const cfg = window.configs[crowdsourcingConfig];
+    CROWDSOURCING_RENDERING_KEYS.forEach((key) => {
+        if (cfg[key] !== undefined && cfg[key] !== null && cfg[key] !== "") {
+            crowdsourcingRenderingConfig[key] = cfg[key];
+        }
+    });
 
     const annotatorInstructions = cfg.annotator_instructions;
     const finalMessage = cfg.final_message;

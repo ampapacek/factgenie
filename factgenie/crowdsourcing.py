@@ -316,7 +316,23 @@ def get_service_ids(service, args):
     return service_ids
 
 
+# Output rendering keys of a crowdsourcing campaign (see annotate.js). They have
+# no form fields yet; they are kept when set in a YAML config or the request.
+CROWDSOURCING_RENDERING_KEYS = {
+    "output_format": "outputFormat",
+    "citation_display": "citationDisplay",
+    "annotation_view": "annotationView",
+    "view_switch": "viewSwitch",
+}
+
+
 def parse_crowdsourcing_config(config):
+    rendering = {}
+    for key, camel_key in CROWDSOURCING_RENDERING_KEYS.items():
+        value = config.get(camel_key, config.get(key))
+        if value not in (None, ""):
+            rendering[key] = value
+
     # parse Nones or empty strings
     examples_per_batch = config.get("examplesPerBatch")
     examples_per_batch = int(examples_per_batch) if examples_per_batch else 10
@@ -345,6 +361,7 @@ def parse_crowdsourcing_config(config):
         "options": config.get("options"),
         "sliders": config.get("sliders"),
         "text_fields": config.get("textFields"),
+        **rendering,
     }
 
     return config
