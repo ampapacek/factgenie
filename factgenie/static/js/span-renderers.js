@@ -404,11 +404,25 @@ class MarkdownRenderer {
         return from;
     }
 
+    // The whole range becomes one unit marked as unaligned, which fails the
+    // unit checks (checkUnits), so it is never annotated silently.
     _alignFailed(ctx, container, start, end, value) {
         console.warn('[FactGenie markdown] could not align text node', { start, end, value });
         if (end > start) {
             this._push(ctx, container, start, end, value);
+            ctx.units[ctx.units.length - 1].unaligned = true;
         }
+    }
+
+    // The decoded value when `raw` is exactly one character reference
+    // (e.g. "&amp;", "&#x41;"), else null.
+    static decodeEntity(raw) {
+        if (typeof MdastGfm === 'undefined') {
+            return null;
+        }
+        const chars = Array.from(String(raw));
+        const decoded = MarkdownRenderer.prototype._entityAt(chars, 0, chars.length);
+        return decoded && decoded.length === chars.length ? decoded.value : null;
     }
 
     _entityAt(raw, i, end) {
@@ -425,9 +439,13 @@ class MarkdownRenderer {
             }
         } else {
             const code = parseInt(match[1] ?? match[2], match[1] ? 16 : 10);
-            value = code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)
-                ? '�'
-                : String.fromCodePoint(code);
+            // same replacements as the parser (micromark): controls,
+            // surrogates, noncharacters and out-of-range codes become U+FFFD
+            const replaced = code < 9 || code === 11 || (code > 13 && code < 32)
+                || (code > 126 && code < 160) || (code > 55295 && code < 57344)
+                || (code > 64975 && code < 65008) || (code & 65535) === 65535
+                || (code & 65535) === 65534 || code > 1114111;
+            value = replaced ? '\uFFFD' : String.fromCodePoint(code);
         }
         return { value, length: Array.from(match[0]).length };
     }
@@ -625,7 +643,8 @@ const SpanRenderers = {
 
     // Renderer-level checks: units lie inside the text, are in raw order, do
     // not overlap, and show their raw characters (or the decoded form of an
-    // escape or entity, or the label of a citation marker).
+    // escape or of exactly one entity, or the label of a citation marker).
+    // A unit the renderer could not align always fails.
     checkUnits(rendered) {
         const problems = [];
         let previousEnd = 0;
@@ -639,9 +658,11 @@ const SpanRenderers = {
                 const citation = unit.kind === 'citation' && CITATION_MARKER_EXACT.test(raw);
                 const decoded = citation
                     || raw === `\\${unit.display}`
-                    || (raw.startsWith('&') && raw.endsWith(';'))
+                    || (raw.startsWith('&') && MarkdownRenderer.decodeEntity(raw) === unit.display)
                     || (raw === '\n' && unit.display === ' ');
-                if (unit.display !== raw && !decoded) {
+                if (unit.unaligned) {
+                    problems.push({ check: 2, message: 'text could not be aligned with its raw characters', index, start: unit.start, raw, display: unit.display });
+                } else if (unit.display !== raw && !decoded) {
                     problems.push({ check: 2, message: 'unit shows other text than its raw characters', index, start: unit.start, raw, display: unit.display });
                 }
             }

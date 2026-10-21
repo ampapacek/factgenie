@@ -478,6 +478,37 @@ test('redo markers cross formatting in the rendered view', () => {
     assertEqual(window.markRedoAnnotatableText(chars, 'missing', text), false);
 });
 
+// Review fixes (2026-10-19): entities, unaligned text, links, citation
+// defaults and code-point ranges in Browse.
+
+test('numeric entities decode like the parser, so they align', () => {
+    assertEqual(units('&#128; hello &amp;').slice(0, 2), [[0, '�'], [6, ' ']]);
+    for (const granularity of ['words', 'chars']) {
+        const result = renderDocument(window, '&#128; hello &amp;', granularity);
+        assertEqual(result.check.ok, true, `checks (${granularity})`);
+        assertEqual(result.warnings, [], `warnings (${granularity})`);
+    }
+    assertEqual(renderDocument(window, '&#128; hello &amp;', 'chars').atoms.length, 9, 'chars atoms');
+});
+
+test('a unit the renderer could not align fails the checks', () => {
+    const rendered = window.SpanRenderers.render('abc def', 'plain');
+    rendered.units = [{ ...rendered.units[0], end: 7, display: 'abc def', unaligned: true }];
+    assertEqual(window.SpanRenderers.checkUnits(rendered).map(p => p.check), [2]);
+});
+
+test('only a complete entity counts as decoded text', () => {
+    const check = (raw, display) => {
+        const rendered = window.SpanRenderers.render(raw, 'plain');
+        rendered.units = [{ start: 0, end: rendered.chars.length, container: rendered.root, display }];
+        return window.SpanRenderers.checkUnits(rendered).length;
+    };
+    assertEqual(check('&amp;', '&'), 0, '&amp;');
+    assertEqual(check('&#x41;', 'A'), 0, '&#x41;');
+    assertEqual(check('&amp;', 'x'), 1, 'wrong value');
+    assertEqual(check('&#128; hello &amp;', '� hello &'), 1, 'several entities and text');
+    assertEqual(check('&bogus;', 'x'), 1, 'unknown name');
+});
 console.log(`passed: ${passed}, failed: ${failures.length}`);
 failures.forEach(failure => console.log(`FAIL ${failure}`));
 process.exit(failures.length === 0 ? 0 : 1);
