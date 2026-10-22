@@ -98,6 +98,19 @@ class AsyncLlmCampaignRunTests(unittest.TestCase):
         self.assertNotIn("campaign-1", app.db["announcers"])
         campaign.update_metadata.assert_not_called()
 
+    def test_reconcile_keeps_running_status_owned_by_another_worker(self):
+        # Another worker runs the thread, so this process has no thread and no flag for it.
+        app = DummyApp()
+
+        campaign = MagicMock()
+        campaign.metadata = {"id": "campaign-1", "status": CampaignStatus.RUNNING}
+
+        is_running = reconcile_llm_campaign_runtime_state(app, campaign)
+
+        self.assertFalse(is_running)
+        self.assertEqual(campaign.metadata["status"], CampaignStatus.RUNNING)
+        campaign.update_metadata.assert_not_called()
+
     @patch("factgenie.app.render_template")
     @patch("factgenie.app.workflows.load_configs")
     @patch("factgenie.app.workflows.load_campaign")
