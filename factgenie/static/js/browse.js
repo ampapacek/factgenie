@@ -1934,13 +1934,17 @@ function getTextListsHtml(lists, definitions) {
         listsDiv.append(itemsList);
 
         if (items.length > BROWSE_TEXT_LIST_PREVIEW_ITEMS) {
-            const showAll = $('<button>', { type: "button", class: "btn btn-link btn-sm p-0 mb-1 small" })
-                .text(`Show all (${items.length})`);
-            showAll.on("click", function () {
-                itemsList.children().removeClass("d-none");
-                $(this).remove();
+            const showAllLabel = `Show all (${items.length})`;
+            const toggle = $('<button>', { type: "button", class: "btn btn-link btn-sm p-0 mb-1 small" })
+                .text(showAllLabel);
+            toggle.on("click", function () {
+                const expand = toggle.text() === showAllLabel;
+                itemsList.children().each(function (index) {
+                    $(this).toggleClass("d-none", !expand && index >= BROWSE_TEXT_LIST_PREVIEW_ITEMS);
+                });
+                toggle.text(expand ? "Show less" : showAllLabel);
             });
-            listsDiv.append(showAll);
+            listsDiv.append(toggle);
         }
     }
     return listsDiv;
@@ -2123,8 +2127,22 @@ function addBrowseFilterCondition(condition) {
     refreshBrowseSpanGroupOptions();
 }
 
+function browseSelectFields() {
+    return {
+        setup: ["Select answer source...", browseFilterSchema.setups || []],
+        annotation_state: ["Select state...", browseFilterSchema.annotation_states || []],
+        annotator: ["Select annotator...", browseFilterSchema.annotators || []],
+        span_category: ["Select category...", browseFilterSchema.categories || []],
+    };
+}
+
+function browseFieldIsFreeText(field) {
+    return Boolean(field) && field !== "slider" && !(field in browseSelectFields());
+}
+
 function renderBrowseConditionControls(row, condition) {
     const field = row.find(".browse-condition-field").val();
+    row.attr("data-field", field);
     const opSelect = row.find(".browse-condition-op");
     const previousOp = condition.op || opSelect.val();
     opSelect.empty();
@@ -2138,12 +2156,7 @@ function renderBrowseConditionControls(row, condition) {
     const wrap = row.find(".browse-condition-value-wrap");
     wrap.empty();
     const isSpanField = BROWSE_SPAN_FIELDS.has(field);
-    const selectFields = {
-        setup: ["Select answer source...", browseFilterSchema.setups || []],
-        annotation_state: ["Select state...", browseFilterSchema.annotation_states || []],
-        annotator: ["Select annotator...", browseFilterSchema.annotators || []],
-        span_category: ["Select category...", browseFilterSchema.categories || []],
-    };
+    const selectFields = browseSelectFields();
     if (field in selectFields) {
         const [placeholder, values] = selectFields[field];
         const control = buildBrowseSelectWithCustomInput({
@@ -2853,7 +2866,13 @@ $("#browse-toggle-highlights").on("click", function () {
 });
 $("#browse-filter-conditions").on("change", ".browse-condition-field", function () {
     const row = $(this).closest(".browse-filter-condition");
-    renderBrowseConditionControls(row, browseConditionValues(row));
+    const condition = browseConditionValues(row);
+    // Typed text only carries over between free-text fields; a select field would show it as a custom value.
+    if (!browseFieldIsFreeText(row.attr("data-field")) || !browseFieldIsFreeText(condition.field)) {
+        condition.value = "";
+        condition.sliderLabel = "";
+    }
+    renderBrowseConditionControls(row, condition);
     markBrowseFilterStale();
 });
 $("#browse-filter-conditions").on("change", ".browse-condition-op", function () {
