@@ -44,6 +44,7 @@ def generate_example_index(app, campaign):
         "options",
         "sliders",
         "text_fields",
+        "text_lists",
     ]
 
     if "campaign_id" not in example_index.columns:
@@ -54,7 +55,7 @@ def generate_example_index(app, campaign):
     # get the examples for a specific campaign
     example_index = example_index[example_index["campaign_id"] == campaign.campaign_id]
 
-    for field in ["annotations", "flags", "options", "sliders", "text_fields"]:
+    for field in ["annotations", "flags", "options", "sliders", "text_fields", "text_lists"]:
         if field not in example_index.columns:
             example_index[field] = [[] for _ in range(len(example_index))]
         else:
@@ -288,7 +289,29 @@ def aggregate_ann_counts(ann_counts, groupby):
     return aggregated
 
 
-def compute_extra_fields_stats(example_index):
+def _add_text_list_stats(extra_fields_stats, text_lists, definitions):
+    """Per list: item and empty-confirmation counts; per choice group: value counts, "—" for unanswered."""
+    empty_labels = {d.get("label"): d.get("empty_label") for d in definitions if isinstance(d, dict)}
+    for records in text_lists:
+        for record in records if isinstance(records, list) else []:
+            if not isinstance(record, dict) or not record.get("label"):
+                continue
+            label = record["label"]
+            items = [item for item in record.get("items") or [] if isinstance(item, dict)]
+            counts = extra_fields_stats.setdefault(label, defaultdict(int))
+            counts["items"] += len(items)
+            if record.get("empty_confirmed"):
+                counts[empty_labels.get(label) or "empty confirmed"] += 1
+            for item in items:
+                for choice in item.get("choices") or []:
+                    if not isinstance(choice, dict):
+                        continue
+                    group_counts = extra_fields_stats.setdefault(f"{label} / {choice.get('label')}", defaultdict(int))
+                    for value in choice.get("values") or ["—"]:
+                        group_counts[value] += 1
+
+
+def compute_extra_fields_stats(example_index, text_list_definitions=None):
     # compute aggregate statistics for flags, options and text_fields (aggregates of value counts for each label)
     extra_fields_stats = {}
 
@@ -316,6 +339,9 @@ def compute_extra_fields_stats(example_index):
             for example in example_index[field]:
                 for d in example:
                     extra_fields_stats[d["label"]][d["value"]] += 1
+
+        if "text_lists" in example_index.columns:
+            _add_text_list_stats(extra_fields_stats, example_index["text_lists"], text_list_definitions or [])
     except Exception as e:
         logger.error(f"Error while computing extra fields statistics: {e}")
         traceback.print_exc()
@@ -335,16 +361,73 @@ def _normalize_rag_summary_choice(value):
     return str(value or "").strip()
 
 
-def _get_rag_summary_defaults(span_index, campaign):
-    setup_ids = []
-    if span_index is not None and not span_index.empty and "setup_id" in span_index.columns:
-        setup_ids = sorted(
-            {
-                str(setup_id).strip()
-                for setup_id in span_index["setup_id"].dropna().tolist()
-                if str(setup_id).strip()
+# Text lists appear in the summary source selector next to span categories, under this value prefix.
+TEXT_LIST_SOURCE_PREFIX = "list:"
+
+
+def _rag_text_lists(campaign):
+    """Text lists whose options carry RAG codes (InTop10, NotInSeafile, ...); only these feed the summaries."""
+    return {
+        definition["label"]: definition
+        for definition in campaign.metadata["config"].get("text_lists", [])
+        if isinstance(definition, dict)
+        and definition.get("label")
+        and {
+            option.get("code")
+            for group in definition.get("choice_groups", [])
+            for option in group.get("options", [])
+        }
+        & set(RAG_MISTAKE_TOKEN_PATTERNS)
+    }
+
+
+def _text_list_rag_rows(example_index, campaign, list_label=None):
+    """List items as span-like rows; `codes` joins the chosen options' codes (e.g. InTop10 NotInSeafile)."""
+    definitions = _rag_text_lists(campaign)
+    rows = []
+    if example_index is None or example_index.empty or "text_lists" not in example_index.columns:
+        return rows
+    for _, row in example_index.iterrows():
+        records = row["text_lists"] if isinstance(row["text_lists"], list) else []
+        for record in records:
+            if not isinstance(record, dict) or record.get("label") not in definitions:
+                continue
+            if list_label is not None and record["label"] != list_label:
+                continue
+            codes = {
+                group["label"]: {option["label"]: option.get("code") for option in group.get("options", [])}
+                for group in definitions[record["label"]].get("choice_groups", [])
             }
-        )
+            for item in record.get("items") or []:
+                if not isinstance(item, dict):
+                    continue
+                described, tokens = [], []
+                for choice in item.get("choices") or []:
+                    values = choice.get("values") or []
+                    described.append(f"{choice.get('label')}: {', '.join(values) if values else '—'}")
+                    tokens += [codes.get(choice.get("label"), {}).get(value) or "" for value in values]
+                rows.append(
+                    {
+                        "kind": "item",
+                        "dataset": row.get("dataset"),
+                        "split": row.get("split"),
+                        "setup_id": row.get("setup_id"),
+                        "example_idx": row.get("example_idx"),
+                        "annotator_id": row.get("annotator_id"),
+                        "text": str(item.get("text", "")),
+                        "reason": " · ".join(described),
+                        "codes": " ".join(tokens),
+                    }
+                )
+    return rows
+
+
+def _get_rag_summary_defaults(span_index, campaign, example_index=None):
+    setup_ids = set()
+    if span_index is not None and not span_index.empty and "setup_id" in span_index.columns:
+        setup_ids |= {str(setup_id).strip() for setup_id in span_index["setup_id"].dropna().tolist()}
+    setup_ids |= {str(row["setup_id"]).strip() for row in _text_list_rag_rows(example_index, campaign)}
+    setup_ids = sorted(setup_id for setup_id in setup_ids if setup_id)
 
     span_categories = []
     for category in campaign.metadata["config"].get("annotation_span_categories", []):
@@ -352,12 +435,22 @@ def _get_rag_summary_defaults(span_index, campaign):
         if category_name:
             span_categories.append(category_name)
 
+    sources = [{"value": name, "label": name} for name in span_categories]
+    coded_lists = [TEXT_LIST_SOURCE_PREFIX + label for label in _rag_text_lists(campaign)]
+    sources += [{"value": value, "label": f"List: {value[len(TEXT_LIST_SOURCE_PREFIX):]}"} for value in coded_lists]
+
     default_setup_id = next((setup_id for setup_id in setup_ids if "rag" in setup_id.lower()), setup_ids[0] if setup_ids else "")
-    default_span_category = "Chybí" if "Chybí" in span_categories else (span_categories[0] if span_categories else "")
+    if "Chybí" in span_categories:
+        default_span_category = "Chybí"
+    elif coded_lists:
+        default_span_category = coded_lists[0]
+    else:
+        default_span_category = sources[0]["value"] if sources else ""
 
     return {
         "setup_ids": setup_ids,
         "span_categories": span_categories,
+        "sources": sources,
         "default_setup_id": default_setup_id,
         "default_span_category": default_span_category,
     }
@@ -371,12 +464,33 @@ def _resolve_rag_summary_selection(defaults, selected_setup_id=None, selected_sp
         resolved_setup_id = defaults["default_setup_id"] or "all"
 
     resolved_span_category = _normalize_rag_summary_choice(selected_span_category)
-    if resolved_span_category and resolved_span_category != "all" and resolved_span_category not in defaults["span_categories"]:
+    source_values = [source["value"] for source in defaults.get("sources", [])] or defaults["span_categories"]
+    if resolved_span_category and resolved_span_category != "all" and resolved_span_category not in source_values:
         resolved_span_category = defaults["default_span_category"]
     if not resolved_span_category:
         resolved_span_category = defaults["default_span_category"] or "all"
 
     return resolved_setup_id, resolved_span_category
+
+
+def _browse_annotator_key(campaign_id, annotator_id):
+    """Mirror browse.js generateAnnotatorKey: `<campaign_id>-ann-<normalized annotator ID>`."""
+    key = re.sub(r"[^a-z0-9]+", "_", str(annotator_id or "").strip().lower()).strip("_")
+    if not campaign_id or not key or key == "unknown":
+        return None
+    return f"{campaign_id}-ann-{key}"
+
+
+def classify_text_list_item_codes(codes):
+    """List items need the Top 10 answer before any bucket is established.
+
+    Spans keep the lenient classify_rag_mistake_reason rules (a bare InSeafile counts as generation); a list item
+    with Top 10 left on "?" may still be a search error, so it stays unclassified.
+    """
+    text = str(codes or "")
+    if not (RAG_MISTAKE_TOKEN_PATTERNS["InTop10"].search(text) or RAG_MISTAKE_TOKEN_PATTERNS["NotInTop10"].search(text)):
+        return None
+    return classify_rag_mistake_reason(text)
 
 
 def classify_rag_mistake_reason(reason):
@@ -400,19 +514,20 @@ def compute_rag_mistake_stats(
     show_real_annotator_names=True,
     span_index=None,
     defaults=None,
+    example_index=None,
 ):
-    """Summarize the three common RAG mistake buckets for the selected setup and span category.
+    """Summarize the three common RAG mistake buckets for the selected setup and span category or text list.
 
     Pass `defaults` computed from the unfiltered span index when `span_index` is filtered (e.g. by annotator),
     so that a setup missing from the filtered spans yields no matches instead of falling back to the default.
+    Text-list items (from `example_index`) are classified by their choice codes; items without any code
+    (e.g. toggles left in the neutral middle) go to an extra "unclassified" bucket.
     """
     if span_index is None:
         span_index = generate_span_index(app, campaign)
-    if span_index.empty:
-        return []
 
     if defaults is None:
-        defaults = _get_rag_summary_defaults(span_index, campaign)
+        defaults = _get_rag_summary_defaults(span_index, campaign, example_index)
     selected_setup_id, selected_span_category = _resolve_rag_summary_selection(
         defaults,
         selected_setup_id=selected_setup_id,
@@ -424,22 +539,31 @@ def compute_rag_mistake_stats(
         for idx, category in enumerate(campaign.metadata["config"].get("annotation_span_categories", []))
         if str(category.get("name", "")).strip()
     }
+    selected_type_indices, selected_list = [], None
     if selected_span_category == "all":
         selected_type_indices = list(span_category_to_idx.values())
+    elif selected_span_category.startswith(TEXT_LIST_SOURCE_PREFIX):
+        selected_list = selected_span_category[len(TEXT_LIST_SOURCE_PREFIX) :]
     else:
         missing_type = span_category_to_idx.get(selected_span_category)
         if missing_type is None:
             return []
         selected_type_indices = [missing_type]
 
-    missing_spans = span_index[span_index["annotation_type"].isin(selected_type_indices)].copy()
+    rows = []
+    if selected_type_indices and not span_index.empty:
+        for _, row in span_index[span_index["annotation_type"].isin(selected_type_indices)].iterrows():
+            reason = str(row.get("annotation_reason", ""))
+            rows.append({**row.to_dict(), "kind": "span", "text": str(row.get("annotation_text", "")), "reason": reason, "codes": reason})
+    if selected_span_category == "all" or selected_list is not None:
+        rows += _text_list_rag_rows(example_index, campaign, selected_list)
     if selected_setup_id != "all":
-        missing_spans = missing_spans[missing_spans["setup_id"].astype(str) == selected_setup_id]
-    if missing_spans.empty:
+        rows = [row for row in rows if str(row.get("setup_id", "")) == selected_setup_id]
+    if not rows:
         return []
 
     annotator_aliases = _load_campaign_annotator_alias_map(campaign)
-    annotator_ids = missing_spans["annotator_id"].fillna("unknown").tolist()
+    annotator_ids = [row.get("annotator_id") or "unknown" for row in rows]
     annotator_display_names = _build_annotator_public_name_map(annotator_ids, annotator_aliases)
 
     mistake_definitions = {
@@ -467,13 +591,28 @@ def compute_rag_mistake_stats(
             ),
             "lead": "V Top10 je vše OK, ale informace se nedostala do odpovědi nebo se změnila.",
         },
+        "unclassified": {
+            "label": "Nezařazeno",
+            "short_label": "?",
+            "description": (
+                "Položky seznamu, které nelze zařadit, protože chybí vyplnění Top 10 "
+                "(nebo Seafile, když je Top 10 Ne)."
+            ),
+            "lead": "Položka seznamu s nevyplněným Top 10 / Seafile.",
+        },
     }
 
     grouped_examples = {}
-    for _, row in missing_spans.iterrows():
-        mistake_key = classify_rag_mistake_reason(row.get("annotation_reason", ""))
+    for row in rows:
+        if row["kind"] == "item":
+            mistake_key = classify_text_list_item_codes(row["codes"])
+        else:
+            mistake_key = classify_rag_mistake_reason(row["codes"])
         if mistake_key is None:
-            continue
+            # Spans without markers are ordinary span notes; only list items are reported as unclassified.
+            if row["kind"] != "item":
+                continue
+            mistake_key = "unclassified"
 
         annotator_id = _normalize_annotator_id(row.get("annotator_id")) or "unknown"
         display_name = annotator_id if show_real_annotator_names else annotator_display_names.get(annotator_id, annotator_id)
@@ -495,15 +634,11 @@ def compute_rag_mistake_stats(
                 "example_idx": int(row.get("example_idx", 0)),
                 "annotator_id": display_name,
                 "browse_url": None,
+                "raw_annotator_id": annotator_id,
                 "spans": [],
             },
         )
-        example["spans"].append(
-            {
-                "text": str(row.get("annotation_text", "")),
-                "reason": str(row.get("annotation_reason", "")),
-            }
-        )
+        example["spans"].append({"kind": row["kind"], "text": row["text"], "reason": row["reason"]})
 
     for example in grouped_examples.values():
         params = {
@@ -512,6 +647,10 @@ def compute_rag_mistake_stats(
             "example_idx": example["example_idx"],
             "setup_id": example["setup_id"],
         }
+        # Preselect this campaign's annotator in Browse; the same annotator ID may exist in other campaigns.
+        annotator_key = _browse_annotator_key(getattr(campaign, "campaign_id", None), example.pop("raw_annotator_id"))
+        if annotator_key:
+            params["ann_campaign"] = annotator_key
         host_prefix = getattr(app, "config", {}).get("host_prefix", "")
         example["browse_url"] = f"{host_prefix}/browse?{urlencode(params)}"
 
@@ -520,7 +659,9 @@ def compute_rag_mistake_stats(
         grouped_by_mistake[mistake_key].append(example)
 
     summary_rows = []
-    for mistake_key in ["collection", "search", "generation"]:
+    for mistake_key in ["collection", "search", "generation", "unclassified"]:
+        if mistake_key == "unclassified" and not grouped_by_mistake[mistake_key]:
+            continue
         examples = sorted(
             grouped_by_mistake[mistake_key],
             key=lambda item: (item["dataset"], item["split"], item["setup_id"], item["example_idx"], item["annotator_id"]),
@@ -763,6 +904,12 @@ def _has_filled_extra_field(fields):
         elif value != "":
             return True
     return False
+
+
+def _has_text_list_content(lists):
+    return isinstance(lists, list) and any(
+        isinstance(entry, dict) and (entry.get("items") or entry.get("empty_confirmed")) for entry in lists
+    )
 
 
 def _coverage_status(annotated_count, expected_count):
@@ -1072,6 +1219,8 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
             submitted["has_extra_fields"] = submitted["sliders"].apply(_has_filled_extra_field) | submitted[
                 "text_fields"
             ].apply(_has_filled_extra_field)
+            if "text_lists" in submitted.columns:
+                submitted["has_extra_fields"] |= submitted["text_lists"].apply(_has_text_list_content)
             submitted["has_completed_content"] = submitted["has_annotations"] | submitted["has_extra_fields"]
             submitted["skip_selected"] = submitted["flags"].apply(_is_skip_selected)
             submitted["span_count"] = submitted["annotations"].apply(len)
@@ -1203,7 +1352,10 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
             if field not in example_index.columns:
                 example_index[field] = [[] for _ in range(len(example_index))]
 
-        ann_df = example_index[key_cols + ["annotator_id", "annotations", "flags", "sliders", "text_fields"]].copy()
+        list_cols = ["text_lists"] if "text_lists" in example_index.columns else []
+        ann_df = example_index[
+            key_cols + ["annotator_id", "annotations", "flags", "sliders", "text_fields"] + list_cols
+        ].copy()
         ann_df["annotator_id"] = ann_df["annotator_id"].apply(_normalize_annotator_id)
         ann_df = ann_df[ann_df["annotator_id"] != ""]
 
@@ -1217,6 +1369,8 @@ def compute_question_coverage_stats(app, campaign, example_index, show_real_anno
             ann_df["has_extra_fields"] = ann_df["sliders"].apply(_has_filled_extra_field) | ann_df[
                 "text_fields"
             ].apply(_has_filled_extra_field)
+            if list_cols:
+                ann_df["has_extra_fields"] |= ann_df["text_lists"].apply(_has_text_list_content)
             ann_df["has_completed_content"] = ann_df["has_annotations"] | ann_df["has_extra_fields"]
             ann_df["skip_selected"] = ann_df["flags"].apply(_is_skip_selected)
             ann_df["has_annotations_excluding_skipped"] = ann_df["has_completed_content"] & (~ann_df["skip_selected"])
@@ -1618,7 +1772,7 @@ def compute_statistics(
     if "flags" in example_index.columns:
         non_skipped_example_index = example_index[~example_index["flags"].apply(_is_skip_selected)]
     annotator_aliases = _load_campaign_annotator_alias_map(campaign)
-    rag_mistake_defaults = _get_rag_summary_defaults(span_index, campaign)
+    rag_mistake_defaults = _get_rag_summary_defaults(span_index, campaign, non_skipped_example_index)
     selected_rag_setup_id, selected_rag_span_category = _resolve_rag_summary_selection(
         rag_mistake_defaults,
         selected_setup_id=rag_mistake_setup_id,
@@ -1678,23 +1832,34 @@ def compute_statistics(
             show_real_annotator_names=show_real_annotator_names,
             span_index=span_index,
             defaults=rag_mistake_defaults,
+            example_index=filtered_example_index,
         )
         if rag_mistake_stats:
             statistics["rag_mistake_stats"] = rag_mistake_stats
         statistics["rag_mistake_summary"] = {
             "setup_ids": rag_mistake_defaults["setup_ids"],
             "span_categories": rag_mistake_defaults["span_categories"],
+            "sources": rag_mistake_defaults["sources"],
             "default_setup_id": rag_mistake_defaults["default_setup_id"],
             "default_span_category": rag_mistake_defaults["default_span_category"],
             "selected_setup_id": selected_rag_setup_id,
             "selected_span_category": selected_rag_span_category,
             "selected_setup_label": "All setups" if selected_rag_setup_id == "all" else selected_rag_setup_id,
-            "selected_span_category_label": "All span types"
+            "selected_span_category_label": "All span types and lists"
             if selected_rag_span_category == "all"
-            else selected_rag_span_category,
+            else next(
+                (
+                    source["label"]
+                    for source in rag_mistake_defaults["sources"]
+                    if source["value"] == selected_rag_span_category
+                ),
+                selected_rag_span_category,
+            ),
         }
 
-        extra_fields_stats = compute_extra_fields_stats(filtered_example_index)
+        extra_fields_stats = compute_extra_fields_stats(
+            filtered_example_index, campaign.metadata["config"].get("text_lists", [])
+        )
         statistics["extra_fields"] = extra_fields_stats
         slider_label_order = [
             slider.get("label")

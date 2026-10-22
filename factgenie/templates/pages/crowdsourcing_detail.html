@@ -106,6 +106,9 @@
         <hr>
       </div>
 
+      {% if metadata.config.get("text_lists") %}
+      <div class="alert alert-info">Redo is not supported for campaigns with text lists yet.</div>
+      {% else %}
       <div id="redo-admin" class="mb-5">
         <div class="d-flex align-items-center justify-content-between">
           <h4 class="mb-0">Redo annotations</h4>
@@ -249,6 +252,7 @@
         </div>
       </div>
 
+      {% endif %}
       <div id="campaign-status" class="mb-5">
         <h4>Batches</h4>
         <table data-toggle="table" data-pagination="true" data-page-size="100" data-pagination-parts="['pageList']"

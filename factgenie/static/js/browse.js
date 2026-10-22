@@ -1878,7 +1878,56 @@ function getExampleLevelFields(annotations) {
         }
         html.append(textFieldsDiv);
     }
+
+    if (Array.isArray(annotations.text_lists) && annotations.text_lists.length > 0) {
+        html.append(getTextListsHtml(annotations.text_lists, annotations.text_list_definitions));
+    }
     return html;
+}
+
+const BROWSE_TEXT_LIST_PREVIEW_ITEMS = 3;
+
+function getTextListsHtml(lists, definitions) {
+    definitions = Array.isArray(definitions) ? definitions : [];
+    var listsDiv = $('<div>', { class: "small browse-text-lists" });
+
+    for (const list of lists) {
+        const items = Array.isArray(list?.items) ? list.items : [];
+        const definition = definitions.find((d) => d?.label === list?.label) || {};
+        listsDiv.append($('<div>', { class: "small text-muted" }).text(`${list?.label ?? ""}`));
+
+        if (items.length === 0) {
+            // Unfilled is not the same as reviewed: only an explicit confirmation shows the configured label.
+            listsDiv.append(list?.empty_confirmed
+                ? $('<div>', { class: "small mb-1 fw-bold" }).text(definition.empty_label || "Confirmed empty")
+                : $('<div>', { class: "small mb-1 fst-italic text-muted" }).text("No items recorded"));
+            continue;
+        }
+
+        var itemsList = $('<ol>', { class: "browse-text-list-items small mb-1" });
+        items.forEach((item, index) => {
+            var itemRow = $('<li>').toggleClass("d-none", index >= BROWSE_TEXT_LIST_PREVIEW_ITEMS);
+            itemRow.append($('<span>', { class: "fw-bold browse-text-list-text" }).text(`${item?.text ?? ""}`));
+            for (const choice of (Array.isArray(item?.choices) ? item.choices : [])) {
+                const values = Array.isArray(choice?.values) && choice.values.length > 0 ? choice.values.join(", ") : "—";
+                itemRow.append(" ", $('<span>', { class: "badge bg-light text-dark border fw-normal" })
+                    .text(`${choice?.label ?? ""}: ${values}`));
+            }
+            itemsList.append(itemRow);
+        });
+        listsDiv.append(itemsList);
+
+        if (items.length > BROWSE_TEXT_LIST_PREVIEW_ITEMS) {
+            const showAll = $('<button>', { type: "button", class: "btn btn-link btn-sm p-0 mb-1 small" })
+                .text(`Show all (${items.length})`);
+            showAll.on("click", function () {
+                itemsList.children().removeClass("d-none");
+                $(this).remove();
+            });
+            listsDiv.append(showAll);
+        }
+    }
+    return listsDiv;
 }
 
 function browseTextOperators(field) {

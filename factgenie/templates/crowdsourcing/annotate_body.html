@@ -100,6 +100,8 @@
               <div id='outputarea'>
               </div>
             </div>
+            {# Embedded only in the final render: config text must not pass through Jinja twice. #}
+            <div id="text-lists" data-config="{% raw %}{{ (metadata.config.text_lists or []) | tojson | forceescape }}{% endraw %}"></div>
             <div class="" id="checkbox-annotation-box">
               {{ flags | safe }}
 

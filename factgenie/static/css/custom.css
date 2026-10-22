@@ -1709,3 +1709,54 @@ body.auth-only #annotator-auth-modal .modal-dialog {
 .permalink-btn .fa-check {
     color: #28a745 !important;
 }
+
+/* Text lists: compact numbered single-line items with inline choice groups */
+.text-list-rows {
+    counter-reset: text-list-item;
+}
+
+.text-list-item {
+    counter-increment: text-list-item;
+}
+
+.text-list-line::before {
+    content: counter(text-list-item) ".";
+    min-width: 1.5rem;
+    padding-top: 0.25rem;
+    text-align: right;
+    color: var(--bs-secondary-color);
+}
+
+.text-list-choices {
+    padding-left: 2rem;
+}
+
+.text-list-item textarea {
+    resize: none;
+    overflow: hidden;
+}
+
+.text-list-choices:not(:empty) {
+    margin-top: 0.25rem;
+}
+
+.text-list-choices legend {
+    float: left;
+    width: auto;
+    margin: 0;
+    padding: 0;
+    font-size: inherit;
+    font-weight: 600;
+}
+
+.browse-text-list-items {
+    padding-left: 1.25rem;
+}
+
+.browse-text-list-text {
+    white-space: pre-wrap;
+}
+
+.text-list-toggle .btn {
+    padding: 0 0.6rem;
+}

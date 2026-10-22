@@ -12,6 +12,15 @@ import pandas as pd
 import factgenie.querying as querying
 from factgenie import CAMPAIGN_DIR
 
+TEXT_LISTS_UNSUPPORTED = "Redo is not supported for campaigns with text lists yet."
+
+
+def require_supported_campaign(campaign_id):
+    path = Path(CAMPAIGN_DIR) / campaign_id / "metadata.json"
+    if path.exists() and json.loads(path.read_text()).get("config", {}).get("text_lists"):
+        raise ValueError(TEXT_LISTS_UNSUPPORTED)
+
+
 QUEUE_VERSION = 1
 STATUS_PENDING = "pending"
 STATUS_COMPLETED = "completed"
@@ -159,6 +168,7 @@ def find_equivalent_item(queue, item):
 
 
 def add_items(campaign_id, rows, created_by="admin", instruction=None, source=None):
+    require_supported_campaign(campaign_id)
     queue = load_queue(campaign_id)
     added = []
     reused = []
@@ -265,6 +275,7 @@ def find_original_revision(campaign_id, redo_id):
 
 
 def restore_original_annotations(campaign_id, redo_ids, restored_by="admin"):
+    require_supported_campaign(campaign_id)
     queue = load_queue(campaign_id)
     redo_ids = set(redo_ids)
     restored = []
@@ -616,7 +627,10 @@ def annotation_state_for_record(record):
         return "skipped"
     annotations = record.get("annotations", []) if record else []
     span_count = len([annotation for annotation in annotations if isinstance(annotation, dict) and annotation.get("text")])
-    if span_count:
+    if span_count or any(
+        entry.get("items") or entry.get("empty_confirmed")
+        for entry in (record.get("text_lists", []) if record else []) if isinstance(entry, dict)
+    ):
         return "done"
     return "empty"
 
@@ -643,6 +657,7 @@ def redo_query_row(campaign, row, record, categories, alias_map=None):
         "options": record.get("options", []) if record else [],
         "sliders": record.get("sliders", []) if record else [],
         "text_fields": record.get("text_fields", []) if record else [],
+        "text_lists": record.get("text_lists", []) if record else [],
         "annotations": record.get("annotations", []) if record else [],
     }
     spans = [

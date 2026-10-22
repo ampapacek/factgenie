@@ -458,9 +458,10 @@ function duplicateEval(inputDuplicateId, campaignId) {
 // yet, so they are carried over from the loaded config as they are.
 const CROWDSOURCING_RENDERING_KEYS = ["output_format", "citation_display", "annotation_view", "view_switch"];
 let crowdsourcingRenderingConfig = {};
+let configuredTextLists = [];
 
 function gatherConfig() {
-    var config = {};
+    var config = {text_lists: structuredClone(configuredTextLists)};
 
     if (window.mode == "crowdsourcing") {
         config.annotatorInstructions = annotatorInstructionsMDE.value();
@@ -921,7 +922,10 @@ function updateCampaignConfig(campaignId) {
             config: config
         }),
         success: function (response) {
-            console.log(response);
+            if (response.success !== true) {
+                alert(response.error);
+                return;
+            }
             $(".update-config-btn").removeClass("btn-danger").addClass("btn-success").text("Saved!");
 
             setTimeout(function () {
@@ -954,6 +958,7 @@ function setCampaignPseudonymizeAnnotators(campaignId, pseudonymizeAnnotators) {
 }
 
 function updateCrowdsourcingConfig() {
+    configuredTextLists = [];
     const crowdsourcingConfig = $('#crowdsourcingConfig').val();
     crowdsourcingRenderingConfig = {};
 
@@ -981,6 +986,7 @@ function updateCrowdsourcingConfig() {
             crowdsourcingRenderingConfig[key] = cfg[key];
         }
     });
+    configuredTextLists = structuredClone(cfg.text_lists || []);
 
     const annotatorInstructions = cfg.annotator_instructions;
     const finalMessage = cfg.final_message;
@@ -1073,6 +1079,11 @@ function importCrowdsourcingConfigToLLM() {
         return;
     }
 
+    if (cfg.text_lists?.length) {
+        alert("Text lists are not supported in LLM campaigns yet.");
+        return;
+    }
+    configuredTextLists = [];
     const annotationSpanCategories = cfg.annotation_span_categories || [];
     const annotationGranularity = cfg.annotation_granularity || "words";
     const annotationOverlapAllowed = cfg.annotation_overlap_allowed || false;
@@ -1140,6 +1151,7 @@ function importCrowdsourcingConfigToLLM() {
 
 
 function updateLLMMetricConfig() {
+    configuredTextLists = [];
     const llmConfigValue = $('#llmConfig').val();
 
     if (llmConfigValue === "[None]") {
@@ -1168,6 +1180,7 @@ function updateLLMMetricConfig() {
         return;
     }
     const cfg = window.configs[llmConfigValue];
+    configuredTextLists = structuredClone(cfg.text_lists || []);
 
     // Supporting a deprecated `type` field
     const api_provider = cfg.api_provider || cfg.type;

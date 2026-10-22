@@ -261,3 +261,136 @@ def test_compute_statistics_filters_selected_annotators(monkeypatch):
     per_annotator = analysis.compute_statistics(app, campaign, averaging="annotator")
     assert per_annotator["slider_stats"]["overall"][0]["avg_value"] == 6.0
     assert per_annotator["annotator_filter"]["averaging"] == "annotator"
+
+
+def _text_list_fixture():
+    toggle = lambda label, yes, no: {
+        "label": label,
+        "multiple": False,
+        "required": False,
+        "display": "toggle",
+        "default_values": [],
+        "options": [{"label": "Ano", "code": yes}, {"label": "Ne", "code": no}],
+    }
+    campaign = SimpleNamespace(
+        campaign_id="mock-campaign",
+        metadata={
+            "config": {
+                "annotation_span_categories": [{"name": "Incorrect"}],
+                "text_lists": [
+                    {
+                        "label": "Chybí",
+                        "empty_label": "Nic nechybí",
+                        "choice_groups": [
+                            toggle("Top 10", "InTop10", "NotInTop10"),
+                            toggle("Seafile", "InSeafile", "NotInSeafile"),
+                        ],
+                    }
+                ],
+            }
+        }
+    )
+    item = lambda text, top, seafile: {
+        "id": text,
+        "text": text,
+        "choices": [{"label": "Top 10", "values": top}, {"label": "Seafile", "values": seafile}],
+    }
+    base = {"dataset": "demo", "split": "test", "setup_id": "rag", "annotator_id": "alice"}
+    example_index = pd.DataFrame(
+        [
+            {
+                **base,
+                "example_idx": 0,
+                "text_lists": [
+                    {
+                        "label": "Chybí",
+                        "empty_confirmed": False,
+                        "items": [
+                            item("search miss", ["Ne"], ["Ano"]),
+                            item("collection gap", ["Ne"], ["Ne"]),
+                            item("not filled", [], []),
+                            item("only seafile", [], ["Ano"]),
+                            item("only top10 no", ["Ne"], []),
+                            item("only top10 yes", ["Ano"], []),
+                        ],
+                    }
+                ],
+            },
+            {**base, "example_idx": 1, "text_lists": [{"label": "Chybí", "empty_confirmed": True, "items": []}]},
+        ]
+    )
+    return campaign, example_index
+
+
+def test_rag_summary_classifies_text_list_items_by_choice_codes(monkeypatch):
+    campaign, example_index = _text_list_fixture()
+    monkeypatch.setattr(analysis, "_load_campaign_annotator_alias_map", lambda campaign: {})
+    span_index = pd.DataFrame(columns=["setup_id", "annotation_type"])
+
+    defaults = analysis._get_rag_summary_defaults(span_index, campaign, example_index)
+    assert defaults["default_span_category"] == "list:Chybí"
+    assert defaults["setup_ids"] == ["rag"]
+
+    stats = analysis.compute_rag_mistake_stats(
+        app=SimpleNamespace(),
+        campaign=campaign,
+        span_index=span_index,
+        defaults=defaults,
+        example_index=example_index,
+    )
+    by_key = {row["key"]: row for row in stats}
+    assert by_key["collection"]["span_count"] == 1
+    assert by_key["search"]["examples"][0]["spans"] == [
+        {"kind": "item", "text": "search miss", "reason": "Top 10: Ne · Seafile: Ano"}
+    ]
+    # Browse links preselect this campaign's annotator, not a same-named annotator from another campaign.
+    assert by_key["search"]["examples"][0]["browse_url"].endswith("&ann_campaign=mock-campaign-ann-alice")
+    # Partially answered toggles: a bucket needs the Top 10 answer (and Seafile when Top 10 is Ne).
+    assert [span["text"] for span in by_key["generation"]["examples"][0]["spans"]] == ["only top10 yes"]
+    assert [span["text"] for span in by_key["unclassified"]["examples"][0]["spans"]] == [
+        "not filled",
+        "only seafile",
+        "only top10 no",
+    ]
+    assert by_key["unclassified"]["examples"][0]["spans"][0]["reason"] == "Top 10: — · Seafile: —"
+
+    # A span category selection leaves the list items out.
+    assert analysis.compute_rag_mistake_stats(
+        app=SimpleNamespace(),
+        campaign=campaign,
+        selected_span_category="Incorrect",
+        span_index=span_index,
+        defaults=defaults,
+        example_index=example_index,
+    ) == []
+
+
+def test_extra_fields_stats_count_text_list_items_and_choices():
+    campaign, example_index = _text_list_fixture()
+    stats = analysis.compute_extra_fields_stats(example_index, campaign.metadata["config"]["text_lists"])
+    assert stats["Chybí"] == {"items": 6, "Nic nechybí": 1}
+    assert stats["Chybí / Top 10"] == {"Ne": 3, "Ano": 1, "—": 2}
+    assert stats["Chybí / Seafile"] == {"Ano": 2, "Ne": 1, "—": 3}
+
+
+def test_rag_summary_ignores_lists_without_rag_codes(monkeypatch):
+    campaign, example_index = _text_list_fixture()
+    campaign.metadata["config"]["text_lists"].append(
+        {"label": "Zdroje", "choice_groups": [{"label": "Typ", "options": [{"label": "Web", "code": None}]}]}
+    )
+    example_index.at[1, "text_lists"] = [
+        {"label": "Zdroje", "empty_confirmed": False, "items": [{"id": "z", "text": "web", "choices": []}]}
+    ]
+    monkeypatch.setattr(analysis, "_load_campaign_annotator_alias_map", lambda campaign: {})
+    span_index = pd.DataFrame(columns=["setup_id", "annotation_type"])
+    defaults = analysis._get_rag_summary_defaults(span_index, campaign, example_index)
+    assert [source["value"] for source in defaults["sources"]] == ["Incorrect", "list:Chybí"]
+    stats = analysis.compute_rag_mistake_stats(
+        app=SimpleNamespace(),
+        campaign=campaign,
+        selected_span_category="all",
+        span_index=span_index,
+        defaults=defaults,
+        example_index=example_index,
+    )
+    assert {row["key"]: row["span_count"] for row in stats}["unclassified"] == 3  # "web" is not counted
