@@ -1528,20 +1528,28 @@ def llm_campaign_run():
     if reconcile_llm_campaign_runtime_state(app, campaign):
         return utils.error(f"Campaign {campaign_id} is already running.")
 
-    app.db["announcers"][campaign_id] = announcer = utils.MessageAnnouncer()
-    app.db["running_campaigns"].add(campaign_id)
-
     try:
         datasets = app.db["datasets_obj"]
 
         config = campaign.metadata["config"]
         model = ModelFactory.from_config(config, mode=mode)
+    except Exception as e:
+        traceback.print_exc()
+        return utils.error(f"Error while running campaign: {e}")
+
+    # Register the run right before starting its thread, so a concurrent reconcile
+    # has almost no window to see the flag without a thread and clear it.
+    app.db["announcers"][campaign_id] = announcer = utils.MessageAnnouncer()
+    app.db["running_campaigns"].add(campaign_id)
+
+    try:
         start_llm_campaign_background(app, mode, campaign_id, announcer, campaign, datasets, model)
         return jsonify(success=True, status=CampaignStatus.RUNNING)
 
     except Exception as e:
         app.db["running_campaigns"].discard(campaign_id)
         app.db["running_campaign_threads"].pop(campaign_id, None)
+        app.db["announcers"].pop(campaign_id, None)
         traceback.print_exc()
         return utils.error(f"Error while running campaign: {e}")
 
