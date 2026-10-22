@@ -20,7 +20,7 @@ class SequenceAPI(MockingAPI):
     def call_model_once(self, messages, model_service, prompt_strat_kwargs):
         self.calls.append(messages)
         payload = self.responses.pop(0)
-        response = litellm.completion(model="gemini-2.0-flash", mock_response=payload["content"])
+        response = litellm.completion(model="gemini/gemini-2.0-flash", mock_response=payload["content"])
         reasoning = payload.get("reasoning")
         if reasoning is not None:
             response["choices"][0]["message"].reasoning_content = reasoning

@@ -251,7 +251,7 @@ class MockingAPI(GeminiAPI):
     def call_model_once(self, messages, model_service, prompt_strat_kwargs):
         import litellm
 
-        response = litellm.completion(model="gemini-2.0-flash", mock_response=self.mocking_reponse(messages))
+        response = litellm.completion(model="gemini/gemini-2.0-flash", mock_response=self.mocking_reponse(messages))
         if self.include_thought is not None:
             response["choices"][0]["message"].reasoning_content = self.include_thought
         return response
