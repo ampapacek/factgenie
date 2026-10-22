@@ -166,6 +166,27 @@ class Dataset(ABC):
             raise IndexError(f"Examples for split '{split}' are None, cannot retrieve index {example_idx}.")
         return self.examples[split][example_idx]
 
+    def get_question_id(self, example):
+        """
+        Return the stable question ID of an example, or None if the dataset has none.
+
+        The same question ID in different splits marks the same question, so Browse
+        can keep the question when the split changes.
+        """
+        return None
+
+    def find_question_index(self, split, question_id):
+        """
+        Return the index of the example with the given question ID in the split, or None.
+        """
+        if not question_id:
+            return None
+        self._ensure_split_loaded(split)
+        for example_idx, example in enumerate(self.examples[split] or []):
+            if self.get_question_id(example) == question_id:
+                return example_idx
+        return None
+
     def get_example_count(self, split=None):
         """
         Get the number of examples in the dataset.

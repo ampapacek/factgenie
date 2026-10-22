@@ -819,6 +819,28 @@ def browse():
     )
 
 
+@app.route("/browse/question_index", methods=["GET"])
+@login_required
+def browse_question_index():
+    # index of the example with the given question ID in the split, so Browse
+    # keeps the question when the split changes; None if the question is not there
+    dataset_id = slugify(str(request.args.get("dataset") or ""))
+    split = str(request.args.get("split") or "")
+    question_id = str(request.args.get("question_id") or "")
+    dataset_config = utils.load_dataset_config().get(dataset_id)
+    if not dataset_config or not dataset_config.get("enabled", True):
+        return jsonify(success=True, example_idx=None)
+    if not _is_authenticated_viewer() and dataset_config.get("hidden_from_regular_users", False):
+        return jsonify(success=True, example_idx=None)
+    try:
+        dataset = workflows.get_dataset(app, dataset_id)
+        example_idx = dataset.find_question_index(split, question_id) if dataset is not None else None
+    except Exception as e:
+        logger.warning(f"Cannot look up question {question_id!r} in {dataset_id}/{split}: {e}")
+        example_idx = None
+    return jsonify(success=True, example_idx=example_idx)
+
+
 @app.route("/browse/instructions", methods=["GET"])
 @login_required
 def browse_instructions():

@@ -17,6 +17,8 @@ from natsort import natsorted
 from factgenie.datasets.dataset import Dataset
 from factgenie.utils import resumable_download
 
+QUESTION_ID_META_RE = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
+
 
 class BasicDataset(Dataset):
     @classmethod
@@ -193,6 +195,15 @@ class HTMLDataset(BasicDataset):
                     examples.append(content)
 
         return examples
+
+    def get_question_id(self, example):
+        # the question ID is stored as <meta name="question-id" content="..."> in the HTML
+        for tag in QUESTION_ID_META_RE.findall(example):
+            if re.search(r'name\s*=\s*["\']question-id["\']', tag):
+                match = re.search(r'content\s*=\s*["\']([^"\']*)["\']', tag)
+                if match and match.group(1).strip():
+                    return match.group(1).strip()
+        return None
 
     def render(self, example):
         return example

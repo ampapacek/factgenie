@@ -1,4 +1,6 @@
 var current_example_idx = 0;
+// stable question ID of the shown example (from the dataset), or null
+var current_question_id = null;
 var selected_campaigns = [];
 var collapsed_boxes = [];
 var showAnnotatorNames = false;
@@ -322,10 +324,23 @@ function changeSplit() {
     $("#dataset-spinner").show();
     const dataset = $('#dataset-select').val();
     const split = $('#split-select').val();
-    current_example_idx = 0;
     clearFilteredQueue();
     loadBrowseFilterSchema();
-    fetchExample(dataset, split, current_example_idx);
+    // stay on the same question if the new split has it, otherwise start at 0
+    const questionId = current_question_id;
+    const goTo = (example_idx) => {
+        current_example_idx = example_idx;
+        fetchExample(dataset, split, current_example_idx);
+    };
+    if (!questionId) {
+        goTo(0);
+        return;
+    }
+    $.get(`${url_prefix}/browse/question_index`, { dataset, split, question_id: questionId }, function (data) {
+        goTo(Number.isInteger(data.example_idx) ? data.example_idx : 0);
+    }).fail(function () {
+        goTo(0);
+    });
 }
 
 function changeExample(dataset, split, example_idx, options = {}) {
@@ -1717,6 +1732,7 @@ function fetchExample(dataset, split, example_idx, options = {}) {
 
         showRawData(data);
 
+        current_question_id = data.question_id || null;
         total_examples = datasets[dataset].example_count[split];
         renderBrowseNavigationState();
         updateOutputViewToggle();
@@ -2553,14 +2569,18 @@ function renderBrowseNavigationState() {
         const resultUnit = browseResultUnitLabel || "question";
         $("#page-input").val(position);
         $("#total-examples")
-            .text(`Matched ${resultUnit} ${position} / ${total} · Question no. ${currentQuestionNumber()}`)
+            .text(`Matched ${resultUnit} ${position} / ${total} · Question no. ${currentQuestionNumber()}${questionIdSuffix()}`)
             .attr("title", `Original question number ${currentQuestionNumber()}`);
         return;
     }
     $("#page-input").val(currentQuestionNumber());
     $("#total-examples")
-        .text(`/ ${total_examples || 0}`)
+        .text(`/ ${total_examples || 0}${questionIdSuffix()}`)
         .attr("title", `Total ${browseResultUnitPlural || "questions"}`);
+}
+
+function questionIdSuffix() {
+    return current_question_id ? ` · ${current_question_id}` : "";
 }
 
 function applyBrowseFilters(targetExampleIdx = null, replaceUrl = false) {

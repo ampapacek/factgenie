@@ -121,6 +121,7 @@ def get_example_data(app, dataset_id, split, example_idx, setup_id=None):
     return {
         "html": html,
         "raw_data": example,
+        "question_id": dataset.get_question_id(example),
         "generated_outputs": generated_outputs,
     }
 
