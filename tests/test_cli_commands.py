@@ -4,14 +4,21 @@ Run cli commands which wrap high level functionalites as a kind of functional te
 
 import logging
 import subprocess
+import sys
 from pathlib import Path
 
-from factgenie import CAMPAIGN_DIR, INPUT_DIR, OUTPUT_DIR
+from factgenie import CAMPAIGN_DIR, INPUT_DIR, OUTPUT_DIR, ROOT_DIR
+
+
+def run_cli(*args, **kwargs):
+    # Run this checkout's CLI with the interpreter running pytest, not whatever `factgenie` is on PATH.
+    code = "from factgenie.bin.run import run; run(prog_name='factgenie')"
+    return subprocess.run([sys.executable, "-c", code, *args], cwd=ROOT_DIR, **kwargs)
 
 
 def test_factgenie_help():
     cmd = "factgenie --help"
-    result = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    result = run_cli(*cmd.split()[1:], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     logging.debug(f"RUNNING ${cmd}\n{result.stdout.decode()}")
     assert result.returncode == 0
     assert b"Usage: factgenie [OPTIONS] COMMAND [ARGS]..." in result.stdout
@@ -20,7 +27,7 @@ def test_factgenie_help():
 def test_factgenie_routes():
     """Routes list endpoints to be called with GET, POST, PUT, DELETE methods"""
     cmd = "factgenie routes"
-    result = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = run_cli(*cmd.split()[1:], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     assert result.returncode == 0
 
 
@@ -32,7 +39,7 @@ def test_factgenie_list_datasets():
     assert Path(INPUT_DIR).exists()
     assert "factgenie/data/input" in str(INPUT_DIR), f"INPUT_DIR: {INPUT_DIR}"
     cmd = "factgenie list datasets"
-    result = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    result = run_cli(*cmd.split()[1:], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     logging.debug(f"RUNNING ${cmd}\n{result.stdout.decode()}")
     assert result.returncode == 0
     cli_datasets = sorted([d.strip() for d in result.stdout.decode().split("\n") if len(d.strip()) > 0])
@@ -53,7 +60,7 @@ def test_factgenie_list_campaigns():
     assert Path(CAMPAIGN_DIR).exists()
     assert "factgenie/campaigns" in str(CAMPAIGN_DIR), f"CAMPAIGN_DIR: {CAMPAIGN_DIR}"
     cmd = "factgenie list campaigns"
-    result = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    result = run_cli(*cmd.split()[1:], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     logging.debug(f"RUNNING ${cmd}\n{result.stdout.decode()}")
     assert result.returncode == 0
     cli_campaigns = sorted([d.strip() for d in result.stdout.decode().split("\n") if len(d.strip()) > 0])
