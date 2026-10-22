@@ -63,7 +63,14 @@ function saveSplitSizes() {
 
 var splitInstance = Split(['#centerpanel', '#rightpanel'], {
     sizes: loadSplitSizes(),
-    gutterSize: 1,
+    gutterSize: 8,
+    gutter: (index, direction) => {
+        const gutter = document.createElement('div');
+        gutter.className = `gutter gutter-${direction}`;
+        gutter.title = 'Drag to resize the panels';
+        return gutter;
+    },
+    onDragEnd: saveSplitSizes,
 });
 
 function normalizeNewlines(text) {

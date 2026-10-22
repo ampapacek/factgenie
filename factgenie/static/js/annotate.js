@@ -1,4 +1,5 @@
-const sizes = [50, 50];
+const DEFAULT_SPLIT_SIZES = [50, 50];
+const SPLIT_STORAGE_KEY = "factgenie:annotateSplitSizes";
 const annotator_id = window.annotator_id;
 const metadata = window.metadata;
 const redo_context = window.redo_context || {};
@@ -17,9 +18,32 @@ var examples_cached = {};
 var annotatorAuthMode = "login";
 var annotatorAuthModal = null;
 
+function loadSplitSizes() {
+    try {
+        return JSON.parse(localStorage.getItem(SPLIT_STORAGE_KEY)) || DEFAULT_SPLIT_SIZES;
+    } catch {
+        return DEFAULT_SPLIT_SIZES;
+    }
+}
+
+function saveSplitSizes(sizes) {
+    try {
+        localStorage.setItem(SPLIT_STORAGE_KEY, JSON.stringify(sizes));
+    } catch {
+        // storage unavailable: the split just resets on the next page load
+    }
+}
+
 var splitInstance = Split(['#centerpanel', '#rightpanel'], {
-    sizes: sizes,
-    gutterSize: 1,
+    sizes: loadSplitSizes(),
+    gutterSize: 8,
+    gutter: (index, direction) => {
+        const gutter = document.createElement('div');
+        gutter.className = `gutter gutter-${direction}`;
+        gutter.title = 'Drag to resize the panels';
+        return gutter;
+    },
+    onDragEnd: saveSplitSizes,
 });
 
 function initStickyAnnotationCategories() {

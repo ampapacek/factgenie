@@ -313,8 +313,16 @@ pre {
 }
 
 .gutter.gutter-horizontal {
-    background-color: #dedddd;
+    /* thin line with a short grip in the middle, so the divider looks draggable */
+    background-color: #f1f1f1;
+    background-image: linear-gradient(#b5b5b5, #b5b5b5);
+    background-size: 3px 32px;
     cursor: col-resize;
+}
+
+.gutter.gutter-horizontal:hover {
+    background-color: #dbe7f3;
+    background-image: linear-gradient(#0175ac, #0175ac);
 }
 
 
@@ -1711,6 +1719,12 @@ body.auth-only #annotator-auth-modal .modal-dialog {
 }
 
 /* Text lists: compact numbered single-line items with inline choice groups */
+/* Same side margins as #checkbox-annotation-box so both blocks line up. */
+#text-lists {
+    margin-left: 75px;
+    margin-right: 75px;
+}
+
 .text-list-rows {
     counter-reset: text-list-item;
 }
