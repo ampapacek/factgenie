@@ -105,7 +105,8 @@ def reconcile_llm_campaign_runtime_state(app, campaign):
     is_running = thread is not None and thread.is_alive()
     had_local_thread = thread is not None
 
-    if had_local_thread and not is_running and campaign_id in app.db["running_campaigns"]:
+    # In-memory flags belong to this process, so clear them whenever no local thread is alive.
+    if not is_running:
         app.db["running_campaigns"].discard(campaign_id)
         app.db["running_campaign_threads"].pop(campaign_id, None)
         app.db["announcers"].pop(campaign_id, None)
