@@ -987,6 +987,7 @@ function detailLabel(detail) {
         output: "Answer",
         any_text: "Any text",
         slider: "Slider",
+        text_list: "Text list",
     };
     const opLabels = {
         contains: "contains",
@@ -1006,6 +1007,10 @@ function detailLabel(detail) {
     const op = opLabels[detail.op] || detail.op || "";
     const setup = detail.setup_id ? ` · ${detail.setup_id}` : "";
     const who = detailAnnotatorLabel(detail);
+    if (detail.target === "text_list") {
+        const status = Object.fromEntries(browseTextOperators("text_list"))[detail.op] || detail.op || "";
+        return `${detail.value} ${status}${setup}${who}`;
+    }
     if (detail.target === "span") {
         const spanText = shortenMatchText(detail.span_text || detail.matched_text || detail.reason || "", 60);
         const category = detail.category ? `${detail.category}: ` : "";
@@ -1044,7 +1049,7 @@ function shortenMatchText(text, maxLength) {
 
 function detailOccurrenceUnit(detail) {
     const target = String(detail?.target || detail?.field || "occurrence");
-    if (["annotation_state", "annotator"].includes(target)) {
+    if (["annotation_state", "annotator", "text_list"].includes(target)) {
         return "annotation";
     }
     if (["question", "source_data", "output", "setup", "span", "slider"].includes(target)) {
@@ -1094,6 +1099,9 @@ function detailOccurrenceIdentity(detail) {
     }
     if (["annotation_state", "annotator", "setup"].includes(target)) {
         return [target, ...base].join("|");
+    }
+    if (target === "text_list") {
+        return [target, ...base, String(detail?.value || "")].join("|");
     }
     return [target, String(detail?.matched_text || ""), String(detail?.value || "")].join("|");
 }
@@ -1957,7 +1965,27 @@ function getTextListsHtml(lists, definitions) {
     return listsDiv;
 }
 
+function browseTextListEmptyLabel() {
+    const labels = [];
+    (browseFilterSchema.text_lists || []).forEach(function (list) {
+        (list.empty_labels || []).forEach(function (label) {
+            if (!labels.includes(label)) {
+                labels.push(label);
+            }
+        });
+    });
+    return labels.length ? ` (${labels.join(" / ")})` : "";
+}
+
 function browseTextOperators(field) {
+    if (field === "text_list") {
+        return [
+            ["has_items", "has items"],
+            ["empty_confirmed", `is confirmed empty${browseTextListEmptyLabel()}`],
+            ["not_filled", "is not filled"],
+            ["filled", "has items or is confirmed empty"],
+        ];
+    }
     if (field === "slider") {
         return [
             ["eq", "equals"],
@@ -1997,6 +2025,9 @@ function browseFieldOptions() {
         fields.push(["source_data", "Source data"]);
     }
     fields.push(["output", "Answer"], ["any_text", "Any text"], ["slider", "Slider"]);
+    if ((browseFilterSchema.text_lists || []).length) {
+        fields.push(["text_list", "Text list"]);
+    }
     return fields;
 }
 
@@ -2130,6 +2161,11 @@ function addBrowseFilterCondition(condition) {
     });
     $("#browse-filter-conditions").append(row);
     fieldSelect.val(condition?.field || "span_category");
+    if (!fieldSelect.val()) {
+        // The field is not offered in this scope (e.g. no text lists after a dataset switch).
+        fieldSelect.val("span_category");
+        condition = {};
+    }
     renderBrowseConditionControls(row, condition || {});
     refreshBrowseSpanGroupOptions();
 }
@@ -2144,7 +2180,7 @@ function browseSelectFields() {
 }
 
 function browseFieldIsFreeText(field) {
-    return Boolean(field) && field !== "slider" && !(field in browseSelectFields());
+    return Boolean(field) && !["slider", "text_list"].includes(field) && !(field in browseSelectFields());
 }
 
 function renderBrowseConditionControls(row, condition) {
@@ -2199,6 +2235,19 @@ function renderBrowseConditionControls(row, condition) {
         controls.find(".browse-condition-slider-label-wrap").append(labelControl);
         wrap.append(controls);
         controls.find(".browse-condition-value").val(condition.value || "");
+    } else if (field === "text_list") {
+        // The list is the value; the operator holds the fill status.
+        const lists = (browseFilterSchema.text_lists || []).map((list) => list.label);
+        const select = $('<select class="form-select form-select-sm browse-condition-value"></select>');
+        lists.forEach(function (label) {
+            select.append(escapeBrowseOption(label));
+        });
+        if (condition.value && !lists.includes(condition.value)) {
+            select.append(escapeBrowseOption(condition.value));
+        }
+        select.val(condition.value || lists[0] || "");
+        wrap.append('<label class="form-label small mb-1">List</label>');
+        wrap.append(select);
     } else {
         const input = $('<input class="form-control form-control-sm browse-condition-value" type="search">');
         appendBrowseValueControl(wrap, input, isSpanField, condition);

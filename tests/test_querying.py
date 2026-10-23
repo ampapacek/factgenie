@@ -726,3 +726,88 @@ def test_public_query_scope_excludes_hidden_datasets_and_campaigns():
     kwargs = build_query_tables.call_args.kwargs
     assert kwargs["visible_dataset_ids"] == {"demo"}
     assert kwargs["visible_campaign_ids"] == {"camp"}
+
+
+def text_list_tables():
+    """Two list campaigns plus one without lists: items, confirmed empty, unfilled, skipped."""
+    outputs = pd.DataFrame(
+        [{"dataset": "demo", "split": "test", "setup_id": "rag", "example_idx": idx, "output": f"Answer {idx}"} for idx in range(3)]
+    )
+    zdroje = {"label": "Zdroje", "empty_label": "Nic nechybí", "choice_groups": [{"label": "Typ", "options": ["Top 10", "Seafile"]}]}
+
+    def submission(campaign_id, example_idx, annotator_id, text_lists=None, skipped=False):
+        return {
+            "campaign_id": campaign_id,
+            "dataset": "demo",
+            "split": "test",
+            "setup_id": "rag",
+            "example_idx": example_idx,
+            "annotator_id": annotator_id,
+            "annotator_group": 0,
+            "annotations": [],
+            "flags": [{"label": "Skip", "value": skipped}],
+            "options": [],
+            "sliders": [],
+            "text_fields": [],
+            "text_lists": text_lists or [],
+        }
+
+    annotation_index = pd.DataFrame(
+        [
+            submission(
+                "lists",
+                0,
+                "alice",
+                [{"label": "Zdroje", "empty_confirmed": False, "items": [{"id": "a", "text": "wikipedia.org", "choices": [{"label": "Typ", "values": ["Seafile"]}]}]}],
+            ),
+            submission("lists", 1, "bob", [{"label": "Zdroje", "empty_confirmed": True, "items": []}]),
+            submission("lists", 2, "carol", [{"label": "Zdroje", "empty_confirmed": False, "items": []}]),
+            submission("lists", 2, "dana", [], skipped=True),
+            submission("plain", 0, "erik"),
+        ]
+    )
+
+    def campaign(text_lists):
+        return SimpleNamespace(
+            metadata={"mode": "crowdsourcing", "config": {"annotation_span_categories": [], "pseudonymize_annotators": False, "text_lists": text_lists}},
+            db=pd.DataFrame(),
+        )
+
+    campaign_index = {"lists": campaign([zdroje]), "plain": campaign([])}
+    submissions = querying._build_submissions(annotation_index, campaign_index)
+    spans = querying._build_spans(submissions, campaign_index)
+    rows = querying._build_example_rows(make_app(), outputs, submissions, spans, pd.DataFrame())
+    return {"outputs": outputs, "submissions": submissions, "spans": spans, "assignments": pd.DataFrame(), "rows": rows}
+
+
+def test_any_text_searches_text_list_items_choices_and_confirmed_empty_label():
+    tables = text_list_tables()
+
+    assert filter_rows(tables, [condition("any_text", "contains", "wikipedia")])["example_idx"].tolist() == [0]
+    assert filter_rows(tables, [condition("any_text", "contains", "seafile")])["example_idx"].tolist() == [0]
+    assert filter_rows(tables, [condition("any_text", "contains", "nic nechybí")])["example_idx"].tolist() == [1]
+
+
+def test_text_list_status_filters_are_per_annotation_and_skip_unrelated_campaigns():
+    tables = text_list_tables()
+
+    def matches(op):
+        rows = filter_rows(tables, [condition("text_list", op, "Zdroje")])
+        return {
+            (row["example_idx"], detail["annotator_id"])
+            for _, row in rows.iterrows()
+            for detail in row["match_details"]
+        }
+
+    assert matches("has_items") == {(0, "alice")}
+    assert matches("empty_confirmed") == {(1, "bob")}
+    # Skipped annotations (dana) and campaigns without the list (erik) are not "not filled".
+    assert matches("not_filled") == {(2, "carol")}
+    assert matches("filled") == {(0, "alice"), (1, "bob")}
+    assert filter_rows(tables, [condition("text_list", "not_filled", "Zdroje"), condition("annotator", "eq", "dana")]).empty
+    assert filter_rows(tables, [condition("text_list", "has_items", "Zdroje")], mode="any")["example_idx"].tolist() == [0]
+
+
+def test_schema_lists_text_lists_only_when_configured():
+    assert querying.schema_payload(text_list_tables())["text_lists"] == [{"label": "Zdroje", "empty_labels": ["Nic nechybí"]}]
+    assert querying.schema_payload(sample_tables())["text_lists"] == []

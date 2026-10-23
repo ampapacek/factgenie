@@ -71,10 +71,11 @@ OCCURRENCE_LABELS = {
     "annotation_state": ("annotation", "annotations"),
     "annotator": ("annotation", "annotations"),
     "any_text": ("text block", "text blocks"),
+    "text_list": ("annotation", "annotations"),
 }
 
 SPAN_FIELDS = {"span_category", "span_reason", "span_text"}
-ANNOTATION_SCOPED_FIELDS = {"annotator", "annotation_state", "slider"} | SPAN_FIELDS
+ANNOTATION_SCOPED_FIELDS = {"annotator", "annotation_state", "slider", "text_list"} | SPAN_FIELDS
 TEXT_FIELDS = {
     "setup",
     "split",
@@ -90,6 +91,8 @@ TEXT_FIELDS = {
 }
 SLIDER_OPS = {"eq", "neq", "gt", "gte", "lt", "lte", "missing", "not_missing"}
 TEXT_OPS = {"contains", "not_contains", "eq", "neq", "missing", "not_missing", "regex", "not_regex"}
+# Text list conditions pick a list (the condition value) and its fill status (the op).
+TEXT_LIST_OPS = {"has_items", "empty_confirmed", "not_filled", "filled"}
 
 
 class QueryFilterError(ValueError):
@@ -270,6 +273,35 @@ def _field_text(items):
     return " ".join(values)
 
 
+def _text_list_texts(lists, definitions):
+    """Item texts, choice values and confirmed empty labels, for the "Any text" search."""
+    empty_labels = {definition.get("label"): definition.get("empty_label", "") for definition in _safe_list(definitions)}
+    texts = []
+    for entry in _safe_list(lists):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("empty_confirmed") and empty_labels.get(entry.get("label")):
+            texts.append(str(empty_labels[entry.get("label")]))
+        for item in _safe_list(entry.get("items")):
+            if not isinstance(item, dict):
+                continue
+            texts.append(str(item.get("text", "")))
+            for choice in _safe_list(item.get("choices")):
+                if isinstance(choice, dict):
+                    texts.extend(str(value) for value in _safe_list(choice.get("values")))
+    return texts
+
+
+def _text_list_definitions(metadata):
+    definitions = []
+    for definition in _safe_list(metadata.get("config", {}).get("text_lists")):
+        if isinstance(definition, dict) and str(definition.get("label", "") or "").strip():
+            definitions.append(
+                {"label": str(definition["label"]), "empty_label": str(definition.get("empty_label", "Nothing to add") or "")}
+            )
+    return definitions
+
+
 def _coerce_columns(df, columns):
     if df is None or df.empty:
         return pd.DataFrame(columns=columns)
@@ -330,6 +362,7 @@ def _build_submissions(annotation_index, campaign_index):
         "sliders",
         "text_fields",
         "text_lists",
+        "text_list_definitions",
         "annotations",
         "jsonl_file",
     ]
@@ -393,6 +426,7 @@ def _build_submissions(annotation_index, campaign_index):
                 "sliders": _safe_list(row.get("sliders")),
                 "text_fields": _safe_list(row.get("text_fields")),
                 "text_lists": _safe_list(row.get("text_lists")),
+                "text_list_definitions": _text_list_definitions(metadata),
                 "annotations": annotations,
                 "jsonl_file": row.get("jsonl_file"),
             }
@@ -564,6 +598,7 @@ def _build_example_rows(app, outputs, submissions, spans, assignments):
             for _, sub in sub_group.iterrows():
                 submissions_list.append(sub.to_dict())
                 any_texts.extend([_field_text(sub.get("flags")), _field_text(sub.get("options")), _field_text(sub.get("text_fields"))])
+                any_texts.extend(_text_list_texts(sub.get("text_lists"), sub.get("text_list_definitions")))
                 if sub.get("annotation_state") != "skipped":
                     for slider in _safe_list(sub.get("sliders")):
                         if not isinstance(slider, dict):
@@ -686,6 +721,13 @@ def schema_payload(tables, authenticated=False):
             for slider in _safe_list(sliders):
                 if slider.get("label"):
                     slider_labels.add(str(slider["label"]))
+    text_lists = {}
+    if not submissions.empty and "text_list_definitions" in submissions.columns:
+        for definitions in submissions["text_list_definitions"].tolist():
+            for definition in _safe_list(definitions):
+                empty_labels = text_lists.setdefault(definition["label"], [])
+                if definition.get("empty_label") and definition["empty_label"] not in empty_labels:
+                    empty_labels.append(definition["empty_label"])
     annotators = set()
     if not submissions.empty:
         annotators.update(submissions["annotator_alias"].dropna().astype(str).tolist())
@@ -701,6 +743,8 @@ def schema_payload(tables, authenticated=False):
         "annotators": sorted(value for value in annotators if value),
         "categories": sorted(spans["category_name"].dropna().astype(str).unique().tolist()) if not spans.empty else [],
         "slider_labels": sorted(slider_labels),
+        # Only lists configured in campaigns with annotations in scope; empty when no campaign has lists.
+        "text_lists": [{"label": label, "empty_labels": text_lists[label]} for label in sorted(text_lists)],
         "annotation_states": ["done", "skipped", "mixed", "empty", "assigned", "todo"],
         "source_data_available": bool(not rows.empty and rows.get("has_source_data", pd.Series(dtype=bool)).fillna(False).any()),
     }
@@ -740,7 +784,12 @@ def normalize_conditions(conditions):
             _, _, embedded_slider_label = field.partition(":")
             embedded_slider_label = embedded_slider_label.strip()
             field = "slider"
-        if field not in TEXT_FIELDS and field != "slider":
+        if field not in TEXT_FIELDS and field not in ["slider", "text_list"]:
+            continue
+        if field == "text_list":
+            list_label = str(condition.get("value") if condition.get("value") is not None else "").strip()
+            if op in TEXT_LIST_OPS and list_label:
+                normalized.append({"field": field, "op": op, "value": list_label})
             continue
         if field == "slider":
             if op not in SLIDER_OPS:
@@ -896,7 +945,33 @@ def submission_condition_matches(submission, condition, authenticated, regex_cac
             return True, condition_detail(condition, "slider", _missing_slider_item(submission, condition), authenticated)
         slider = first_matching_slider(slider_items, condition)
         return bool(slider), condition_detail(condition, "slider", slider, authenticated) if slider else {}
+    if field == "text_list":
+        matched = text_list_matches(submission, condition)
+        return matched, condition_detail(condition, "text_list", submission, authenticated) if matched else {}
     return True, condition_detail(condition, field, submission, authenticated)
+
+
+def text_list_matches(submission, condition):
+    """Fill status of one list in one annotation. Skipped annotations and campaigns without the list never match."""
+    label = condition.get("value")
+    if submission.get("annotation_state") == "skipped":
+        return False
+    if not any(definition.get("label") == label for definition in _safe_list(submission.get("text_list_definitions"))):
+        return False
+    entry = next(
+        (entry for entry in _safe_list(submission.get("text_lists")) if isinstance(entry, dict) and entry.get("label") == label),
+        {},
+    )
+    has_items = any(isinstance(item, dict) and str(item.get("text", "") or "").strip() for item in _safe_list(entry.get("items")))
+    confirmed = bool(entry.get("empty_confirmed")) and not has_items
+    op = condition["op"]
+    if op == "has_items":
+        return has_items
+    if op == "empty_confirmed":
+        return confirmed
+    if op == "not_filled":
+        return not has_items and not confirmed
+    return has_items or confirmed
 
 
 def condition_matches_row(row, condition, authenticated, regex_cache):
@@ -968,6 +1043,13 @@ def condition_matches_row(row, condition, authenticated, regex_cache):
         details = [condition_detail(condition, "slider", slider, authenticated) for slider in sliders]
         if condition["op"] == "missing" and slider_matches(row_sliders, condition):
             details.append(condition_detail(condition, "slider", _missing_slider_item({}, condition), authenticated))
+        return bool(details), metadata_from_details(details) if details else {}
+    if field == "text_list":
+        details = [
+            condition_detail(condition, "text_list", submission, authenticated)
+            for submission in _safe_list(row.get("submissions"))
+            if text_list_matches(submission, condition)
+        ]
         return bool(details), metadata_from_details(details) if details else {}
     return True, {}
 
@@ -1276,7 +1358,7 @@ def preferred_occurrence_unit(occurrence_keys_by_unit):
 
 def occurrence_unit_for_detail(detail):
     target = str(detail.get("target") or detail.get("field") or "occurrence")
-    if target in ["annotation_state", "annotator"]:
+    if target in ["annotation_state", "annotator", "text_list"]:
         return "annotation"
     return target if target in OCCURRENCE_LABELS else "occurrence"
 
@@ -1301,6 +1383,8 @@ def occurrence_identity(detail):
         return ("question",)
     if target in ["annotation_state", "annotator", "setup"]:
         return base + (target,)
+    if target == "text_list":
+        return base + (target, detail.get("value", ""))
     return (target, detail.get("matched_text", ""), detail.get("value", ""))
 
 
