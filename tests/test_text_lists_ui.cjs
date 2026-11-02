@@ -5,7 +5,7 @@ const {randomUUID} = require('node:crypto');
 class Node {
     constructor(tag, text = '') { this.tag = tag; this.children = []; this.textContent = text; this.events = {}; }
     append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); } }
-    replaceChildren() { this.children = []; }
+    replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
     remove() { this.parent.children = this.parent.children.filter(node => node !== this); }
     setAttribute() {}
     addEventListener(type, handler) { this.events[type] = handler; }
@@ -15,6 +15,7 @@ class Node {
         return all.filter(child => child.tag === 'input' && (selector !== 'input:checked' || child.checked));
     }
     get style() { return this._style ||= {}; }
+    get classList() { return {add: () => {}, remove: () => {}}; }
 }
 const definitions = [{label: 'List', placeholder: '', max_items: 2, empty_confirmation: true,
     empty_label: 'Nothing', required: true, choice_groups: [
@@ -77,6 +78,60 @@ assert.equal(rows().length, 1);
 type(rows()[0], 'new item');
 assert.equal(confirmation.checked, false);
 assert.equal(confirmation.disabled, true);
+// Copy items between answers of the batch and through the clipboard.
+{
+    const choices = (single, multi, toggle) => [{label: 'Single', values: single}, {label: 'Multi', values: multi},
+        {label: 'Switch', values: toggle}];
+    const storage = {};
+    context.localStorage = {getItem: key => storage[key] ?? null, setItem: (key, value) => { storage[key] = value; }};
+    context.clearTimeout = () => {};
+    const immediate = context.setTimeout;
+    context.setTimeout = () => 0; // keep the status message and its Undo button
+    context.current_example_idx = 1;
+    context.window.annotation_set = [{text_lists: [{label: 'List', items: [
+        {id: 'other', text: 'new item', choices: choices(['Yes'], ['A'], [])},
+        {id: 'source', text: 'copied', choices: choices(['Yes'], ['A', 'bad'], ['Ne'])}]}]}, {}];
+    ui.load(ui.collect());
+    const menu = () => descendants(root, 'select')[0];
+    const pick = value => { menu().value = value; menu().events.change(); };
+    const texts = () => Array.from(ui.collect()[0].items, item => item.text);
+    assert.deepEqual(descendants(menu(), 'option').map(node => node.value), ['', 'batch:0']);
+    assert.equal(menu().hidden, false);
+    const values = index => Array.from(ui.collect()[0].items[index].choices, choice => Array.from(choice.values));
+    const status = () => descendants(root, 'text').map(node => node.textContent).join(' ');
+    const ownId = ui.collect()[0].items[0].id;
+    pick('batch:0');
+    assert.deepEqual(texts(), ['new item', 'copied']);
+    // The same text keeps its row and ID but takes the pasted choices.
+    assert.equal(ui.collect()[0].items[0].id, ownId);
+    assert.deepEqual(values(0), [['Yes'], ['A'], []]);
+    assert.notEqual(ui.collect()[0].items[1].id, 'source');
+    assert.deepEqual(values(1), [['Yes'], ['A'], ['Ne']]);
+    assert.match(status(), /Choices updated on 1 item already in the list/);
+    descendants(root, 'button').find(node => node.textContent === 'Undo').events.click();
+    assert.deepEqual(texts(), ['new item']);
+    assert.deepEqual(values(0), [['Unknown'], ['A', 'B'], []]);
+    context.window.annotation_set[0].text_lists[0].items.push({text: 'third', choices: []});
+    ui.load(ui.collect());
+    pick('batch:0');
+    assert.deepEqual(texts(), ['new item', 'copied']); // max_items 2
+    assert.match(status(), /1 not pasted \(limit of 2\)/);
+    pick('batch:0');
+    assert.match(status(), /Pasted 0 items .* 2 items already in the list unchanged/);
+    const copyButton = () => descendants(root, 'button').find(node => node.textContent === 'Copy');
+    copyButton().events.click();
+    context.window.annotation_set = [];
+    ui.load([]);
+    assert.equal(copyButton().disabled, true); // nothing to copy from an empty list
+    assert.deepEqual(descendants(menu(), 'option').map(node => node.value), ['', 'clipboard']);
+    pick('clipboard');
+    assert.deepEqual(texts(), ['new item', 'copied']);
+    assert.equal(copyButton().disabled, false);
+    context.localStorage = {getItem: () => null};
+    ui.load(ui.collect());
+    assert.equal(menu().hidden, true); // nothing to paste from
+    context.setTimeout = immediate;
+}
 // Plain-HTTP (non-secure) origins have no crypto.randomUUID; IDs fall back to getRandomValues.
 {
     const insecureRoot = new Node('div'); insecureRoot.dataset = {config: JSON.stringify(definitions)};

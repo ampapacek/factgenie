@@ -1731,6 +1731,7 @@ body.auth-only #annotator-auth-modal .modal-dialog {
 
 .text-list-item {
     counter-increment: text-list-item;
+    transition: background-color 0.6s;
 }
 
 .text-list-line::before {
@@ -1769,6 +1770,10 @@ body.auth-only #annotator-auth-modal .modal-dialog {
 
 .browse-text-list-text {
     white-space: pre-wrap;
+}
+
+.text-list-item.text-list-copied {
+    background-color: var(--bs-warning-bg-subtle);
 }
 
 .text-list-toggle .btn {

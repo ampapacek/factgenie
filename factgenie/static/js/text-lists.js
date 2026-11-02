@@ -46,6 +46,7 @@ const textListsUI = (() => {
             if (count) list.confirmation.checked = false;
         }
         const belowLimit = list.definition.max_items === null || count < list.definition.max_items;
+        list.copyButton.disabled = !count;
         const last = list.rows.at(-1);
         if (belowLimit && (!last || last.item)) addRow(list);
         if (!belowLimit) {
@@ -184,6 +185,117 @@ const textListsUI = (() => {
         grow(textarea);
         resizeObserver?.observe(textarea);
     }
+    // Clipboard survives batch submission and reloads; kept per campaign and list label.
+    const clipboardKey = `factgenie_text_list_clipboard_${window.metadata?.id || ''}`;
+    const readClipboard = () => {
+        try { return JSON.parse(localStorage.getItem(clipboardKey)) || {}; } catch { return {}; }
+    };
+    const filledItems = records => (records || []).filter(item => item.text?.trim());
+    const option = (text, value) => Object.assign(element('option', text), {value});
+    const itemCount = count => `${count} ${count === 1 ? 'item' : 'items'}`;
+    // Other answers of this batch with items in the list, as [annotation index, items].
+    function batchSources(list) {
+        const set = window.annotation_set || [];
+        const current = typeof current_example_idx === 'number' ? current_example_idx : -1;
+        return set.map((annotation, index) => [index,
+            filledItems((annotation?.text_lists || annotation?.textLists || [])
+                .find(record => record.label === list.definition.label)?.items)])
+            .filter(([index, items]) => index !== current && items.length);
+    }
+    function showStatus(list, message, undo = null) {
+        clearTimeout(list.statusTimer);
+        list.status.replaceChildren(document.createTextNode(message));
+        if (undo) {
+            const button = element('button', 'Undo', 'btn btn-link btn-sm p-0 ms-2 align-baseline');
+            button.type = 'button';
+            button.addEventListener('click', () => { undo(); list.status.replaceChildren(); });
+            list.status.append(button);
+        }
+        list.statusTimer = setTimeout(() => list.status.replaceChildren(), 10000);
+    }
+    function buildPasteMenu(list) {
+        const select = list.pasteMenu;
+        select.replaceChildren(option('Paste from…', ''));
+        const sources = batchSources(list);
+        if (sources.length) {
+            const group = document.createElement('optgroup');
+            group.label = 'This batch';
+            sources.forEach(([index, items]) =>
+                group.append(option(`Answer ${index + 1} · ${itemCount(items.length)}`, `batch:${index}`)));
+            select.append(group);
+        }
+        const stored = readClipboard()[list.definition.label];
+        if (stored?.items?.length) {
+            const group = document.createElement('optgroup');
+            group.label = 'Clipboard';
+            group.append(option(`${stored.source} · ${itemCount(stored.items.length)}`, 'clipboard'));
+            select.append(group);
+        }
+        select.hidden = !sources.length && !stored?.items?.length;
+    }
+    function copyToClipboard(list) {
+        const items = list.rows.filter(row => row.item).map(row =>
+            ({text: row.item.text, choices: structuredClone(row.item.choices)}));
+        const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        const clipboard = readClipboard();
+        clipboard[list.definition.label] = {source: `Answer ${current_example_idx + 1} (${time})`, items};
+        try {
+            localStorage.setItem(clipboardKey, JSON.stringify(clipboard));
+        } catch {
+            return showStatus(list, 'Could not save to clipboard (browser storage unavailable).');
+        }
+        lists.forEach(buildPasteMenu);
+        showStatus(list, `Copied ${itemCount(items.length)} to clipboard.`);
+    }
+    // Append pasted items with their choices; an item with the same text takes the pasted choices.
+    function pasteItems(list, items, sourceName) {
+        const before = list.rows.filter(row => row.item).map(row => structuredClone(row.item));
+        const wasConfirmed = list.confirmation?.checked === true;
+        const byText = new Map(list.rows.filter(row => row.item).map(row => [row.item.text.trim(), row]));
+        const maximum = list.definition.max_items;
+        let added = 0, updated = 0, unchanged = 0, overLimit = 0;
+        const highlight = node => {
+            node.classList.add('text-list-copied');
+            setTimeout(() => node.classList.remove('text-list-copied'), 2000);
+        };
+        list.rows.filter(row => !row.item).forEach(row => removeRow(list, row));
+        filledItems(items).forEach(item => {
+            const text = item.text.trim();
+            // Keep only values the current config still offers.
+            const choices = list.definition.choice_groups.map(group => {
+                const values = (item.choices?.find(choice => choice.label === group.label)?.values || [])
+                    .filter(value => group.options.some(option => option.label === value));
+                return {label: group.label, values: group.multiple ? [...new Set(values)] : values.slice(0, 1)};
+            });
+            const existing = byText.get(text);
+            if (existing) {
+                if (JSON.stringify(existing.item.choices) === JSON.stringify(choices)) return unchanged++;
+                existing.item.choices = choices;
+                renderChoices(list, existing);
+                highlight(existing.node);
+                return updated++;
+            }
+            if (maximum !== null && byText.size >= maximum) return overLimit++;
+            addRow(list, {text, choices});
+            byText.set(text, list.rows.at(-1));
+            highlight(list.rows.at(-1).node);
+            added++;
+        });
+        list.error.textContent = '';
+        refresh(list);
+        changed();
+        let message = `Pasted ${itemCount(added)} from ${sourceName}.`;
+        if (updated) message += ` Choices updated on ${itemCount(updated)} already in the list.`;
+        if (unchanged) message += ` ${itemCount(unchanged)} already in the list unchanged.`;
+        if (overLimit) message += ` ${overLimit} not pasted (limit of ${maximum}).`;
+        showStatus(list, message, added || updated ? () => {
+            [...list.rows].forEach(row => removeRow(list, row));
+            before.forEach(item => addRow(list, item));
+            if (list.confirmation) list.confirmation.checked = wasConfirmed;
+            refresh(list);
+            changed();
+        } : null);
+    }
     function load(records) {
         if (!root) return;
         resizeObserver?.disconnect();
@@ -192,14 +304,39 @@ const textListsUI = (() => {
         lists = config.map(definition => {
             const saved = records.find(record => record.label === definition.label);
             const section = element('section', '', 'my-3');
-            section.append(element('h5', definition.label + (definition.required ? ' *' : ''), 'mb-1'));
+            const header = element('div', '', 'd-flex align-items-center justify-content-between gap-2 mb-1');
+            const controls = element('div', '', 'd-flex align-items-center gap-2');
+            const copyButton = element('button', 'Copy', 'btn btn-sm btn-outline-secondary');
+            copyButton.type = 'button';
+            copyButton.title = 'Copy this list to the clipboard';
+            const pasteMenu = element('select', '', 'form-select form-select-sm w-auto');
+            pasteMenu.setAttribute('aria-label', definition.label + ' — paste items');
+            controls.append(copyButton, pasteMenu);
+            header.append(element('h5', definition.label + (definition.required ? ' *' : ''), 'mb-0'), controls);
+            section.append(header);
             if (definition.description) section.append(element('p', definition.description, 'text-muted small mb-2'));
             const error = element('div', '', 'text-danger small mb-1');
             error.setAttribute('role', 'alert');
             const container = element('div', '', 'text-list-rows');
             container.style.maxHeight = '65vh';
             container.style.overflowY = 'auto';
-            const list = {definition, rows: [], container, error, confirmation: null};
+            const status = element('div', '', 'text-muted small mb-1');
+            status.setAttribute('role', 'status');
+            const list = {definition, rows: [], container, error, status, copyButton, pasteMenu, confirmation: null};
+            copyButton.addEventListener('click', () => copyToClipboard(list));
+            pasteMenu.addEventListener('change', () => {
+                const value = pasteMenu.value;
+                pasteMenu.value = '';
+                if (value === 'clipboard') {
+                    const stored = readClipboard()[definition.label];
+                    if (stored) pasteItems(list, stored.items, `clipboard (${stored.source})`);
+                } else if (value.startsWith('batch:')) {
+                    const index = Number(value.slice(6));
+                    const source = batchSources(list).find(([candidate]) => candidate === index);
+                    if (source) pasteItems(list, source[1], `Answer ${index + 1}`);
+                }
+            });
+            buildPasteMenu(list);
             if (definition.empty_confirmation) {
                 const label = element('label', '', 'd-block small mb-1');
                 const input = document.createElement('input');
@@ -211,7 +348,7 @@ const textListsUI = (() => {
                 section.append(label);
                 list.confirmation = input;
             }
-            section.append(error, container);
+            section.append(status, error, container);
             root.append(section);
             (saved?.items || []).filter(item => item.text?.trim()).forEach(item => addRow(list, item));
             refresh(list);
