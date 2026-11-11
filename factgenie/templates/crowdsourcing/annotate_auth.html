@@ -144,7 +144,16 @@
     }
 
     $(document).ready(function () {
-      setAuthMode("login");
+      const prefillId = {{ (auth_prefill_id or "") | tojson | safe }};
+      if (prefillId) {
+        setAuthMode("register");
+        $("#annotator-name-input").val(prefillId);
+        $("#annotator-auth-error")
+          .text(`The name "${prefillId}" is not registered for this campaign yet. Register to continue, or log in with another name.`)
+          .show();
+      } else {
+        setAuthMode("login");
+      }
       $("#annotator-auth-login-btn").on("click", function () {
         setAuthMode("login");
       });

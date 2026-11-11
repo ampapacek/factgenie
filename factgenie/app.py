@@ -425,11 +425,18 @@ def annotate(campaign_id):
 
     metadata = campaign.metadata
     annotator_preferences = {"hide_instructions_next_time": False}
+    auth_prefill_id = ""
     normalized_annotator_id = _normalize_annotator_id(template_annotator_id)
     if normalized_annotator_id and normalized_annotator_id != PREVIEW_STUDY_ID:
         existing = _find_existing_annotator(_load_annotator_registry(campaign_id), normalized_annotator_id)
         if existing:
             annotator_preferences["hide_instructions_next_time"] = existing.get("hide_instructions_next_time", False)
+        elif service == "local" and (batch_idx is None or batch_idx == ""):
+            # A direct link with an id that is not registered yet: show the
+            # standalone access page (prefilled) instead of rendering the
+            # annotation page behind a modal and assigning it a batch.
+            auth_prefill_id = normalized_annotator_id
+            needs_annotator_auth = True
     if needs_annotator_auth:
         annotation_set = []
         redo_context = {
@@ -459,6 +466,7 @@ def annotate(campaign_id):
             campaign=campaign,
             campaign_id=campaign.campaign_id,
             auth_redirect_template=_build_auth_redirect_template(app.config["host_prefix"], campaign.campaign_id),
+            auth_prefill_id=auth_prefill_id,
         )
 
     if not annotation_set:
