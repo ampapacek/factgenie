@@ -328,6 +328,13 @@ CROWDSOURCING_RENDERING_KEYS = {
 }
 
 
+BATCH_ORDERS = ("random", "sequential")
+
+
+def normalize_batch_order(value):
+    return value if value in BATCH_ORDERS else "random"
+
+
 def parse_crowdsourcing_config(config):
     rendering = {}
     for key, camel_key in CROWDSOURCING_RENDERING_KEYS.items():
@@ -358,6 +365,7 @@ def parse_crowdsourcing_config(config):
         "pseudonymize_annotators": config.get("pseudonymizeAnnotators", True),
         "service": config.get("service"),
         "sort_order": config.get("sortOrder"),
+        "batch_order": normalize_batch_order(config.get("batchOrder", config.get("batch_order"))),
         "annotation_span_categories": config.get("annotationSpanCategories"),
         "flags": config.get("flags"),
         "options": config.get("options"),
@@ -374,7 +382,7 @@ def is_per_example_save_campaign(campaign):
     return campaign.metadata.get("config", {}).get("save_mode", "batch") == "per_example"
 
 
-def select_batch(db, seed, annotator_id):
+def select_batch(db, seed, annotator_id, batch_order="random"):
     # If the annotator already has any examples with ExampleStatus.ASSIGNED, return that batch
     if annotator_id != PREVIEW_STUDY_ID:
         if not db.loc[(db["annotator_id"] == annotator_id) & (db["status"] == ExampleStatus.ASSIGNED)].empty:
@@ -411,6 +419,9 @@ def select_batch(db, seed, annotator_id):
 
 
 
+    if batch_order == "sequential" and not free_batches.empty:
+        return select_sequential_batch(db, free_batches)
+
     # Choose from the batches with the lowest annotator group
     eligible_batches = free_batches.groupby("batch_idx")["annotator_group"].min()
 
@@ -444,6 +455,23 @@ def _normal_item_from_row(row):
 def _active_record_for_row(campaign_id, row):
     item = _normal_item_from_row(row)
     return redo.latest_active_record(campaign_id, item)
+
+
+def select_sequential_batch(db, free_batches):
+    """Everybody gets the batches in the same order (batch position 0, 1, 2, ...).
+
+    Each annotator group is a full copy of the batches, with batch_idx offset by
+    group * batches_per_group. The position of a batch inside its group is its
+    order in the dataset. Among free copies of the lowest position still open
+    for the annotator, the copy from the lowest annotator group is used.
+    """
+    batches_per_group = int(db.groupby("annotator_group")["batch_idx"].nunique().max())
+    position = free_batches["batch_idx"].astype(int) - free_batches["annotator_group"].astype(int) * batches_per_group
+    candidates = free_batches.assign(_position=position)
+    candidates = candidates[candidates["_position"] == candidates["_position"].min()]
+    selected = candidates.sort_values(["annotator_group", "batch_idx"]).iloc[0]
+    logging.info(f"Selected batch {selected['batch_idx']} (sequential)")
+    return selected["batch_idx"]
 
 
 def get_examples_for_batch(db, batch_idx, campaign=None, annotator_id=None, include_saved=False):
@@ -599,7 +627,12 @@ def get_annotator_batch(
                     batch_idx = select_finished_batch_for_review(db, annotator_id)
                 else:
                     # usual case: an annotator opened the annotation page, we need to select the batch
-                    batch_idx = select_batch(db, seed, annotator_id)
+                    batch_idx = select_batch(
+                        db,
+                        seed,
+                        annotator_id,
+                        campaign.metadata.get("config", {}).get("batch_order", "random"),
+                    )
             except ValueError as e:
                 logger.info(str(e))
                 # no available batches
