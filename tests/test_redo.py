@@ -1861,3 +1861,20 @@ def test_login_disabled_counts_as_authenticated_view_for_analyze(monkeypatch):
 
     with app_mod.app.test_request_context("/analyze/detail/redo-test"):
         assert app_mod._is_authenticated_viewer() is True
+
+
+def test_show_saved_items_without_saved_examples_serves_current_batch(monkeypatch, tmp_path):
+    configure_campaign_dir(monkeypatch, tmp_path)
+    campaign = make_per_example_campaign(tmp_path)
+
+    annotation_set, context = crowdsourcing.get_annotator_batch(
+        SimpleNamespace(db={"lock": threading.Lock()}),
+        campaign,
+        {"annotator_id": "ann-a"},
+        include_saved_examples=True,
+        return_context=True,
+    )
+
+    assert context["show_saved"] is True
+    assert [item["example_idx"] for item in annotation_set] == [0, 1]
+    assert not any(item.get("per_example_saved") for item in annotation_set)

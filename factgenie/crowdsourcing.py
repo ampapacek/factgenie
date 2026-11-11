@@ -517,6 +517,10 @@ def get_examples_for_batch(db, batch_idx, campaign=None, annotator_id=None, incl
     return annotator_batch
 
 
+def _has_finished_rows(db, annotator_id):
+    return not db.loc[(db["annotator_id"] == annotator_id) & (db["status"] == ExampleStatus.FINISHED)].empty
+
+
 def select_finished_batch_for_review(db, annotator_id):
     if not annotator_id or annotator_id == PREVIEW_STUDY_ID:
         raise ValueError("No available batches")
@@ -623,9 +627,13 @@ def get_annotator_batch(
             try:
                 if annotator_id == PREVIEW_STUDY_ID:
                     batch_idx = select_preview_batch(db)
-                elif include_saved_examples and is_per_example_save_campaign(campaign):
+                elif include_saved_examples and is_per_example_save_campaign(campaign) and _has_finished_rows(
+                    db, annotator_id
+                ):
                     batch_idx = select_finished_batch_for_review(db, annotator_id)
                 else:
+                    # Also reached from "Show saved items" before anything is
+                    # saved: serve the current batch instead of the closed page.
                     # usual case: an annotator opened the annotation page, we need to select the batch
                     batch_idx = select_batch(
                         db,
