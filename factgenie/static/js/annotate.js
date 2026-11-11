@@ -1993,6 +1993,16 @@ $(document).ready(function () {
         setTimeout(syncOverlayScrollLock, 0);
     });
 
+    // "Show saved items" reloads the page with saved examples included; that is
+    // an intended navigation, so skip the "leave this page?" prompt. The
+    // in-page toggles use href="#" and are handled by their own click handlers.
+    $(document).on("click", "#redo-show-completed-link", function () {
+        const href = $(this).attr("href");
+        if (href && href !== "#") {
+            window.onbeforeunload = null;
+        }
+    });
+
     $("#annotator-auth-login-btn").click(function () {
         setAnnotatorAuthMode("login");
     });
