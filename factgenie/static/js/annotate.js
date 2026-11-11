@@ -196,6 +196,15 @@ function redirectWithAnnotatorId(annotatorId, forceShowInstructions = false) {
 function applyOverlayInstructionPreference() {
     const url = new URL(window.location.href);
     const forceShowInstructions = url.searchParams.get("showInstructions") === "1";
+    // Reloads from "Show saved items" come back to the annotation view directly.
+    const reviewingSaved = redo_context.show_saved === true || redo_context.show_completed === true;
+    if (!forceShowInstructions && reviewingSaved) {
+        $("body").addClass("annotation-ui-ready");
+        $("#overlay-start").hide();
+        syncOverlayScrollLock();
+        window.dispatchEvent(new Event("resize"));
+        return;
+    }
     const hidden = !forceShowInstructions && !!annotator_preferences.hide_instructions_next_time;
     $("#hide-instructions-next-time").prop("checked", !!annotator_preferences.hide_instructions_next_time);
     $("#overlay-start-hidden-message").toggle(hidden);
@@ -1993,14 +2002,28 @@ $(document).ready(function () {
         setTimeout(syncOverlayScrollLock, 0);
     });
 
-    // "Show saved items" reloads the page with saved examples included; that is
-    // an intended navigation, so skip the "leave this page?" prompt. The
-    // in-page toggles use href="#" and are handled by their own click handlers.
-    $(document).on("click", "#redo-show-completed-link", function () {
+    // "Show saved items" reloads the page with saved examples included. Skip
+    // the "leave this page?" prompt unless an unsaved example has content.
+    // The in-page toggles use href="#" and are handled by their own handlers.
+    $(document).on("click", "#redo-show-completed-link", function (event) {
         const href = $(this).attr("href");
-        if (href && href !== "#") {
-            window.onbeforeunload = null;
+        if (!href || href === "#") {
+            return;
         }
+        if (annotation_set[current_example_idx]) {
+            saveCurrentAnnotations(current_example_idx);
+        }
+        // Redo items start prefilled with the earlier annotation, so content
+        // alone does not mean unsaved work; only per-example mode is checked.
+        const inProgress = redo_context.is_redo !== true && annotation_set.some((annotation) =>
+            annotation.per_example_saved !== true && hasStoredAnnotationContent(annotation));
+        if (inProgress && !window.confirm(
+            "You have an annotation in progress that is not saved yet. " +
+            "Showing saved items reloads the page and discards it. Continue?")) {
+            event.preventDefault();
+            return;
+        }
+        window.onbeforeunload = null;
     });
 
     $("#annotator-auth-login-btn").click(function () {
